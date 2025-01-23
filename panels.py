@@ -210,7 +210,7 @@ class MAT_PT_Brush(Panel):
     def poll(cls, context):
         ps = PaintSystem(context)
         obj = ps.active_object
-        return obj.mode == 'TEXTURE_PAINT'
+        return hasattr(obj,"mode") and obj.mode == 'TEXTURE_PAINT'
 
     def draw(self, context):
         layout = self.layout
@@ -294,7 +294,7 @@ class MAT_PT_BrushColor(Panel):
     def poll(cls, context):
         ps = PaintSystem(context)
         obj = ps.active_object
-        return obj.mode == 'TEXTURE_PAINT'
+        return hasattr(obj,"mode") and obj.mode == 'TEXTURE_PAINT'
 
     def draw_header_preset(self, context):
         layout = self.layout
@@ -327,7 +327,7 @@ class MAT_PT_BrushSettings(Panel):
     def poll(cls, context):
         ps = PaintSystem(context)
         obj = ps.active_object
-        return obj.mode == 'TEXTURE_PAINT'
+        return hasattr(obj,"mode") and obj.mode == 'TEXTURE_PAINT'
 
     def draw(self, context):
         layout = self.layout

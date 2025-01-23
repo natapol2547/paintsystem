@@ -21,7 +21,7 @@ from . import auto_load
 
 bl_info = {
     "name": "Paint System",
-    "author": "Tawan Sunflower",
+    "author": "Tawan Sunflower, @blastframe",
     "description": "",
     "blender": (4, 1, 0),
     "version": (1, 1, 7),
@@ -29,6 +29,7 @@ bl_info = {
     "warning": "",
     "category": "Node",
     'support': 'COMMUNITY',
+    "tracker_url": "https://github.com/natapol2547/paintsystem"
 }
 
 bl_info_copy = bl_info.copy()
@@ -42,8 +43,7 @@ auto_load.init()
 def mode_change_handler(scene):
     # Get the active object and its mode
     obj = bpy.context.object
-    if obj and obj.mode == 'TEXTURE_PAINT':
-
+    if obj and hasattr(obj,"mode") and obj.mode == 'TEXTURE_PAINT':
         update_active_image()
 
 
