@@ -31,10 +31,12 @@ def update_active_image(self=None, context: Context = None):
         return
     image_paint = context.tool_settings.image_paint
     mat = ps.get_active_material()
+    mat.update_tag()
     active_group = ps.get_active_group()
     if not mat or not active_group:
         return
     active_layer = ps.get_active_layer()
+    print("Active layer:", active_layer)
     update_brush_settings(self, context)
     if not active_layer:
         return
@@ -42,7 +44,10 @@ def update_active_image(self=None, context: Context = None):
     if image_paint.mode == 'IMAGE':
         image_paint.mode = 'MATERIAL'
     selected_image = active_layer.mask_image if active_layer.edit_mask else active_layer.image
+    print("Selected image:", selected_image)
+    print(mat.texture_paint_images)
     for i, image in enumerate(mat.texture_paint_images):
+        print(image)
         if not selected_image or active_layer.lock_layer or active_group.use_bake_image:
             if image_paint.mode == 'MATERIAL':
                 image_paint.mode = 'IMAGE'
@@ -50,6 +55,7 @@ def update_active_image(self=None, context: Context = None):
             # Unable to paint
             return
         if image == selected_image:
+            print("Found image:", image)
             mat.paint_active_slot = i
             # Get uv map name
             uv_map_node = ps.find_uv_map_node()
@@ -129,6 +135,7 @@ class PaintSystemLayer(BaseNestedListItem):
         name="Edit Mask",
         description="Edit mask",
         default=False,
+        update=update_active_image
     )
     mask_image: PointerProperty(
         name="Mask Image",
@@ -168,6 +175,7 @@ class NodeEntry:
 class PaintSystemGroup(BaseNestedListManager):
 
     def update_node_tree(self, context=bpy.context):
+        print("Updating node tree")
         self.normalize_orders()
         flattened = self.flatten_hierarchy()
         interface: NodeTreeInterface = self.node_tree.interface
@@ -452,6 +460,8 @@ class PaintSystemGroup(BaseNestedListManager):
         ng_input.location = node_entry.location + Vector((-200, 0))
         
         print("Updated node tree")
+        
+        update_active_image()
 
     # Define the collection property directly in the class
     items: CollectionProperty(type=PaintSystemLayer)

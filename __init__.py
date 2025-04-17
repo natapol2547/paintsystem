@@ -49,6 +49,16 @@ def texture_paint_handler(scene):
         update_active_image()
 
 
+# Any Python object can act as the subscription's owner.
+owner = object()
+
+def msgbus_callback(*args):
+    context = bpy.context
+    obj = context.object
+    if obj and hasattr(obj, "mode") and obj.mode == 'TEXTURE_PAINT':
+        update_active_image(context)
+
+
 @persistent
 def save_handler(scene: bpy.types.Scene):
     images = get_paint_system_images()
@@ -88,15 +98,24 @@ def register():
     load_custom_icons()
     if addon_updater_ops:
         addon_updater_ops.register(bl_info_copy)
-    bpy.app.handlers.depsgraph_update_post.append(texture_paint_handler)
+    # bpy.app.handlers.depsgraph_update_post.append(texture_paint_handler)
     bpy.app.handlers.save_pre.append(save_handler)
     bpy.app.handlers.load_post.append(refresh_image)
+
+    subscribe_to = (bpy.types.Object, "mode")
+
+    bpy.msgbus.subscribe_rna(
+        key=subscribe_to,
+        owner=owner,
+        args=(bpy.context,),
+        notify=msgbus_callback,
+    )
 
 
 def unregister():
     bpy.app.handlers.load_post.remove(refresh_image)
     bpy.app.handlers.save_pre.remove(save_handler)
-    bpy.app.handlers.depsgraph_update_post.remove(texture_paint_handler)
+    # bpy.app.handlers.depsgraph_update_post.remove(texture_paint_handler)
     if addon_updater_ops:
         addon_updater_ops.unregister()
     unload_custom_icons()
