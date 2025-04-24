@@ -619,6 +619,7 @@ class PAINTSYSTEM_OT_NewAttributeLayer(MultiMaterialOperator):
             ('VIEW_LAYER', "View Layer", "View Layer"),],
     )
     disable_popup: BoolProperty(default=False)
+    as_mask: BoolProperty(default=False)
 
     def process_material(self, context):
         if not self.attribute_name:
@@ -626,7 +627,7 @@ class PAINTSYSTEM_OT_NewAttributeLayer(MultiMaterialOperator):
             return 1
         ps = PaintSystem(context)
         ps.create_attribute_layer(
-            f"{self.attribute_name} Attribute", self.attribute_name, self.attribute_type)
+            f"{self.attribute_name} Attribute", self.attribute_name, self.attribute_type, self.as_mask)
         return 0
 
     def invoke(self, context, event):
@@ -684,6 +685,7 @@ class PAINTSYSTEM_OT_NewImage(UVLayerHandler, MultiMaterialOperator):
         description="Height of the image in pixels"
     )
     disable_popup: BoolProperty(default=False)
+    as_mask: BoolProperty(default=False)
 
     def process_material(self, context):
         ps = PaintSystem(context)
@@ -700,7 +702,7 @@ class PAINTSYSTEM_OT_NewImage(UVLayerHandler, MultiMaterialOperator):
             alpha=True,
         )
         image.generated_color = (0, 0, 0, 0)
-        ps.create_image_layer(self.name, image, self.uv_map_name)
+        ps.create_image_layer(self.name, image, self.uv_map_name, self.as_mask)
         return 0
 
     def invoke(self, context, event):
@@ -742,13 +744,14 @@ class PAINTSYSTEM_OT_OpenImage(UVLayerHandler, MultiMaterialOperator):
         default='*.jpg;*.jpeg;*.png;*.tif;*.tiff;*.bmp',
         options={'HIDDEN'}
     )
+    as_mask: BoolProperty(default=False)
 
     def process_material(self, context):
         ps = PaintSystem(context)
         self.set_uv_mode(context)
         image = bpy.data.images.load(self.filepath, check_existing=True)
 
-        ps.create_image_layer(image.name, image, self.uv_map_name)
+        ps.create_image_layer(image.name, image, self.uv_map_name, self.as_mask)
         return 0
 
     def invoke(self, context, event):
@@ -772,6 +775,7 @@ class PAINTSYSTEM_OT_OpenExistingImage(UVLayerHandler, MultiMaterialOperator):
     bl_description = "Open an image from the existing images"
 
     image_name: StringProperty()
+    as_mask: BoolProperty(default=False)
 
     def process_material(self, context):
         ps = PaintSystem(context)
@@ -784,7 +788,7 @@ class PAINTSYSTEM_OT_OpenExistingImage(UVLayerHandler, MultiMaterialOperator):
             self.report({'ERROR'}, "Image not found")
             return 1
 
-        ps.create_image_layer(self.image_name, image, self.uv_map_name)
+        ps.create_image_layer(self.image_name, image, self.uv_map_name, self.as_mask)
         return 0
 
     def invoke(self, context, event):
@@ -830,10 +834,11 @@ class PAINTSYSTEM_OT_NewSolidColor(MultiMaterialOperator):
         default=(1.0, 1.0, 1.0, 1.0)
     )
     disable_popup: BoolProperty(default=False)
+    as_mask: BoolProperty(default=False)
 
     def process_material(self, context):
         ps = PaintSystem(context)
-        ps.create_solid_color_layer(self.name, self.color)
+        ps.create_solid_color_layer(self.name, self.color, self.as_mask)
         return 0
 
     def invoke(self, context, event):
@@ -939,6 +944,7 @@ class PAINTSYSTEM_OT_NewGradientLayer(MultiMaterialOperator):
         items=GRADIENT_ENUM,
         default="LINEAR",
     )
+    as_mask: BoolProperty(default=False)
     
     def get_next_gradient_name(self, context: Context) -> str:
         ps = PaintSystem(context)
@@ -958,7 +964,7 @@ class PAINTSYSTEM_OT_NewGradientLayer(MultiMaterialOperator):
         ps = PaintSystem(context)
         # Look for get name from in adjustment_enum based on adjustment_type
         layer_name = self.get_next_gradient_name(context)
-        ps.create_gradient_layer(layer_name, self.gradient_type)
+        ps.create_gradient_layer(layer_name, self.gradient_type, self.as_mask)
 
         # Force the UI to update
         redraw_panel(self, context)
@@ -1172,7 +1178,7 @@ class PAINTSYSTEM_OT_NewMaskImage(UVLayerHandler, MultiMaterialOperator):
 
 
 class PAINTSYSTEM_OT_DeleteMask(Operator):
-    bl_idname = "paint_system.delete_mask_image"
+    bl_idname = "paint_system.delete_mask"
     bl_label = "Delete Mask"
     bl_options = {'REGISTER', 'UNDO'}
     bl_description = "Delete the active mask"
@@ -1186,6 +1192,8 @@ class PAINTSYSTEM_OT_DeleteMask(Operator):
     def execute(self, context):
         ps = PaintSystem(context)
         active_layer = ps.get_active_layer()
+        bpy.data.node_groups.remove(
+            active_layer.mask_node_tree, do_unlink=True)
         if active_layer.mask_image:
             bpy.data.images.remove(active_layer.mask_image)
             active_layer.mask_image = None

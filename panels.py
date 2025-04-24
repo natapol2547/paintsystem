@@ -1228,8 +1228,8 @@ class MAT_MT_PaintSystemMaskMenu(Menu):
                         icon="MOD_MASK").image_name = image_name
         layout.operator("paint_system.resize_image", text="Resize Mask",
                         icon="CON_SIZELIMIT").image_name = image_name
-        layout.operator("paint_system.delete_mask_image",
-                        icon="TRASH").image_name = image_name
+        layout.operator("paint_system.delete_mask",
+                        icon="TRASH")
 
 
 class MAT_PT_PaintSystemMaskSettings(Panel):
@@ -1254,11 +1254,13 @@ class MAT_PT_PaintSystemMaskSettings(Panel):
         active_layer = ps.get_active_layer()
         if not active_layer:
             return
-        row = layout.row(align=True)
-        if not active_layer.mask_image:
-            row.operator("paint_system.new_mask_image",
-                         text="Create", icon='ADD')
-        else:
+        box = layout.box()
+        row = box.row(align=True)
+        row.alignment = 'CENTER'
+        if not active_layer.mask_node_tree:
+            row.menu("MAT_MT_PaintSystemAddMaskMenu",
+                         text="Create Mask", )
+        elif active_layer.mask_image:
             row.prop(active_layer, "edit_mask",
                      text="Editing" if active_layer.edit_mask else "Edit Mask", icon='IMAGE_DATA')
             # row.prop(active_layer, "enable_mask", text="", icon='HIDE_OFF' if active_layer.enable_mask else 'HIDE_ON')
@@ -1279,23 +1281,40 @@ class MAT_PT_PaintSystemMaskSettings(Panel):
         layout = self.layout
         ps = PaintSystem(context)
         active_layer = ps.get_active_layer()
-        if not active_layer.mask_image:
+        node_tree = active_layer.mask_node_tree
+        if not active_layer.mask_node_tree:
             layout.label(text="Create a Mask first!")
             return
-        row = layout.row(align=True)
-        row.scale_y = 1.5
-        ops = row.operator("paint_system.invert_colors",
-                           text="Invert Mask", icon='MOD_MASK')
-        ops.image_name = active_layer.mask_image.name
-        ops.disable_popup = True
-        row.menu("MAT_MT_PaintSystemMaskMenu",
-                     text="", icon='COLLAPSEMENU')
-        # row.operator("paint_system.delete_mask_image", text="", icon='TRASH')
+        color_mix_node = ps.find_color_mix_node()
         box = layout.box()
+        match active_layer.mask_type:
+            case 'IMAGE':
+                col = box.column(align=True)
+                # row = col.row(align=True)
+                # if not ps.preferences.use_compact_design:
+                #     row.scale_y = 1.5
+                #     row.scale_x = 1.5
+                # else:
+                #     row.scale_y = 1.2
+                #     row.scale_x = 1.2
+                # row.prop(color_mix_node, "blend_type", text="")
+                row = col.row(align=True)
+                if not ps.preferences.use_compact_design:
+                    row.scale_y = 1.5
+                else:
+                    row.scale_y = 1.2
+                row.prop(ps.find_opacity_mix_node(node_tree).inputs[0], "default_value",
+                         text="Opacity", slider=True)
+        if active_layer.mask_image:
+            row.menu("MAT_MT_PaintSystemMaskMenu",
+                        text="", icon='COLLAPSEMENU')
+        
+        # row.operator("paint_system.delete_mask_image", text="", icon='TRASH')
+        # box = layout.box()
 
-        box.label(text="UV Map:", icon="UV")
-        box.prop_search(active_layer, "mask_uv_map",
-                        ps.active_object.data, "uv_layers", text="")
+        # box.label(text="UV Map:", icon="UV")
+        # box.prop_search(active_layer, "mask_uv_map",
+        #                 ps.active_object.data, "uv_layers", text="")
 
 
 class MAT_PT_PaintSystemLayersSettings(Panel):
@@ -1634,22 +1653,24 @@ class MAT_MT_PaintSystemAddLayerMenu(Menu):
         col.separator()
         col.label(text="--- IMAGE ---")
         col.operator("paint_system.new_image",
-                     text="New Image Layer", icon="FILE")
+                     text="New Image Layer", icon="FILE").as_mask = False
         col.operator("paint_system.open_image",
-                     text="Open External Image")
+                     text="Open External Image").as_mask = False
         col.operator("paint_system.open_existing_image",
-                     text="Use Existing Image")
+                     text="Use Existing Image").as_mask = False
         col.separator()
         col.label(text="--- COLOR ---")
         col.operator("paint_system.new_solid_color", text="Solid Color",
-                     icon=icon_parser('STRIP_COLOR_03', "SEQUENCE_COLOR_03"))
+                     icon=icon_parser('STRIP_COLOR_03', "SEQUENCE_COLOR_03")).as_mask = False
         col.operator("paint_system.new_attribute_layer",
-                     text="Attribute Color", icon='MESH_DATA')
+                     text="Attribute Color", icon='MESH_DATA').as_mask = False
         col.separator()
         col.label(text="--- GRADIENT ---")
         for idx, (node_type, name, description) in enumerate(GRADIENT_ENUM):
-            col.operator("paint_system.new_gradient_layer",
-                         text=name, icon='COLOR' if idx == 0 else 'NONE').gradient_type = node_type
+            op = col.operator("paint_system.new_gradient_layer",
+                         text=name, icon='COLOR' if idx == 0 else 'NONE')
+            op.gradient_type = node_type
+            op.as_mask = False
 
         col.separator()
         col.label(text="--- SHADER ---")
@@ -1670,6 +1691,37 @@ class MAT_MT_PaintSystemAddLayerMenu(Menu):
         # col.label(text="Folder:")
         # col.operator("paint_system.new_folder", text="Folder",
         #              icon="FILE_FOLDER")
+
+
+class MAT_MT_PaintSystemAddMaskMenu(Menu):
+    bl_label = "Add Mask"
+    bl_idname = "MAT_MT_PaintSystemAddMaskMenu"
+
+    def draw(self, context):
+        layout = self.layout
+        row = layout.row()
+        col = row.column()
+        col.separator()
+        col.label(text="--- IMAGE ---")
+        col.operator("paint_system.new_image",
+                     text="New Image Layer", icon="FILE").as_mask = True
+        col.operator("paint_system.open_image",
+                     text="Open External Image").as_mask = True
+        col.operator("paint_system.open_existing_image",
+                     text="Use Existing Image").as_mask = True
+        col.separator()
+        col.label(text="--- COLOR ---")
+        col.operator("paint_system.new_solid_color", text="Solid Color",
+                     icon=icon_parser('STRIP_COLOR_03', "SEQUENCE_COLOR_03")).as_mask = True
+        col.operator("paint_system.new_attribute_layer",
+                     text="Attribute Color", icon='MESH_DATA').as_mask = True
+        col.separator()
+        col.label(text="--- GRADIENT ---")
+        for idx, (node_type, name, description) in enumerate(GRADIENT_ENUM):
+            op = col.operator("paint_system.new_gradient_layer",
+                         text=name, icon='COLOR' if idx == 0 else 'NONE')
+            op.gradient_type = node_type
+            op.as_mask = True
 
 
 class MAT_MT_PaintSystemMergeAndExport(Menu):
@@ -1772,6 +1824,7 @@ classes = (
     MAT_PT_PaintSystemMaskSettings,
     MAT_PT_PaintSystemLayersAdvanced,
     MAT_MT_PaintSystemAddLayerMenu,
+    MAT_MT_PaintSystemAddMaskMenu,
     MAT_MT_BrushTooltips,
     MAT_MT_PaintSystemMergeAndExport,
     MAT_MT_PaintSystemMergeOptimize,

@@ -77,7 +77,9 @@ class MultiMaterialOperator(Operator):
         try:
             return self.process_material(context)
         except Exception as e:
+            import traceback
             print(f"Error processing material: {e}")
+            print(traceback.format_exc())
             return 1
         
     def multiple_objects_ui(self, layout):

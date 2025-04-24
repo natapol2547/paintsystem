@@ -203,7 +203,7 @@ class PaintSystem:
         # self.clip_mix_node = self.find_clip_mix_node()
         # self.rgb_node = self.find_rgb_node()
 
-    def add_group(self, name: str) -> PropertyGroup:
+    def add_group(self, name: str) -> NodeTree:
         """Creates a new group in the active material's paint system.
 
         Args:
@@ -309,7 +309,7 @@ class PaintSystem:
             return True
         return False
 
-    def create_image_layer(self, name: str, image: Image, uv_map_name: str = None) -> PropertyGroup:
+    def create_image_layer(self, name: str, image: Image, uv_map_name: str = None, as_mask = False) -> NodeTree:
         """Creates a new image layer in the active group.
 
         Args:
@@ -334,9 +334,8 @@ class PaintSystem:
         # layer_nt = layer_template.copy()
         # layer_nt.name = f"PS {name} (MAT: {mat.name})"
 
-        new_layer = self._add_layer(
-            name, f'_PS_Layer_Template', 'IMAGE', image=image, force_reload=False, make_copy=True)
-        layer_nt = new_layer.node_tree
+        layer_nt = self._add_layer(
+            name, f'_PS_Layer_Template', 'IMAGE', image=image, force_reload=False, make_copy=True, as_mask=as_mask)
 
         # Find the image texture node
         image_texture_node = None
@@ -378,9 +377,9 @@ class PaintSystem:
 
         active_group.update_node_tree()
 
-        return new_layer
+        return layer_nt
     
-    def create_attribute_layer(self, name: str, attribute_name: str, attribute_type: str = "") -> PropertyGroup:
+    def create_attribute_layer(self, name: str, attribute_name: str, attribute_type: str, as_mask = False) -> NodeTree:
         """Creates a new attribute layer in the active group.
 
         Args:
@@ -391,14 +390,15 @@ class PaintSystem:
             PropertyGroup: The newly created attribute layer.
         """
         active_group = self.get_active_group()
-        new_layer = self._add_layer(
-            name, '_PS_Attribute_Template', 'ATTRIBUTE', make_copy=True)
-        attr_node = new_layer.node_tree.nodes['Attribute']
+        node_tree = self._add_layer(
+            name, '_PS_Attribute_Template', 'ATTRIBUTE', make_copy=True, as_mask=as_mask)
+        attr_node = node_tree.nodes['Attribute']
         attr_node.attribute_name = attribute_name
+        attr_node.attribute_type = attribute_type
         active_group.update_node_tree()
-        return new_layer
+        return node_tree
 
-    def create_solid_color_layer(self, name: str, color: Tuple[float, float, float, float]) -> PropertyGroup:
+    def create_solid_color_layer(self, name: str, color: Tuple[float, float, float, float], as_mask = False) -> NodeTree:
         """Creates a new solid color layer in the active group.
 
         Args:
@@ -418,9 +418,8 @@ class PaintSystem:
         #     '_PS_Solid_Color_Template', False)
         # solid_color_nt = solid_color_template.copy()
         # solid_color_nt.name = f"PS_IMG {name} (MAT: {mat.name})"
-        new_layer = self._add_layer(
-            name, f'_PS_Solid_Color_Template', 'SOLID_COLOR', make_copy=True)
-        solid_color_nt = new_layer.node_tree
+        solid_color_nt = self._add_layer(
+            name, f'_PS_Solid_Color_Template', 'SOLID_COLOR', make_copy=True, as_mask=as_mask)
         solid_color_nt.nodes['RGB'].outputs[0].default_value = color
 
         # Create the new item
@@ -442,9 +441,9 @@ class PaintSystem:
 
         active_group.update_node_tree()
 
-        return new_layer
+        return solid_color_nt
 
-    def create_folder(self, name: str) -> PropertyGroup:
+    def create_folder(self, name: str) -> NodeTree:
         """Creates a new folder in the active group.
 
         Args:
@@ -466,7 +465,7 @@ class PaintSystem:
         # folder_nt = folder_template.copy()
         # folder_nt.name = f"PS_FLD {name} (MAT: {mat.name})"
 
-        new_layer = self._add_layer(
+        nt = self._add_layer(
             name, f'_PS_Folder_Template', 'FOLDER', make_copy=True)
 
         # Create the new item
@@ -488,9 +487,9 @@ class PaintSystem:
 
         active_group.update_node_tree()
 
-        return new_layer
+        return nt
 
-    def create_adjustment_layer(self, name: str, adjustment_type: str) -> PropertyGroup:
+    def create_adjustment_layer(self, name: str, adjustment_type: str) -> NodeTree:
         """Creates a new adjustment layer in the active group.
 
         Args:
@@ -500,7 +499,6 @@ class PaintSystem:
         Returns:
             PropertyGroup: The newly created adjustment layer.
         """
-        mat = self.get_active_material()
         active_group = self.get_active_group()
         # # Get insertion position
         # parent_id, insert_order = active_group.get_insertion_data()
@@ -512,9 +510,8 @@ class PaintSystem:
         #     f'_PS_Adjustment_Template', False)
         # adjustment_nt: NodeTree = adjustment_template.copy()
         # adjustment_nt.name = f"PS_ADJ {name} (MAT: {mat.name})"
-        new_layer = self._add_layer(
+        adjustment_nt = self._add_layer(
             name, f'_PS_Adjustment_Template', 'ADJUSTMENT', make_copy=True)
-        adjustment_nt = new_layer.node_tree
         nodes = adjustment_nt.nodes
         links = adjustment_nt.links
         # Find Vector Math node
@@ -568,9 +565,9 @@ class PaintSystem:
 
         active_group.update_node_tree()
 
-        return new_layer
+        return adjustment_nt
     
-    def create_gradient_layer(self, name: str, gradient_type: str) -> PropertyGroup:
+    def create_gradient_layer(self, name: str, gradient_type: str, as_mask = False) -> NodeTree:
         """Creates a new gradient layer in the active group.
 
         Args:
@@ -591,8 +588,8 @@ class PaintSystem:
             else:
                 collection = view_layer.layer_collection.collection.children["Paint System Collection"]
 
-            new_layer = self._add_layer(
-                name, f'_PS_{gradient_type}_Gradient_Template', 'GRADIENT', make_copy=True)
+            node_tree = self._add_layer(
+                name, f'_PS_{gradient_type}_Gradient_Template', 'GRADIENT', make_copy=True, as_mask=as_mask)
             empty_object = bpy.data.objects.new(f"{active_group.name} {name}", None)
             collection.objects.link(empty_object)
         empty_object.location = obj.location
@@ -602,7 +599,7 @@ class PaintSystem:
             empty_object.empty_display_type = 'SPHERE'
         empty_object.show_in_front = True
         empty_object.parent = obj
-        new_layer.node_tree.nodes["Texture Coordinate"].object = empty_object
+        node_tree.nodes["Texture Coordinate"].object = empty_object
         # gradient_nt.nodes['Gradient'].label = name
 
         # Create the new item
@@ -624,21 +621,21 @@ class PaintSystem:
 
         active_group.update_node_tree()
 
-        return new_layer
+        return node_tree
 
-    def create_shader_layer(self, name: str, shader_type: str) -> PropertyGroup:
+    def create_shader_layer(self, name: str, shader_type: str) -> NodeTree:
         active_group = self.get_active_group()
-        new_layer = self._add_layer(
+        node_tree = self._add_layer(
             name, shader_type, 'SHADER', sub_type=shader_type, make_copy=True)
         active_group.update_node_tree()
-        return new_layer
+        return node_tree
     
-    def create_node_group_layer(self, name: str, node_tree_name: str) -> PropertyGroup:
+    def create_node_group_layer(self, name: str, node_tree_name: str) -> NodeTree:
         active_group = self.get_active_group()
-        new_layer = self._add_layer(
+        node_tree = self._add_layer(
             name, node_tree_name, 'NODE_GROUP')
         active_group.update_node_tree()
-        return new_layer
+        return node_tree
 
     def get_active_material(self) -> Optional[Material]:
         if not self.active_object or self.active_object.type != 'MESH':
@@ -689,39 +686,51 @@ class PaintSystem:
         node = self.find_node(active_group.node_tree, node_details)
         return node
 
-    def find_color_mix_node(self) -> Optional[Node]:
-        layer_node_tree = self.get_active_layer().node_tree
+    def find_color_mix_node(self, layer_node_tree: NodeTree | None = None) -> Optional[Node]:
+        if not layer_node_tree:
+            layer_node_tree = self.get_active_layer().node_tree
         node_details = {'type': 'MIX', 'data_type': 'RGBA'}
         return self.find_node(layer_node_tree, node_details)
 
-    def find_uv_map_node(self) -> Optional[Node]:
-        layer_node_tree = self.get_active_layer().node_tree
+    def find_uv_map_node(self, layer_node_tree: NodeTree | None = None) -> Optional[Node]:
+        if not layer_node_tree:
+            layer_node_tree = self.get_active_layer().node_tree
         node_details = {'type': 'UVMAP'}
         return self.find_node(layer_node_tree, node_details)
 
-    def find_opacity_mix_node(self) -> Optional[Node]:
-        layer_node_tree = self.get_active_layer().node_tree
+    def find_opacity_mix_node(self, layer_node_tree: NodeTree | None = None) -> Optional[Node]:
+        if not layer_node_tree:
+            layer_node_tree = self.get_active_layer().node_tree
         node_details = {'type': 'MIX', 'name': 'Opacity'}
         return self.find_node(layer_node_tree, node_details) or self.find_color_mix_node()
 
-    def find_clip_mix_node(self) -> Optional[Node]:
-        layer_node_tree = self.get_active_layer().node_tree
+    def find_clip_mix_node(self, layer_node_tree: NodeTree | None = None) -> Optional[Node]:
+        if not layer_node_tree:
+            layer_node_tree = self.get_active_layer().node_tree
         node_details = {'type': 'MIX', 'name': 'Clip'}
         return self.find_node(layer_node_tree, node_details)
 
-    def find_image_texture_node(self) -> Optional[Node]:
-        layer_node_tree = self.get_active_layer().node_tree
+    def find_image_texture_node(self, layer_node_tree: NodeTree | None = None) -> Optional[Node]:
+        if not layer_node_tree:
+            layer_node_tree = self.get_active_layer().node_tree
         node_details = {'type': 'TEX_IMAGE'}
         return self.find_node(layer_node_tree, node_details)
 
-    def find_rgb_node(self) -> Optional[Node]:
-        layer_node_tree = self.get_active_layer().node_tree
+    def find_rgb_node(self, layer_node_tree: NodeTree | None = None) -> Optional[Node]:
+        if not layer_node_tree:
+            layer_node_tree = self.get_active_layer().node_tree
         node_details = {'name': 'RGB'}
         return self.find_node(layer_node_tree, node_details)
 
-    def find_adjustment_node(self) -> Optional[Node]:
-        layer_node_tree = self.get_active_layer().node_tree
+    def find_adjustment_node(self, layer_node_tree: NodeTree | None = None) -> Optional[Node]:
+        if not layer_node_tree:
+            layer_node_tree = self.get_active_layer().node_tree
         node_details = {'label': 'Adjustment'}
+        return self.find_node(layer_node_tree, node_details)
+    
+    def find_attribute_node(self, layer_node_tree: NodeTree | None = None) -> Optional[Node]:
+        layer_node_tree = self.get_active_layer().node_tree
+        node_details = {'type': 'ATTRIBUTE'}
         return self.find_node(layer_node_tree, node_details)
 
     def find_node_group(self, node_tree: NodeTree) -> Optional[Node]:
@@ -730,11 +739,6 @@ class PaintSystem:
             if hasattr(node, 'node_tree') and node.node_tree and node.node_tree.name == node_tree.name:
                 return node
         return None
-    
-    def find_attribute_node(self) -> Optional[Node]:
-        layer_node_tree = self.get_active_layer().node_tree
-        node_details = {'type': 'ATTRIBUTE'}
-        return self.find_node(layer_node_tree, node_details)
     
     def is_valid_ps_nodetree(self, node_tree: NodeTree):
         # check if the node tree has both Color and Alpha inputs and outputs
@@ -771,16 +775,29 @@ class PaintSystem:
                 if layer.image:
                     layer.image.name = f"PS {active_group.name} {layer.name} (MAT: {mat.name})"
 
-    def _add_layer(self, layer_name, tree_name: str, item_type: str, sub_type="", image=None, force_reload=False, make_copy=False) -> NodeTree:
+    def _add_layer(self, layer_name, tree_name: str, item_type: str, sub_type="", image=None, force_reload=False, make_copy=False, as_mask=False) -> NodeTree:
+        nt = get_nodetree_from_library(
+            tree_name, force_reload)
+        if make_copy:
+            nt = nt.copy()
+            
+        if as_mask:
+            active_layer = self.get_active_layer()
+            active_layer.mask_node_tree = nt
+            active_layer.mask_node_tree.name = f"PS_MASK {layer_name} (MAT: {self.get_active_material().name})"
+            active_layer.enable_mask = True
+            active_layer.mask_type = item_type
+            active_layer.mask_sub_type = sub_type
+            if image:
+                active_layer.mask_image = image
+            return nt
+            
         active_group = self.get_active_group()
         # Get insertion position
         parent_id, insert_order = active_group.get_insertion_data()
         # Adjust existing items' order
         active_group.adjust_sibling_orders(parent_id, insert_order)
-        nt = get_nodetree_from_library(
-            tree_name, force_reload)
-        if make_copy:
-            nt = nt.copy()
+
         # Create the new item
         new_id = active_group.add_item(
             name=layer_name,
@@ -800,7 +817,7 @@ class PaintSystem:
                     active_group.active_index = i
                     break
         self._update_paintsystem_data()
-        return active_group.get_item_by_id(new_id)
+        return active_group.get_item_by_id(new_id).node_tree
 
     def _value_set(self, obj, path, value):
         if '.' in path:

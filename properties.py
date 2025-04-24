@@ -154,6 +154,19 @@ class PaintSystemLayer(BaseNestedListItem):
         default="",
         update=update_node_tree
     )
+    mask_node_tree: PointerProperty(
+        name="Mask Node Tree",
+        type=NodeTree,
+        update=update_node_tree
+    )
+    mask_type: EnumProperty(
+        items=LAYER_ENUM,
+        default='IMAGE'
+    )
+    mask_sub_type: StringProperty(
+        name="Mask Sub Type",
+        default="",
+    )
     external_image: PointerProperty(
         name="Edit External Image",
         type=Image,
@@ -310,7 +323,7 @@ class PaintSystemGroup(BaseNestedListManager):
                 node_entry.inputs['Mask Color'] = None
                 node_entry.inputs['Mask Alpha'] = None
 
-            if item.enable_mask and item.mask_image:
+            if item.enable_mask and item.mask_node_tree:
                 mask_nt = get_nodetree_from_library(
                     '_PS_Mask')
                 mask_node = nodes.new('ShaderNodeGroup')
@@ -318,28 +331,31 @@ class PaintSystemGroup(BaseNestedListManager):
                 mask_node.mute = not item.enabled
                 mask_node.location = group_node.location
                 group_node.location += Vector((-200, 0))
+                
+                mask_node_group = nodes.new('ShaderNodeGroup')
+                mask_node_group.node_tree = item.mask_node_tree
+                mask_node_group.location = mask_node.location + \
+                    Vector((-200, -200))
 
-                mask_image_node = nodes.new('ShaderNodeTexImage')
-                mask_image_node.image = item.mask_image
-                mask_image_node.location = mask_node.location + Vector((-200, -200))
-                mask_image_node.width = 140
-                mask_image_node.hide = True
+                # mask_image_node = nodes.new('ShaderNodeTexImage')
+                # mask_image_node.image = item.mask_image
+                # mask_image_node.location = mask_node.location + Vector((-200, -200))
+                # mask_image_node.width = 140
+                # mask_image_node.hide = True
 
-                mask_uvmap_node = nodes.new('ShaderNodeUVMap')
-                mask_uvmap_node.uv_map = item.mask_uv_map
-                mask_uvmap_node.location = mask_image_node.location + Vector((0, -50))
-                mask_uvmap_node.hide = True
+                # mask_uvmap_node = nodes.new('ShaderNodeUVMap')
+                # mask_uvmap_node.uv_map = item.mask_uv_map
+                # mask_uvmap_node.location = mask_image_node.location + Vector((0, -50))
+                # mask_uvmap_node.hide = True
 
-                if item.image:
-                    image_texture_node = item.node_tree.nodes['Image Texture']
-                    mask_image_node.interpolation = image_texture_node.interpolation
-                    mask_image_node.extension = image_texture_node.extension
+                # if item.image:
+                #     image_texture_node = item.node_tree.nodes['Image Texture']
+                #     mask_image_node.interpolation = image_texture_node.interpolation
+                #     mask_image_node.extension = image_texture_node.extension
 
                 node_entry.location = mask_node.location
-                links.new(mask_image_node.outputs['Color'],
+                links.new(mask_node_group.outputs['Color'],
                           mask_node.inputs['Mask Alpha'])
-                links.new(mask_uvmap_node.outputs['UV'],
-                            mask_image_node.inputs['Vector'])
                 links.new(group_node.outputs['Color'],
                           mask_node.inputs['Color'])
                 links.new(group_node.outputs['Alpha'],
