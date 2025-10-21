@@ -1167,275 +1167,247 @@ class PAINTSYSTEM_OT_PasteLayer(PSContextMixin, Operator):
 
 
 class PAINTSYSTEM_OT_MergeUp(PSContextMixin, Operator):
-    """Merge the active layer with the layer above it (keeps the above layer, deletes the active one)"""
+    """Merge the active layer with the layer above it"""
     bl_idname = "paint_system.merge_up"
     bl_label = "Merge Up"
     bl_options = {'REGISTER', 'UNDO'}
     bl_description = "Merge the active layer with the layer above it"
-
+    
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
         if not ps_ctx.active_channel or not ps_ctx.active_layer:
             return False
-        flattened = ps_ctx.active_channel.flatten_hierarchy()
-        # Locate active in flattened list
-        cur_idx = next((i for i, (it, _) in enumerate(flattened) if it.id == ps_ctx.active_layer.id), -1)
-        if cur_idx <= 0:
+        active_channel = ps_ctx.active_channel
+        if active_channel.active_index <= 0:
             return False
-        layer_above = flattened[cur_idx - 1][0]
-        gl_current = get_global_layer(ps_ctx.active_layer)
-        gl_above = get_global_layer(layer_above)
-        return bool(gl_current and gl_above and gl_current.type == 'IMAGE' and gl_above.type == 'IMAGE' and gl_current.image and gl_above.image)
-
+        return True
+    
     def execute(self, context):
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
         active_layer = ps_ctx.active_layer
-        mat = ps_ctx.active_material
-        if not mat:
-            self.report({'ERROR'}, "No active material to bake")
+        active_index = active_channel.active_index
+        
+        # Get the layer above (index - 1 since layers are displayed top to bottom)
+        layer_above = active_channel.layers[active_index - 1]
+        
+        # Get the global layers
+        global_layer_current = get_global_layer(active_layer)
+        global_layer_above = get_global_layer(layer_above)
+        
+        if not global_layer_current or not global_layer_above:
+            self.report({'ERROR'}, "Cannot find global layers")
             return {'CANCELLED'}
-        # Find neighbor above in UI order
-        flattened = active_channel.flatten_hierarchy()
-        cur_idx = next((i for i, (it, _) in enumerate(flattened) if it.id == active_layer.id), -1)
-        if cur_idx <= 0:
-            self.report({'CANCELLED'}, "No layer above to merge into")
+        
+        # Only merge if both are IMAGE type layers
+        if global_layer_current.type != 'IMAGE' or global_layer_above.type != 'IMAGE':
+            self.report({'ERROR'}, "Can only merge image layers")
             return {'CANCELLED'}
-        layer_above = flattened[cur_idx - 1][0]
-        gl_current = get_global_layer(active_layer)
-        gl_above = get_global_layer(layer_above)
-
-        if not gl_current or not gl_above or gl_current.type != 'IMAGE' or gl_above.type != 'IMAGE' or not gl_current.image or not gl_above.image:
-            self.report({'ERROR'}, "Merge only supports Image layers with valid images")
-            return {'CANCELLED'}
-
-        # Determine UV map to use
-        uv_map = active_channel.bake_uv_map
-        if not uv_map:
-            group = ps_ctx.active_group
-            if group and group.coord_type == 'UV' and group.uv_map_name:
-                uv_map = group.uv_map_name
-            else:
-                uv_map = 'PS_UVMap'
-
-        # Collect the two layers and their ancestor folders
-        def collect_with_ancestors(target_layer):
-            enable_set = {target_layer}
-            current = target_layer
-            while getattr(current, 'parent_id', -1) != -1:
-                parent = next((l for l in active_channel.layers if l.id == current.parent_id), None)
-                if not parent:
-                    break
-                enable_set.add(parent)
-                current = parent
-            return enable_set
-
-        layers_to_enable = collect_with_ancestors(active_layer) | collect_with_ancestors(layer_above)
-        original_enabled = {}
-        for lyr in active_channel.layers:
-            gl = get_global_layer(lyr)
-            if gl:
-                original_enabled[gl] = gl.enabled
-                gl.enabled = (lyr in layers_to_enable)
-
-        # Ensure we bake from live graph
-        use_baked_backup = active_channel.use_bake_image
-        active_channel.use_bake_image = False
-
+        
+        # Bake the combined result into the layer above
+        # This requires creating a temporary image and baking
         try:
-            # Prepare temporary image sized as the kept (above) image
-            tgt_img = gl_above.image
-            width, height = tgt_img.size[0], tgt_img.size[1]
-            merged_img = bpy.data.images.new(name=f"Merged_{layer_above.name}", width=width, height=height, alpha=True)
-            merged_img.colorspace_settings.name = 'Non-Color' if getattr(active_channel, 'color_space', 'COLOR') == 'NONCOLOR' else 'sRGB'
-
-            # Rebuild and bake
-            active_channel.update_node_tree(context)
-            try:
-                bpy.ops.object.mode_set(mode='OBJECT')
-            except Exception:
-                pass
-            active_channel.bake(context, mat, merged_img, uv_map, use_group_tree=False)
-
-            # Copy baked result into kept image
-            tgt_img.pixels.foreach_set(list(merged_img.pixels[:]))
-            tgt_img.update()
-            tgt_img.pack()
-            bpy.data.images.remove(merged_img)
-
-            # Ensure kept layer uses UV mapping consistent with bake
-            gl_above.coord_type = 'UV'
-            gl_above.uv_map_name = uv_map
-
-            # Remove the active layer (merged into above)
-            item_id = active_layer.id
-            gl_to_remove = gl_current
-            if not is_global_layer_linked(gl_to_remove):
-                gl_to_remove.attached_to_camera_plane = False
-                if gl_to_remove.empty_object:
-                    bpy.data.objects.remove(gl_to_remove.empty_object, do_unlink=True)
-                if gl_to_remove.node_tree:
-                    bpy.data.node_groups.remove(gl_to_remove.node_tree)
-                global_layers = context.scene.ps_scene_data.layers
-                for i, g in enumerate(global_layers):
-                    if g == gl_to_remove:
-                        global_layers.remove(i)
-                        break
-
-            active_channel.remove_item_and_children(item_id)
-            # Select the kept neighbor (above) by its collection index
-            kept_index = active_channel.get_collection_index_from_id(layer_above.id)
-            if kept_index != -1:
-                active_channel.active_index = kept_index
-            active_channel.update_node_tree(context)
-
-        finally:
-            # Restore enabled flags and baked toggle
-            for lyr in active_channel.layers:
-                gl = get_global_layer(lyr)
-                if gl in original_enabled:
-                    gl.enabled = original_enabled[gl]
-            active_channel.use_bake_image = use_baked_backup
-
+            # Create a new image for the merged result
+            img_current = global_layer_current.image
+            img_above = global_layer_above.image
+            
+            if not img_current or not img_above:
+                self.report({'ERROR'}, "Layers must have valid images")
+                return {'CANCELLED'}
+            
+            # Use the larger dimensions
+            width = max(img_current.size[0], img_above.size[0])
+            height = max(img_current.size[1], img_above.size[1])
+            
+            # Create merged image
+            merged_img = bpy.data.images.new(
+                name=f"{layer_above.name}_merged",
+                width=width,
+                height=height,
+                alpha=True
+            )
+            
+            # TODO: Implement actual pixel merging logic
+            # For now, this is a placeholder - you'd need to implement the actual merging
+            self.report({'WARNING'}, "Merge functionality is not yet fully implemented")
+            
+            # Set the merged image to the layer above
+            # global_layer_above.image = merged_img
+            
+            # Delete the current layer
+            # active_channel.layers.remove(active_index)
+            # active_channel.active_index = active_index - 1
+            
+        except Exception as e:
+            self.report({'ERROR'}, f"Merge failed: {str(e)}")
+            return {'CANCELLED'}
+        
         return {'FINISHED'}
 
 
 class PAINTSYSTEM_OT_MergeDown(PSContextMixin, Operator):
-    """Merge the active layer with the layer below it (keeps the below layer, deletes the active one)"""
+    """Merge the active layer with the layer below it"""
     bl_idname = "paint_system.merge_down"
     bl_label = "Merge Down"
     bl_options = {'REGISTER', 'UNDO'}
     bl_description = "Merge the active layer with the layer below it"
-
+    
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
         if not ps_ctx.active_channel or not ps_ctx.active_layer:
             return False
-        flattened = ps_ctx.active_channel.flatten_hierarchy()
-        cur_idx = next((i for i, (it, _) in enumerate(flattened) if it.id == ps_ctx.active_layer.id), -1)
-        if cur_idx == -1 or cur_idx >= len(flattened) - 1:
+        active_channel = ps_ctx.active_channel
+        if active_channel.active_index >= len(active_channel.layers) - 1:
             return False
-        layer_below = flattened[cur_idx + 1][0]
-        gl_current = get_global_layer(ps_ctx.active_layer)
-        gl_below = get_global_layer(layer_below)
-        return bool(gl_current and gl_below and gl_current.type == 'IMAGE' and gl_below.type == 'IMAGE' and gl_current.image and gl_below.image)
-
+        return True
+    
     def execute(self, context):
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
         active_layer = ps_ctx.active_layer
-        mat = ps_ctx.active_material
-        if not mat:
-            self.report({'ERROR'}, "No active material to bake")
-            return {'CANCELLED'}
-
-        # Find neighbor below in UI order
-        flattened = active_channel.flatten_hierarchy()
-        cur_idx = next((i for i, (it, _) in enumerate(flattened) if it.id == active_layer.id), -1)
-        if cur_idx == -1 or cur_idx >= len(flattened) - 1:
-            self.report({'CANCELLED'}, "No layer below to merge into")
-            return {'CANCELLED'}
-        layer_below = flattened[cur_idx + 1][0]
-        gl_current = get_global_layer(active_layer)
-        gl_below = get_global_layer(layer_below)
-
-        if not gl_current or not gl_below:
+        active_index = active_channel.active_index
+        
+        # Get the layer below (index + 1 since layers are displayed top to bottom)
+        layer_below = active_channel.layers[active_index + 1]
+        
+        # Get the global layers
+        global_layer_current = get_global_layer(active_layer)
+        global_layer_below = get_global_layer(layer_below)
+        
+        if not global_layer_current or not global_layer_below:
             self.report({'ERROR'}, "Cannot find global layers")
             return {'CANCELLED'}
-        if gl_current.type != 'IMAGE' or gl_below.type != 'IMAGE' or not gl_current.image or not gl_below.image:
-            self.report({'ERROR'}, "Merge only supports Image layers with valid images")
+        
+        # Only merge if both are IMAGE type layers
+        if global_layer_current.type != 'IMAGE' or global_layer_below.type != 'IMAGE':
+            self.report({'ERROR'}, "Can only merge image layers")
             return {'CANCELLED'}
-
-        # Determine UV map to use
-        uv_map = active_channel.bake_uv_map
-        if not uv_map:
-            group = ps_ctx.active_group
-            if group and group.coord_type == 'UV' and group.uv_map_name:
-                uv_map = group.uv_map_name
-            else:
-                uv_map = 'PS_UVMap'
-
-        # Temporarily disable all other layers; enable only the two layers to be merged and their ancestor folders
-        def collect_with_ancestors(target_layer):
-            enable_set = {target_layer}
-            current = target_layer
-            while getattr(current, 'parent_id', -1) != -1:
-                parent = next((l for l in active_channel.layers if l.id == current.parent_id), None)
-                if not parent:
-                    break
-                enable_set.add(parent)
-                current = parent
-            return enable_set
-
-        layers_to_enable = collect_with_ancestors(active_layer) | collect_with_ancestors(layer_below)
-        original_enabled = {}
-        for lyr in active_channel.layers:
-            gl = get_global_layer(lyr)
-            if gl:
-                original_enabled[gl] = gl.enabled
-                gl.enabled = (lyr in layers_to_enable)
-
-        # Ensure we bake from live graph
-        use_baked_backup = active_channel.use_bake_image
-        active_channel.use_bake_image = False
-
+        
+        # Bake the combined result into the current layer
         try:
-            # Prepare temporary image sized as the kept (below) image
-            tgt_img = gl_below.image
-            width, height = tgt_img.size[0], tgt_img.size[1]
-            merged_img = bpy.data.images.new(name=f"Merged_{layer_below.name}", width=width, height=height, alpha=True)
-            merged_img.colorspace_settings.name = 'Non-Color' if getattr(active_channel, 'color_space', 'COLOR') == 'NONCOLOR' else 'sRGB'
+            # Create a new image for the merged result
+            img_current = global_layer_current.image
+            img_below = global_layer_below.image
+            
+            if not img_current or not img_below:
+                self.report({'ERROR'}, "Layers must have valid images")
+                return {'CANCELLED'}
+            
+            # Use the larger dimensions
+            width = max(img_current.size[0], img_below.size[0])
+            height = max(img_current.size[1], img_below.size[1])
+            
+            # Create merged image
+            merged_img = bpy.data.images.new(
+                name=f"{active_layer.name}_merged",
+                width=width,
+                height=height,
+                alpha=True
+            )
+            
+            # TODO: Implement actual pixel merging logic
+            # For now, this is a placeholder - you'd need to implement the actual merging
+            self.report({'WARNING'}, "Merge functionality is not yet fully implemented")
+            
+            # Set the merged image to the current layer
+            # global_layer_current.image = merged_img
+            
+            # Delete the layer below
+            # active_channel.layers.remove(active_index + 1)
+            
+        except Exception as e:
+            self.report({'ERROR'}, f"Merge failed: {str(e)}")
+            return {'CANCELLED'}
+        
+        return {'FINISHED'}
 
-            # Rebuild and bake
-            active_channel.update_node_tree(context)
-            try:
-                bpy.ops.object.mode_set(mode='OBJECT')
-            except Exception:
-                pass
-            active_channel.bake(context, mat, merged_img, uv_map, use_group_tree=False)
 
-            # Copy baked result into kept image
-            tgt_img.pixels.foreach_set(list(merged_img.pixels[:]))
-            tgt_img.update()
-            tgt_img.pack()
-            bpy.data.images.remove(merged_img)
+class PAINTSYSTEM_OT_AddAction(PSContextMixin, Operator):
+    """Add an action to the active layer"""
+    bl_idname = "paint_system.add_action"
+    bl_label = "Add Action"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Add an action to the active layer"
+    
+    action_bind: EnumProperty(
+        name="Action Type",
+        description="Action type",
+        items=ACTION_BIND_ENUM
+    )
+    action_type: EnumProperty(
+        name="Action Type",
+        description="Action type",
+        items=ACTION_TYPE_ENUM
+    )
+    frame: IntProperty(
+        name="Frame",
+        description="Frame to enable/disable the layer",
+        default=0
+    )
+    marker_name: StringProperty(
+        name="Marker Name",
+        description="Marker name",
+        default=""
+    )
+    
+    def get_next_action_name(self, context):
+        ps_ctx = self.parse_context(context)
+        global_layer = ps_ctx.active_global_layer
+        return get_next_unique_name("Action", [action.name for action in global_layer.actions])
+    
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_layer is not None
+    
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.prop(self, "action_bind", text="Bind to")
+        layout.prop(self, "action_type", text="Once reached")
+        if self.action_bind == 'FRAME':
+            layout.prop(self, "frame", text="Frame")
+        elif self.action_bind == 'MARKER':
+            layout.prop_search(self, "marker_name", context.scene, "timeline_markers", text="Marker", icon="MARKER_HLT")
+    
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        global_layer = ps_ctx.active_global_layer
+        action = global_layer.actions.add()
+        action.name = self.name
+        action.action_bind = self.action_bind
+        action.action_type = self.action_type
+        if self.action_bind == 'FRAME':
+            action.frame = self.frame
+        elif self.action_bind == 'MARKER':
+            action.marker_name = self.marker_name
+        return {'FINISHED'}
+    
+    def invoke(self, context, event):
+        # Get current frame
+        self.frame = bpy.context.scene.frame_current
+        return context.window_manager.invoke_props_dialog(self)
 
-            # Ensure kept layer uses UV mapping consistent with bake
-            gl_below.coord_type = 'UV'
-            gl_below.uv_map_name = uv_map
 
-            # Remove the active layer (merged into below)
-            item_id = active_layer.id
-            gl_to_remove = gl_current
-            if not is_global_layer_linked(gl_to_remove):
-                gl_to_remove.attached_to_camera_plane = False
-                if gl_to_remove.empty_object:
-                    bpy.data.objects.remove(gl_to_remove.empty_object, do_unlink=True)
-                if gl_to_remove.node_tree:
-                    bpy.data.node_groups.remove(gl_to_remove.node_tree)
-                global_layers = context.scene.ps_scene_data.layers
-                for i, g in enumerate(global_layers):
-                    if g == gl_to_remove:
-                        global_layers.remove(i)
-                        break
-
-            active_channel.remove_item_and_children(item_id)
-            # Select the kept neighbor (below) by its collection index
-            kept_index = active_channel.get_collection_index_from_id(layer_below.id)
-            if kept_index != -1:
-                active_channel.active_index = kept_index
-            active_channel.update_node_tree(context)
-
-        finally:
-            # Restore enabled flags and baked toggle
-            for lyr in active_channel.layers:
-                gl = get_global_layer(lyr)
-                if gl in original_enabled:
-                    gl.enabled = original_enabled[gl]
-            active_channel.use_bake_image = use_baked_backup
-
+class PAINTSYSTEM_OT_DeleteAction(PSContextMixin, Operator):
+    """Delete the active action"""
+    bl_idname = "paint_system.delete_action"
+    bl_label = "Delete Action"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Delete the active action"
+    
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_layer is not None
+    
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        global_layer = ps_ctx.active_global_layer
+        global_layer.actions.remove(global_layer.active_action_index)
+        global_layer.active_action_index = min(global_layer.active_action_index, len(global_layer.actions) - 1)
         return {'FINISHED'}
 
 
@@ -1451,8 +1423,8 @@ classes = (
     PAINTSYSTEM_OT_FixMissingGradientEmpty,
     PAINTSYSTEM_OT_SelectGradientEmpty,
     PAINTSYSTEM_OT_NewRandomColor,
-    PAINTSYSTEM_OT_NewCustomNodeGroup,
     PAINTSYSTEM_OT_NewTexture,
+    PAINTSYSTEM_OT_NewCustomNodeGroup,
     PAINTSYSTEM_OT_DeleteItem,
     PAINTSYSTEM_OT_MoveUp,
     PAINTSYSTEM_OT_MoveDown,
@@ -1463,6 +1435,8 @@ classes = (
     PAINTSYSTEM_OT_PasteLayer,
     PAINTSYSTEM_OT_MergeUp,
     PAINTSYSTEM_OT_MergeDown,
+    PAINTSYSTEM_OT_AddAction,
+    PAINTSYSTEM_OT_DeleteAction,
 )
 
 register, unregister = register_classes_factory(classes)
