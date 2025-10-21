@@ -943,6 +943,11 @@ class MAT_MT_LayerMenu(PSContextMixin, Menu):
         if ps_ctx.active_global_layer.type != 'IMAGE':
             layout.operator("paint_system.convert_to_image_layer", text="Convert to Image Layer", icon_value=get_icon('image'))
             layout.separator()
+        layout.operator("paint_system.merge_up",
+                        text="Merge Up", icon="TRIA_UP")
+        layout.operator("paint_system.merge_down",
+                        text="Merge Down", icon="TRIA_DOWN")
+        layout.separator()
         layout.operator("paint_system.copy_layer",
                         text="Copy Layer", icon="COPYDOWN")
         layout.operator("paint_system.copy_all_layers",
