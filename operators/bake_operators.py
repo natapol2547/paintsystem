@@ -27,7 +27,12 @@ class BakeOperator(PSContextMixin, PSUVOptionsMixin, PSImageCreateMixin, Operato
             self.uv_map = "PS_UVMap"
         else:
             self.uv_map = self.uv_map_name
-        self.image_name = f"{ps_ctx.active_group.name}_{ps_ctx.active_channel.name}"
+        # Always set image_name to Group_Layer.png
+        group = ps_ctx.active_group.name if ps_ctx.active_group else "Group"
+        layer = ps_ctx.active_channel.name if ps_ctx.active_channel else "Layer"
+        self.image_name = f"{group}_{layer}"
+        if not self.image_name.lower().endswith('.png'):
+            self.image_name += '.png'
         return context.window_manager.invoke_props_dialog(self)
 
 class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
@@ -66,7 +71,11 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
         self.image_height = int(self.image_resolution)
         
         if not bake_image:
-            self.image_name = f"{ps_ctx.active_group.name}_{ps_ctx.active_channel.name}"
+            group = ps_ctx.active_group.name if ps_ctx.active_group else "Group"
+            layer = ps_ctx.active_channel.name if ps_ctx.active_channel else "Layer"
+            self.image_name = f"{group}_{layer}"
+            if not self.image_name.lower().endswith('.png'):
+                self.image_name += '.png'
             bake_image = self.create_image()
             bake_image.colorspace_settings.name = 'sRGB'
             active_channel.bake_image = bake_image
@@ -130,6 +139,39 @@ class PAINTSYSTEM_OT_BakeAllChannels(BakeOperator):
             channel.use_bake_image = True
         # Return to object mode
         bpy.ops.object.mode_set(mode="OBJECT")
+        return {'FINISHED'}
+
+
+class PAINTSYSTEM_OT_RebakeChannel(PSContextMixin, Operator):
+    """Rebake the active channel with existing settings"""
+    bl_idname = "paint_system.rebake_channel"
+    bl_label = "Rebake Channel"
+    bl_description = "Rebake the active channel using existing bake image and UV map"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_channel and ps_ctx.active_channel.bake_image and ps_ctx.active_channel.bake_uv_map
+    
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        active_channel = ps_ctx.active_channel
+        mat = ps_ctx.active_material
+        bake_image = active_channel.bake_image
+        uv_map = active_channel.bake_uv_map
+        
+        if not bake_image or not uv_map:
+            self.report({'ERROR'}, "No baked image/UV map found. Please bake first.")
+            return {'CANCELLED'}
+        
+        # Temporarily disable baked output to bake from live graph
+        active_channel.use_bake_image = False
+        active_channel.bake(context, mat, bake_image, uv_map)
+        active_channel.use_bake_image = True
+        
+        bpy.ops.object.mode_set(mode="OBJECT")
+        self.report({'INFO'}, f"Rebaked channel '{active_channel.name}'")
         return {'FINISHED'}
 
 
@@ -431,6 +473,7 @@ class PAINTSYSTEM_OT_ConvertToImageLayer(PSContextMixin, PSUVOptionsMixin, PSIma
 
 classes = (
     PAINTSYSTEM_OT_BakeChannel,
+    PAINTSYSTEM_OT_RebakeChannel,
     PAINTSYSTEM_OT_BakeAllChannels,
     PAINTSYSTEM_OT_TransferImageLayerUV,
     PAINTSYSTEM_OT_ExportImage,

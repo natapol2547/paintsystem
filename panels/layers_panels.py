@@ -343,7 +343,10 @@ class MAT_PT_Layers(PSContextMixin, Panel):
             row = col.row(align=True)
             row.scale_y = 1.3
             row.scale_x = 1.2
-            
+            # Expose Rebake button next to the Bake dropdown when a bake exists
+            if active_channel and active_channel.bake_image and getattr(active_channel, "bake_uv_map", ""):
+                row.operator("paint_system.rebake_channel", text="", icon='FILE_REFRESH')
+
             row.menu("MAT_MT_PaintSystemMergeAndExport",
                         text="Bake and Export", icon_value=get_icon('merge'))
 
