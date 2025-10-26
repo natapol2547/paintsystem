@@ -23,6 +23,58 @@ from bl_ui.properties_paint_common import (
     UnifiedPaintPanel,
 )
 
+class PAINTSYSTEM_OT_NextActiveChannel(PSContextMixin, Operator):
+    bl_idname = "paint_system.next_active_channel"
+    bl_label = "Next Painting Target"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Switch to the next Paint System channel"
+
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_group is not None and len(ps_ctx.active_group.channels) > 0
+
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        group = ps_ctx.active_group
+        if group is None or len(group.channels) == 0:
+            return {'CANCELLED'}
+        # Compute next index with wrap-around
+        try:
+            current = int(group.active_index)
+        except Exception:
+            current = 0
+        new_index = (current + 1) % len(group.channels)
+        group.active_index = new_index
+        redraw_panel(context)
+        return {'FINISHED'}
+
+
+class PAINTSYSTEM_OT_PrevActiveChannel(PSContextMixin, Operator):
+    bl_idname = "paint_system.prev_active_channel"
+    bl_label = "Previous Painting Target"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Switch to the previous Paint System channel"
+
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_group is not None and len(ps_ctx.active_group.channels) > 0
+
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        group = ps_ctx.active_group
+        if group is None or len(group.channels) == 0:
+            return {'CANCELLED'}
+        try:
+            current = int(group.active_index)
+        except Exception:
+            current = 0
+        new_index = (current - 1) % len(group.channels)
+        group.active_index = new_index
+        redraw_panel(context)
+        return {'FINISHED'}
+
 class PAINTSYSTEM_OT_TogglePaintMode(PSContextMixin, Operator):
     bl_idname = "paint_system.toggle_paint_mode"
     bl_label = "Toggle Paint Mode"
@@ -406,6 +458,8 @@ class PAINTSYSTEM_OT_DuplicatePaintSystemData(PSContextMixin, MultiMaterialOpera
 
 
 classes = (
+    PAINTSYSTEM_OT_NextActiveChannel,
+    PAINTSYSTEM_OT_PrevActiveChannel,
     PAINTSYSTEM_OT_TogglePaintMode,
     PAINTSYSTEM_OT_AddPresetBrushes,
     PAINTSYSTEM_OT_SelectMaterialIndex,
@@ -431,11 +485,31 @@ def register():
     wm = bpy.context.window_manager
     kc = wm.keyconfigs.addon
     if kc:
+        # 3D View: sampler and erase toggle
         km = kc.keymaps.new(name="3D View", space_type='VIEW_3D')
-        kmi = km.keymap_items.new(
-            PAINTSYSTEM_OT_ColorSampler.bl_idname, 'I', 'PRESS', repeat=True)
-        kmi = km.keymap_items.new(
-            PAINTSYSTEM_OT_ToggleBrushEraseAlpha.bl_idname, type='E', value='PRESS')
+        kmi = km.keymap_items.new(PAINTSYSTEM_OT_ColorSampler.bl_idname, 'I', 'PRESS', repeat=True)
+        addon_keymaps.append((km, kmi))
+        kmi = km.keymap_items.new(PAINTSYSTEM_OT_ToggleBrushEraseAlpha.bl_idname, type='E', value='PRESS')
+        addon_keymaps.append((km, kmi))
+
+        # 3D View: Ctrl+Q / Ctrl+Shift+Q for channel cycling
+        kmi = km.keymap_items.new(PAINTSYSTEM_OT_NextActiveChannel.bl_idname, type='Q', value='PRESS', ctrl=True)
+        addon_keymaps.append((km, kmi))
+        kmi = km.keymap_items.new(PAINTSYSTEM_OT_PrevActiveChannel.bl_idname, type='Q', value='PRESS', ctrl=True, shift=True)
+        addon_keymaps.append((km, kmi))
+
+        # Node Editor: Ctrl+Q / Ctrl+Shift+Q
+        km = kc.keymaps.new(name="Node Editor", space_type='NODE_EDITOR')
+        kmi = km.keymap_items.new(PAINTSYSTEM_OT_NextActiveChannel.bl_idname, type='Q', value='PRESS', ctrl=True)
+        addon_keymaps.append((km, kmi))
+        kmi = km.keymap_items.new(PAINTSYSTEM_OT_PrevActiveChannel.bl_idname, type='Q', value='PRESS', ctrl=True, shift=True)
+        addon_keymaps.append((km, kmi))
+
+        # Image Editor: Ctrl+Q / Ctrl+Shift+Q
+        km = kc.keymaps.new(name="Image", space_type='IMAGE_EDITOR')
+        kmi = km.keymap_items.new(PAINTSYSTEM_OT_NextActiveChannel.bl_idname, type='Q', value='PRESS', ctrl=True)
+        addon_keymaps.append((km, kmi))
+        kmi = km.keymap_items.new(PAINTSYSTEM_OT_PrevActiveChannel.bl_idname, type='Q', value='PRESS', ctrl=True, shift=True)
         addon_keymaps.append((km, kmi))
 
 def unregister():

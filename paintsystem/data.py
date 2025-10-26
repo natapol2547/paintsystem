@@ -1311,6 +1311,13 @@ class Group(PropertyGroup):
             # Force to object mode
             bpy.ops.object.mode_set(mode="OBJECT")
         update_active_image(self, context)
+        # After switching channel, sync the Image Editor to the active channel's image
+        try:
+            from ..operators.image_editor_sync import update_active_channel_on_switch
+            update_active_channel_on_switch(self, context)
+        except Exception as e:
+            # Keep this silent to avoid breaking channel switching if editor is absent
+            print(f"[PaintSystem] Image editor sync skipped: {e}")
     
     active_index: IntProperty(name="Active Channel Index", update=update_channel)
     node_tree: PointerProperty(
