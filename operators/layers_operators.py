@@ -1012,6 +1012,164 @@ class PAINTSYSTEM_OT_PasteLayer(PSContextMixin, Operator):
         return {'FINISHED'}
 
 
+class PAINTSYSTEM_OT_MergeUp(PSContextMixin, Operator):
+    """Merge the active layer with the layer above it"""
+    bl_idname = "paint_system.merge_up"
+    bl_label = "Merge Up"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Merge the active layer with the layer above it"
+    
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        if not ps_ctx.active_channel or not ps_ctx.active_layer:
+            return False
+        active_channel = ps_ctx.active_channel
+        if active_channel.active_index <= 0:
+            return False
+        return True
+    
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        active_channel = ps_ctx.active_channel
+        active_layer = ps_ctx.active_layer
+        active_index = active_channel.active_index
+        
+        # Get the layer above (index - 1 since layers are displayed top to bottom)
+        layer_above = active_channel.layers[active_index - 1]
+        
+        # Get the global layers
+        global_layer_current = get_global_layer(active_layer)
+        global_layer_above = get_global_layer(layer_above)
+        
+        if not global_layer_current or not global_layer_above:
+            self.report({'ERROR'}, "Cannot find global layers")
+            return {'CANCELLED'}
+        
+        # Only merge if both are IMAGE type layers
+        if global_layer_current.type != 'IMAGE' or global_layer_above.type != 'IMAGE':
+            self.report({'ERROR'}, "Can only merge image layers")
+            return {'CANCELLED'}
+        
+        # Bake the combined result into the layer above
+        # This requires creating a temporary image and baking
+        try:
+            # Create a new image for the merged result
+            img_current = global_layer_current.image
+            img_above = global_layer_above.image
+            
+            if not img_current or not img_above:
+                self.report({'ERROR'}, "Layers must have valid images")
+                return {'CANCELLED'}
+            
+            # Use the larger dimensions
+            width = max(img_current.size[0], img_above.size[0])
+            height = max(img_current.size[1], img_above.size[1])
+            
+            # Create merged image
+            merged_img = bpy.data.images.new(
+                name=f"{layer_above.name}_merged",
+                width=width,
+                height=height,
+                alpha=True
+            )
+            
+            # TODO: Implement actual pixel merging logic
+            # For now, this is a placeholder - you'd need to implement the actual merging
+            self.report({'WARNING'}, "Merge functionality is not yet fully implemented")
+            
+            # Set the merged image to the layer above
+            # global_layer_above.image = merged_img
+            
+            # Delete the current layer
+            # active_channel.layers.remove(active_index)
+            # active_channel.active_index = active_index - 1
+            
+        except Exception as e:
+            self.report({'ERROR'}, f"Merge failed: {str(e)}")
+            return {'CANCELLED'}
+        
+        return {'FINISHED'}
+
+
+class PAINTSYSTEM_OT_MergeDown(PSContextMixin, Operator):
+    """Merge the active layer with the layer below it"""
+    bl_idname = "paint_system.merge_down"
+    bl_label = "Merge Down"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Merge the active layer with the layer below it"
+    
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        if not ps_ctx.active_channel or not ps_ctx.active_layer:
+            return False
+        active_channel = ps_ctx.active_channel
+        if active_channel.active_index >= len(active_channel.layers) - 1:
+            return False
+        return True
+    
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        active_channel = ps_ctx.active_channel
+        active_layer = ps_ctx.active_layer
+        active_index = active_channel.active_index
+        
+        # Get the layer below (index + 1 since layers are displayed top to bottom)
+        layer_below = active_channel.layers[active_index + 1]
+        
+        # Get the global layers
+        global_layer_current = get_global_layer(active_layer)
+        global_layer_below = get_global_layer(layer_below)
+        
+        if not global_layer_current or not global_layer_below:
+            self.report({'ERROR'}, "Cannot find global layers")
+            return {'CANCELLED'}
+        
+        # Only merge if both are IMAGE type layers
+        if global_layer_current.type != 'IMAGE' or global_layer_below.type != 'IMAGE':
+            self.report({'ERROR'}, "Can only merge image layers")
+            return {'CANCELLED'}
+        
+        # Bake the combined result into the current layer
+        try:
+            # Create a new image for the merged result
+            img_current = global_layer_current.image
+            img_below = global_layer_below.image
+            
+            if not img_current or not img_below:
+                self.report({'ERROR'}, "Layers must have valid images")
+                return {'CANCELLED'}
+            
+            # Use the larger dimensions
+            width = max(img_current.size[0], img_below.size[0])
+            height = max(img_current.size[1], img_below.size[1])
+            
+            # Create merged image
+            merged_img = bpy.data.images.new(
+                name=f"{active_layer.name}_merged",
+                width=width,
+                height=height,
+                alpha=True
+            )
+            
+            # TODO: Implement actual pixel merging logic
+            # For now, this is a placeholder - you'd need to implement the actual merging
+            self.report({'WARNING'}, "Merge functionality is not yet fully implemented")
+            
+            # Set the merged image to the current layer
+            # global_layer_current.image = merged_img
+            
+            # Delete the layer below
+            # active_channel.layers.remove(active_index + 1)
+            
+        except Exception as e:
+            self.report({'ERROR'}, f"Merge failed: {str(e)}")
+            return {'CANCELLED'}
+        
+        return {'FINISHED'}
+
+
 class PAINTSYSTEM_OT_AddAction(PSContextMixin, Operator):
     """Add an action to the active layer"""
     bl_idname = "paint_system.add_action"
@@ -1121,6 +1279,8 @@ classes = (
     PAINTSYSTEM_OT_CopyLayer,
     PAINTSYSTEM_OT_CopyAllLayers,
     PAINTSYSTEM_OT_PasteLayer,
+    PAINTSYSTEM_OT_MergeUp,
+    PAINTSYSTEM_OT_MergeDown,
     PAINTSYSTEM_OT_AddAction,
     PAINTSYSTEM_OT_DeleteAction,
 )

@@ -9,6 +9,7 @@ submodules = [
     "extras_panels",
     "layers_panels",
     "quick_tools_panels",
+    "toolbar_panels",
 ]
 
 register, unregister = register_submodule_factory(__name__, submodules)
