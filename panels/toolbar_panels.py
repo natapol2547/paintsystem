@@ -9,6 +9,8 @@ from .common import (
     check_group_multiuser
 )
 from ..paintsystem.data import get_global_layer
+from bl_ui.properties_paint_common import UnifiedPaintPanel
+from ..utils.version import is_newer_than
 
 # Tool mappings for Paint System
 PAINT_SYSTEM_TOOL_MAPPING = [
@@ -106,14 +108,13 @@ class PAINTSYSTEM_OT_ToolbarAction(PSContextMixin, Operator):
             return {'CANCELLED'}
 
 # Main Toolbar Panel
-class PAINTSYSTEM_PT_Toolbar(PSContextMixin, Panel):
+class PAINTSYSTEM_PT_Toolbar(PSContextMixin, UnifiedPaintPanel, Panel):
     """Paint System Toolbar Panel"""
     bl_label = "Paint System Tools"
     bl_idname = "PAINTSYSTEM_PT_Toolbar"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = 'Paint System'
-    bl_parent_id = 'MAT_PT_PaintSystemMainPanel'
     bl_options = {'DEFAULT_CLOSED'}
     
     @classmethod
@@ -198,36 +199,108 @@ class PAINTSYSTEM_PT_Toolbar(PSContextMixin, Panel):
     def draw_content_column(self, context, layout, toolbar_props):
         """Draw the content sections in the right column"""
         ps_ctx = self.parse_context(context)
+        settings = self.paint_settings(context)
         
-        # Quick Info Section
-        box = layout.box()
-        if self.draw_collapsible_header(box, toolbar_props, "quick_tools_expanded", "Quick Info", 'INFO'):
-            # Show current layer info
-            if ps_ctx.active_layer:
-                box.label(text=f"Layer: {ps_ctx.active_layer.name}", icon='RENDERLAYERS')
-            if ps_ctx.active_channel:
-                box.label(text=f"Channel: {ps_ctx.active_channel.name}", icon='TEXTURE')
-            
-            # Show layer count
-            if ps_ctx.active_group:
-                layer_count = len([layer for layer in ps_ctx.active_group.node_tree.nodes if hasattr(layer, 'ps_type')])
-                box.label(text=f"Layers: {layer_count}", icon='OUTLINER')
+        # Return early if no paint settings available
+        if not settings or not hasattr(settings, 'brush'):
+            return
         
-        # Quick Actions Section
-        box = layout.box()
-        if self.draw_collapsible_header(box, toolbar_props, "layers_expanded", "Quick Actions", 'MODIFIER'):
-            row = box.row(align=True)
-            row.scale_y = 1.5
+        brush = settings.brush
+        
+        # Draw color picker
+        if ps_ctx.ps_object and ps_ctx.ps_object.type == 'MESH':
+            col = layout.column()
+            row = col.row(align=True)
+            row.scale_y = 1.2
+            row.popover(
+                panel="MAT_PT_BrushColorSettings",
+                icon="SETTINGS"
+            )
+            from ..utils.unified_brushes import get_unified_settings
+            prop_owner = get_unified_settings(context, "use_unified_color")
+            row = col.row()
+            row.scale_y = ps_ctx.ps_settings.color_picker_scale
             
-            # Layer visibility toggle
-            if ps_ctx.active_layer:
-                global_layer = get_global_layer(ps_ctx.active_layer)
-                vis_icon = 'HIDE_OFF' if global_layer and global_layer.enabled else 'HIDE_ON'
-                row.operator("paint_system.shortcut_toggle_layer_visibility", text="", icon=vis_icon)
+            # Use the color picker from UnifiedPaintPanel
+            if hasattr(self, 'prop_unified_color_picker'):
+                self.prop_unified_color_picker(row, context, brush, "color", value_slider=True)
+            else:
+                # Fallback to standard color picker
+                row.template_color_picker(prop_owner, "color", value_slider=True)
             
-            # Layer blend mode quick access (if available)
-            row.operator("paint_system.new_image_layer", text="", icon='ADD')
-            row.operator("paint_system.copy_layer", text="", icon='DUPLICATE')
+            if not context.preferences.view.color_picker_type == "SQUARE_SV":
+                col.prop(ps_ctx.ps_scene_data, "hue", text="Hue")
+            col.prop(ps_ctx.ps_scene_data, "saturation", text="Saturation")
+            col.prop(ps_ctx.ps_scene_data, "value", text="Value")
+            if ps_ctx.ps_settings.show_hex_color:
+                row = col.row()
+                row.prop(ps_ctx.ps_scene_data, "hex_color", text="Hex")
+            
+            # Draw color palette
+            col.separator()
+            col.label(text="Palette", icon='COLOR')
+            
+            # Use Blender's built-in palette UI
+            if hasattr(context.tool_settings, 'image_paint'):
+                image_paint = context.tool_settings.image_paint
+                col.template_palette(image_paint, "palette", color=True)
+            
+            # Draw brush settings
+            col.separator()
+            row = col.row()
+            row.label(text="Settings:", icon="SETTINGS")
+            if ps_ctx.ps_settings and hasattr(ps_ctx.ps_settings, 'show_tooltips') and ps_ctx.ps_settings.show_tooltips:
+                row.popover(
+                    panel="MAT_PT_BrushTooltips",
+                    text='Shortcuts!',
+                    icon='INFO_LARGE' if is_newer_than(4, 3) else 'INFO'
+                )
+            
+            box = col.box()
+            brush_col = box.column(align=True)
+            
+            from bl_ui.properties_paint_common import brush_settings
+            from .common import scale_content
+            scale_content(context, brush_col, scale_x=1, scale_y=1.2)
+            brush_settings(brush_col, context, brush, popover=self.is_popover)
+            
+            # Check if preset brushes are imported
+            brush_imported = False
+            for ps_brush in bpy.data.brushes:
+                if ps_brush.name.startswith("PS_"):
+                    brush_imported = True
+                    break
+            if not brush_imported:
+                col.operator("paint_system.add_preset_brushes",
+                           text="Add Preset Brushes", icon="IMPORT")
+            
+            # Draw Advanced Settings
+            col.separator()
+            advanced_row = col.row()
+            advanced_expanded = toolbar_props.quick_tools_expanded
+            advanced_row.prop(toolbar_props, 'quick_tools_expanded', 
+                             icon='DOWNARROW_HLT' if advanced_expanded else 'RIGHTARROW',
+                             icon_only=True, emboss=False)
+            advanced_row.label(text="Advanced Settings", icon='SETTINGS')
+            
+            if advanced_expanded:
+                box = col.box()
+                advanced_col = box.column(align=True)
+                
+                image_paint = context.tool_settings.image_paint
+                if image_paint:
+                    advanced_col.prop(image_paint, "use_occlude", text="Occlude Faces")
+                    advanced_col.prop(image_paint, "use_backface_culling", text="Backface Culling")
+                    advanced_col.prop(image_paint, "use_normal_falloff", text="Normal Falloff")
+                    
+                    angle_col = advanced_col.column(align=True)
+                    angle_col.use_property_split = True
+                    angle_col.use_property_decorate = False
+                    angle_col.prop(image_paint, "normal_angle", text="Angle")
+                
+                if ps_ctx.ps_settings and hasattr(ps_ctx.ps_settings, 'allow_image_overwrite'):
+                    advanced_col.prop(ps_ctx.ps_settings, "allow_image_overwrite",
+                                    text="Auto Image Select", icon='FILE_IMAGE')
 
 
 classes = (

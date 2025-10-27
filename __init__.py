@@ -15,6 +15,9 @@ import bpy
 from bpy.utils import register_submodule_factory
 from .custom_icons import load_icons, unload_icons
 
+# Import submodules to make them available for register_submodule_factory
+from . import paintsystem, panels, operators
+
 # from .paintsystem.data import parse_context
 
 bl_info = {

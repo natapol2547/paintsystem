@@ -5,7 +5,7 @@ from bpy.utils import register_classes_factory
 from bpy_extras.node_utils import connect_sockets, find_base_socket_type
 from mathutils import Vector
 
-from ..paintsystem.data import TEMPLATE_ENUM
+from ..paintsystem.data import TEMPLATE_ENUM, get_global_layer
 from ..utils.nodes import (
     find_node,
     get_material_output,
@@ -259,6 +259,72 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
                 connect_sockets(node_group.outputs['Normal'], norm_map_node.inputs[1])
                 connect_sockets(norm_map_node.outputs[0], diffuse_node.inputs['Normal'])
                 connect_sockets(diffuse_node.outputs[0], mat_output.inputs[0])
+            case 'CONVERT':
+                # Convert to Paint System - adds PS without disconnecting existing connections
+                bpy.ops.paint_system.add_channel('EXEC_DEFAULT', channel_name='Color', channel_type='COLOR', use_alpha=True)
+                
+                # Find the Principled BSDF shader and its existing Base Color connection
+                material_output = get_material_output(mat_node_tree)
+                principled_node = find_node(mat_node_tree, {'bl_idname': 'ShaderNodeBsdfPrincipled'})
+                existing_image_node = None
+                existing_base_color_connection = None
+                
+                if principled_node and principled_node.inputs['Base Color'].links:
+                    # Store the existing connection
+                    existing_base_color_connection = principled_node.inputs['Base Color'].links[0]
+                    connected_node = existing_base_color_connection.from_node
+                    
+                    # Try to find an image texture node
+                    if connected_node.bl_idname == 'ShaderNodeTexImage' and connected_node.image:
+                        existing_image_node = connected_node
+                
+                # Add the Paint System group to the material
+                right_most_node = get_right_most_node(mat_node_tree)
+                node_group = mat_node_tree.nodes.new(type='ShaderNodeGroup')
+                node_group.node_tree = node_tree
+                node_group.location = right_most_node.location + Vector((200, 0))
+                
+                # If there's an existing image texture node, connect it to Paint System's Color input
+                if existing_image_node:
+                    # Disconnect from Principled BSDF
+                    mat_node_tree.links.remove(existing_base_color_connection)
+                    # Connect image texture Color and Alpha to Paint System
+                    connect_sockets(existing_image_node.outputs['Color'], node_group.inputs['Color'])
+                    connect_sockets(existing_image_node.outputs['Alpha'], node_group.inputs['Color Alpha'])
+                    
+                    if self.add_layers:
+                        # Create a duplicate of the image for the base layer
+                        duplicated_image = existing_image_node.image.copy()
+                        duplicated_image.name = f"{existing_image_node.image.name}_PaintOver"
+                        
+                        # Add first layer with the duplicated image as base
+                        bpy.ops.paint_system.new_image_layer('EXEC_DEFAULT', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+                        # Get the active channel and its active layer
+                        ps_ctx_new = self.parse_context(context)
+                        active_channel = ps_ctx_new.active_channel
+                        if active_channel and active_channel.layers:
+                            # Get the layer at the current active index
+                            active_layer = active_channel.layers[active_channel.active_index]
+                            active_global_layer = get_global_layer(active_layer)
+                            if active_global_layer:
+                                # Set the layer name to match the image
+                                active_layer.name = f"{existing_image_node.image.name}_PaintOver"
+                                # Set the image to the duplicated image
+                                active_global_layer.image = duplicated_image
+                                # Lock the base layer to prevent accidental modification
+                                active_layer.lock_alpha = True
+                        
+                        # Add a new paintable layer on top
+                        bpy.ops.paint_system.new_image_layer('EXEC_DEFAULT', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+                else:
+                    # No existing image, just add paintable layers
+                    if self.add_layers:
+                        bpy.ops.paint_system.new_image_layer('EXEC_DEFAULT', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+                
+                # Connect the Paint System output to the Principled BSDF
+                if principled_node:
+                    connect_sockets(node_group.outputs['Color'], principled_node.inputs['Base Color'])
+                    connect_sockets(node_group.outputs['Color Alpha'], principled_node.inputs['Alpha'])
             case _:
                 bpy.ops.paint_system.add_channel('EXEC_DEFAULT', channel_name='Color', channel_type='COLOR', use_alpha=True)
                 if self.add_layers:
@@ -280,6 +346,16 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
         else:
             self.group_name = "New Group"
         self.get_coord_type(context)
+        
+        # For CONVERT template, force UV coordinates and first UV map
+        if self.template == 'CONVERT':
+            self.coord_type = 'UV'
+            # Get the first UV map name from the active object
+            if ps_ctx.ps_object and ps_ctx.ps_object.data.uv_layers:
+                self.uv_map_name = ps_ctx.ps_object.data.uv_layers[0].name
+            else:
+                self.uv_map_name = "UVMap"
+        
         return context.window_manager.invoke_props_dialog(self, width=300)
     
     def draw(self, context):

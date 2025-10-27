@@ -83,7 +83,7 @@ class PSUVOptionsMixin():
     coord_type: EnumProperty(
         name="Coordinate Type",
         items=COORDINATE_TYPE_ENUM,
-        default='AUTO'
+        default='UV'
     )
     uv_map_name: StringProperty(
         name="UV Map",

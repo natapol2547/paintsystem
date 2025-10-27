@@ -55,10 +55,11 @@ from .nested_list_manager import BaseNestedListManager, BaseNestedListItem
 
 TEMPLATE_ENUM = [
     ('BASIC', "Basic", "Basic painting setup", "IMAGE", 0),
-    ('PAINT_OVER', "Paint Over", "Paint over the existing material", get_icon('paintbrush'), 1),
+    ('PAINT_OVER', "Paint Over", "Paint over the existing material", "BRUSH_DATA", 1),
     ('PBR', "PBR", "PBR painting setup", "MATERIAL", 2),
     ('NORMAL', "Normals Painting", "Start off with a normal painting setup", "NORMALS_VERTEX_FACE", 3),
-    ('NONE', "None", "Just add node group to material", "NONE", 4),
+    ('CONVERT', "Convert to Paint System", "Convert existing material to Paint System with image support", "CHECKMARK", 4),
+    ('NONE', "None", "Just add node group to material", "NONE", 5),
 ]
 
 LAYER_TYPE_ENUM = [
@@ -75,9 +76,9 @@ LAYER_TYPE_ENUM = [
 ]
 
 CHANNEL_TYPE_ENUM = [
-    ('COLOR', "Color", "Color channel", get_icon('color_socket'), 1),
-    ('VECTOR', "Vector", "Vector channel", get_icon('vector_socket'), 2),
-    ('FLOAT', "Value", "Value channel", get_icon('float_socket'), 3),
+    ('COLOR', "Color", "Color channel"),
+    ('VECTOR', "Vector", "Vector channel"),
+    ('FLOAT', "Value", "Value channel"),
 ]
 
 GRADIENT_TYPE_ENUM = [
