@@ -96,7 +96,14 @@ class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSUVOptionsMixin, PSImageCreateMix
     def process_material(self, context):
         self.store_coord_type(context)
         ps_ctx = self.parse_context(context)
+        
+        # Create image name with group name prefix for production use
+        group_name = ps_ctx.active_group.name if ps_ctx.active_group else "PS"
+        
         if self.image_add_type == 'NEW':
+            # Override image_name with the production naming convention
+            image_filename = f"{group_name}-{self.image_name}.png"
+            self.image_name = image_filename
             img = self.create_image()
         elif self.image_add_type == 'IMPORT':
             img = bpy.data.images.load(self.filepath, check_existing=True)
@@ -1257,6 +1264,43 @@ class PAINTSYSTEM_OT_DeleteAction(PSContextMixin, Operator):
         return {'FINISHED'}
 
 
+class PAINTSYSTEM_OT_UpdateImageNames(PSContextMixin, Operator):
+    """Update image names for all image layers using production naming convention"""
+    bl_idname = "paint_system.update_image_names"
+    bl_label = "Update Image Names"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Rename all image layers to follow {GroupName}-{LayerName}.png convention"
+    
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_group is not None
+    
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        group = ps_ctx.active_group
+        group_name = group.name
+        
+        # Iterate through all layers in all channels
+        updated_count = 0
+        for channel in group.channels:
+            flattened_layers = channel.flatten_hierarchy()
+            for layer, _ in flattened_layers:
+                global_layer = get_global_layer(layer)
+                if global_layer and global_layer.type == 'IMAGE' and global_layer.image:
+                    # Create production naming
+                    layer_name = global_layer.layer_name or layer.name
+                    new_image_name = f"{group_name}-{layer_name}.png"
+                    
+                    # Update the image name
+                    global_layer.image.name = new_image_name
+                    updated_count += 1
+        
+        self.report({'INFO'}, f"Updated {updated_count} image names")
+        return {'FINISHED'}
+
+
+
 classes = (
     PAINTSYSTEM_OT_NewImage,
     PAINTSYSTEM_OT_NewFolder,
@@ -1283,6 +1327,7 @@ classes = (
     PAINTSYSTEM_OT_MergeDown,
     PAINTSYSTEM_OT_AddAction,
     PAINTSYSTEM_OT_DeleteAction,
+    PAINTSYSTEM_OT_UpdateImageNames,
 )
 
 register, unregister = register_classes_factory(classes)

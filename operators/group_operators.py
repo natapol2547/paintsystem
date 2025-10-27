@@ -113,6 +113,13 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
         default=True
     )
     
+    use_ps_auto_uv: BoolProperty(
+        name="Use PS Auto UV",
+        description="Use Paint System's Auto UV instead of existing UV map",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
@@ -303,15 +310,15 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
                         ps_ctx_new = self.parse_context(context)
                         active_channel = ps_ctx_new.active_channel
                         if active_channel and active_channel.layers:
-                            # Get the layer at the current active index
+                            # Get the layer at the current active index (last added layer)
                             active_layer = active_channel.layers[active_channel.active_index]
                             active_global_layer = get_global_layer(active_layer)
                             if active_global_layer:
-                                # Set the layer name to match the image
-                                active_layer.name = f"{existing_image_node.image.name}_PaintOver"
+                                # Set the layer name to match the duplicated image name
+                                active_global_layer.name = duplicated_image.name
                                 # Set the image to the duplicated image
                                 active_global_layer.image = duplicated_image
-                                # Lock the base layer to prevent accidental modification
+                                # Lock the layer to prevent accidental modification
                                 active_layer.lock_alpha = True
                         
                         # Add a new paintable layer on top
@@ -341,17 +348,25 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
     
     def invoke(self, context, event):
         ps_ctx = self.parse_context(context)
-        if ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.groups:
-            self.group_name = get_next_unique_name(self.group_name, [group.name for group in ps_ctx.ps_mat_data.groups])
+        
+        # Set group name to object name
+        if ps_ctx.ps_object:
+            self.group_name = ps_ctx.ps_object.name
         else:
             self.group_name = "New Group"
-        self.get_coord_type(context)
         
-        # For CONVERT template, force UV coordinates and first UV map
-        if self.template == 'CONVERT':
+        # Make sure the name is unique
+        if ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.groups:
+            self.group_name = get_next_unique_name(self.group_name, [group.name for group in ps_ctx.ps_mat_data.groups])
+        
+        # Default to UV coordinate type
+        if self.use_ps_auto_uv:
+            self.coord_type = 'AUTO'
+            self.uv_map_name = "PS_UVMap"
+        else:
             self.coord_type = 'UV'
             # Get the first UV map name from the active object
-            if ps_ctx.ps_object and ps_ctx.ps_object.data.uv_layers:
+            if ps_ctx.ps_object and hasattr(ps_ctx.ps_object.data, 'uv_layers') and ps_ctx.ps_object.data.uv_layers:
                 self.uv_map_name = ps_ctx.ps_object.data.uv_layers[0].name
             else:
                 self.uv_map_name = "UVMap"
@@ -381,7 +396,32 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
         row.prop(self, "add_layers", text="Add Template Layers", icon_value=get_icon('layer_add'))
         if self.add_layers:
             box = layout.box()
-            self.select_coord_type_ui(box, context) 
+            # Show coordinate type UI with Use PS Auto UV button
+            coord_row = box.row(align=True)
+            coord_row.label(text="Coordinate Type", icon='UV')
+            button_row = coord_row.row(align=True)
+            button_row.alert = self.use_ps_auto_uv  # Turn red when toggled on
+            button_row.prop(self, "use_ps_auto_uv", text="Use PS Auto UV?", toggle=True)
+            
+            # Only show coordinate type and UV picker if not using PS Auto UV
+            if not self.use_ps_auto_uv:
+                box.prop(self, "coord_type", text="")
+                
+                if self.coord_type not in ['AUTO', 'UV']:
+                    # Warning that painting may not work as expected
+                    warning_box = box.box()
+                    warning_box.alert = True
+                    warning_box.label(text="Painting may not work in this mode", icon='ERROR')
+                
+                if self.coord_type == 'UV':
+                    uv_row = box.row(align=True)
+                    uv_row.prop_search(self, "uv_map_name", context.object.data, "uv_layers", text="")
+                    if not self.uv_map_name:
+                        uv_row.alert = True
+            else:
+                # If Use PS Auto UV is enabled, show the PS_UVMap info
+                info_box = box.box()
+                info_box.label(text="Will create UV map: PS_UVMap", icon='INFO') 
         box = layout.box()
         row = box.row()
         row.alignment = "CENTER"

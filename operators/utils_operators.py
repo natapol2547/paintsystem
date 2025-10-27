@@ -232,7 +232,7 @@ class PAINTSYSTEM_OT_CreatePaintSystemUVMap(PSContextMixin, Operator):
         bpy.ops.mesh.select_all(action='SELECT')
         # Apply to only the active object
         uv_layers = ps_object.data.uv_layers
-        uvmap = uv_layers.new(name="PS_UVMap")
+        uvmap = uv_layers.new(name="PS_Auto_UV")
         ps_object.data.uv_layers.active = uvmap
         bpy.ops.uv.smart_project(angle_limit=30/180*math.pi, island_margin=0.005)
         bpy.ops.object.mode_set(mode=original_mode)

@@ -191,6 +191,39 @@ def register():
         args=(None,),
         notify=brush_color_callback,
     )
+    bpy.app.handlers.depsgraph_update_post.append(material_name_change_handler)
+
+
+@bpy.app.handlers.persistent
+def material_name_change_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph = None):
+    """Update Paint System group names when material name changes"""
+    # Store material names to detect changes
+    if not hasattr(bpy.app, '_ps_material_names'):
+        bpy.app._ps_material_names = {}
+    
+    current_names = {}
+    for material in bpy.data.materials:
+        if hasattr(material, 'ps_mat_data') and material.ps_mat_data.groups:
+            current_names[material.name_full] = material.name
+    
+    # Check for changes
+    prev_names = bpy.app._ps_material_names
+    
+    # Find renamed materials
+    for old_full_name, old_name in list(prev_names.items()):
+        # Find if this material still exists but was renamed
+        for mat in bpy.data.materials:
+            if hasattr(mat, 'ps_mat_data') and mat.ps_mat_data.groups:
+                if mat.name_full not in prev_names and old_name in [g.name for g in mat.ps_mat_data.groups]:
+                    # Material was renamed, update groups
+                    for group in mat.ps_mat_data.groups:
+                        if group.name == old_name:
+                            group.name = mat.name
+                    break
+    
+    # Update stored names
+    bpy.app._ps_material_names = current_names
+
 
 def unregister():
     bpy.msgbus.clear_by_owner(owner)
@@ -198,6 +231,7 @@ def unregister():
     bpy.app.handlers.load_post.remove(load_post)
     bpy.app.handlers.save_pre.remove(save_handler)
     bpy.app.handlers.load_post.remove(refresh_image)
+    bpy.app.handlers.depsgraph_update_post.remove(material_name_change_handler)
     if hasattr(bpy.app.handlers, 'scene_update_pre'):
         bpy.app.handlers.scene_update_pre.remove(paint_system_object_update)
     else:

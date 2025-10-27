@@ -956,6 +956,9 @@ class MAT_MT_LayerMenu(PSContextMixin, Menu):
                         text="Paste Layer(s)", icon="PASTEDOWN").linked = False
         layout.operator("paint_system.paste_layer",
                         text="Paste Linked Layer(s)", icon="LINKED").linked = True
+        layout.separator()
+        layout.operator("paint_system.update_image_names",
+                        text="Update Image Names", icon="FILE_REFRESH")
 
 
 class MAT_MT_AddImageLayerMenu(Menu):
