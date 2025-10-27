@@ -12,24 +12,26 @@ from ..paintsystem.data import get_global_layer
 from bl_ui.properties_paint_common import UnifiedPaintPanel
 from ..utils.version import is_newer_than
 
-# Tool mappings for Paint System
-PAINT_SYSTEM_TOOL_MAPPING = [
-    # Layer Creation Tools
+# Tool mappings for Paint System organized by category
+LAYER_TOOLS = [
     {"name": "New Image Layer", "operator": "paint_system.new_image_layer", "icon": 'IMAGE_DATA', "tooltip": "Create a new image layer"},
     {"name": "New Folder", "operator": "paint_system.new_folder_layer", "icon": 'FILE_FOLDER', "tooltip": "Create a new folder layer"},
     {"name": "New Solid Color", "operator": "paint_system.new_solid_color_layer", "icon": 'MATERIAL', "tooltip": "Create a new solid color layer"},
     {"name": "New Gradient", "operator": "paint_system.new_gradient_layer", "icon": 'NODE_TEXTURE', "tooltip": "Create a new gradient layer"},
-    {"separator": True},
-    # Baking Tools
+]
+
+BAKE_TOOLS = [
     {"name": "Bake Channel", "operator": "paint_system.bake_channel", "icon": 'RENDER_RESULT', "tooltip": "Bake the current channel"},
-    {"name": "Bake All", "operator": "paint_system.bake_all_channels", "icon": 'RENDER_ANIMATION', "tooltip": "Bake all channels"},
-    {"name": "Rebake", "operator": "paint_system.rebake_channel", "icon": 'FILE_REFRESH', "tooltip": "Rebake the current channel"},
-    {"separator": True},
-    # Export Tools
+    {"name": "Bake All Channels", "operator": "paint_system.bake_all_channels", "icon": 'RENDER_ANIMATION', "tooltip": "Bake all channels"},
+    {"name": "Rebake Channel", "operator": "paint_system.rebake_channel", "icon": 'FILE_REFRESH', "tooltip": "Rebake the current channel"},
+]
+
+EXPORT_TOOLS = [
     {"name": "Export Image", "operator": "paint_system.export_image", "icon": 'EXPORT', "tooltip": "Export current image"},
-    {"name": "Export All", "operator": "paint_system.export_all_images", "icon": 'PACKAGE', "tooltip": "Export all images"},
-    {"separator": True},
-    # Quick Actions
+    {"name": "Export All Images", "operator": "paint_system.export_all_images", "icon": 'PACKAGE', "tooltip": "Export all images"},
+]
+
+LAYER_ACTIONS = [
     {"name": "Merge Down", "operator": "paint_system.shortcut_merge_down", "icon": 'TRIA_DOWN_BAR', "tooltip": "Merge layer down"},
     {"name": "Merge Up", "operator": "paint_system.shortcut_merge_up", "icon": 'TRIA_UP_BAR', "tooltip": "Merge layer up"},
     {"name": "Duplicate Layer", "operator": "paint_system.shortcut_duplicate_layer", "icon": 'DUPLICATE', "tooltip": "Duplicate current layer"},
@@ -39,28 +41,46 @@ PAINT_SYSTEM_TOOL_MAPPING = [
 # UI Properties for Paint System Toolbar
 class PaintSystemToolbarProps(PropertyGroup):
     """Properties to store toolbar UI state"""
-    toolbar_expanded: BoolProperty(
-        name="Toolbar Expanded",
-        description="Whether the toolbar section is expanded",
+    color_picker_expanded: BoolProperty(
+        name="Color Picker Expanded",
+        description="Whether the color picker section is expanded",
         default=True
     )
     
-    quick_tools_expanded: BoolProperty(
-        name="Quick Tools Expanded", 
-        description="Whether the quick tools section is expanded",
+    brush_settings_expanded: BoolProperty(
+        name="Brush Settings Expanded",
+        description="Whether the brush settings section is expanded",
         default=True
     )
     
-    layers_expanded: BoolProperty(
-        name="Layers Expanded",
-        description="Whether the layers section is expanded", 
+    layer_tools_expanded: BoolProperty(
+        name="Layer Tools Expanded",
+        description="Whether the layer tools section is expanded", 
         default=True
     )
     
-    baking_expanded: BoolProperty(
-        name="Baking Expanded",
-        description="Whether the baking section is expanded",
+    bake_tools_expanded: BoolProperty(
+        name="Bake Tools Expanded",
+        description="Whether the bake tools section is expanded",
         default=True
+    )
+    
+    export_tools_expanded: BoolProperty(
+        name="Export Tools Expanded",
+        description="Whether the export tools section is expanded",
+        default=True
+    )
+    
+    layer_actions_expanded: BoolProperty(
+        name="Layer Actions Expanded",
+        description="Whether the layer actions section is expanded",
+        default=True
+    )
+    
+    advanced_expanded: BoolProperty(
+        name="Advanced Expanded",
+        description="Whether the advanced settings section is expanded",
+        default=False
     )
 
 # Toolbar Operators
@@ -119,6 +139,11 @@ class PAINTSYSTEM_PT_Toolbar(PSContextMixin, UnifiedPaintPanel, Panel):
     
     @classmethod
     def poll(cls, context):
+        # Only show in texture paint, vertex paint, and grease pencil modes
+        valid_modes = {'PAINT_TEXTURE', 'PAINT_VERTEX', 'PAINT_GPENCIL'}
+        if context.mode not in valid_modes:
+            return False
+        
         ps_ctx = cls.parse_context(context)
         return ps_ctx.ps_object is not None and ps_ctx.active_group is not None
     
@@ -132,175 +157,243 @@ class PAINTSYSTEM_PT_Toolbar(PSContextMixin, UnifiedPaintPanel, Panel):
             layout.label(text="Add Paint System first", icon='INFO')
             return
         
-        # Create a row to hold our two columns
-        main_row = layout.row()
+        # ======================
+        # COLOR PICKER SECTION
+        # ======================
+        self.draw_color_picker_section(context, layout, toolbar_props, ps_ctx)
         
-        # Left column (tools) - Fixed width
-        tool_col = main_row.column()
-        tool_col.scale_x = 2
-        tool_col.scale_y = 1.5
+        # ======================
+        # BRUSH SETTINGS SECTION
+        # ======================
+        self.draw_brush_settings_section(context, layout, toolbar_props, ps_ctx)
         
-        # Right column (content) - Expandable
-        content_col = main_row.column()
-        content_col.ui_units_x = 100
+        # ======================
+        # LAYER TOOLS SECTION
+        # ======================
+        self.draw_layer_tools_section(context, layout, toolbar_props)
         
-        # Draw tools in left column
-        self.draw_tools_column(context, tool_col, toolbar_props)
+        # ======================
+        # BAKE TOOLS SECTION
+        # ======================
+        self.draw_bake_tools_section(context, layout, toolbar_props)
         
-        # Draw content in right column (could be settings, info, etc.)
-        self.draw_content_column(context, content_col, toolbar_props)
+        # ======================
+        # EXPORT TOOLS SECTION
+        # ======================
+        self.draw_export_tools_section(context, layout, toolbar_props)
+        
+        # ======================
+        # LAYER ACTIONS SECTION
+        # ======================
+        self.draw_layer_actions_section(context, layout, toolbar_props)
+        
+        # ======================
+        # ADVANCED SETTINGS SECTION
+        # ======================
+        self.draw_advanced_section(context, layout, toolbar_props, ps_ctx)
     
-    def draw_collapsible_header(self, layout, toolbar_props, prop_name, text, icon):
+    def draw_collapsible_header(self, layout, toolbar_props, prop_name, text, icon='TRIA_DOWN'):
         """Draw a collapsible header and return if expanded"""
-        row = layout.row()
+        box = layout.box()
+        row = box.row()
         expanded = getattr(toolbar_props, prop_name)
         
         # Draw the expand/collapse icon
-        row.prop(toolbar_props, prop_name, icon='DOWNARROW_HLT' if expanded else 'RIGHTARROW',
+        row.prop(toolbar_props, prop_name, 
+                 icon='DOWNARROW_HLT' if expanded else 'RIGHTARROW',
                  icon_only=True, emboss=False)
-                 
-        # Draw the header text
+        
+        # Draw the header text with icon
         row.label(text=text, icon=icon)
         
-        return expanded
+        return expanded, box
     
-    def draw_tools_column(self, context, layout, toolbar_props):
-        """Draw the tools in the left column"""
-        box = layout.box()
-        grid = box.grid_flow(row_major=True, columns=1, even_columns=True, even_rows=True, align=True)
-        button_height = 1.2
+    def draw_tool_button(self, layout, tool_data, scale_y=1.2):
+        """Draw a single tool button"""
+        row = layout.row()
+        row.scale_y = scale_y
         
-        for btn_data in PAINT_SYSTEM_TOOL_MAPPING:
-            # Check if this is a separator
-            if btn_data.get("separator", False):
-                grid.separator(factor=1.5)
-                continue
-                
-            # Create button container with fixed size
-            row = grid.row()
-            row.scale_y = button_height
-            row.alignment = 'CENTER'
-            
-            # Create operator button
-            if btn_data["operator"] in ["paint_system.shortcut_merge_down", "paint_system.shortcut_merge_up", 
-                                       "paint_system.shortcut_duplicate_layer", "paint_system.shortcut_delete_layer"]:
-                # Use our toolbar action operator for shortcut functions
-                op = row.operator("paint_system.toolbar_action", text="", icon=btn_data["icon"])
-                op.action = btn_data["operator"]
-            else:
-                # Use direct operator for existing Paint System operators
-                op = row.operator(btn_data["operator"], text="", icon=btn_data["icon"])
-            
-            # Set the tooltip property if available
-            if "tooltip" in btn_data:
-                if hasattr(op, "tool_tooltip"):
-                    op.tool_tooltip = btn_data["tooltip"]
+        # Use direct operator for most tools
+        if tool_data["operator"].startswith("paint_system.shortcut_"):
+            op = row.operator("paint_system.toolbar_action", 
+                            text=tool_data["name"], 
+                            icon=tool_data["icon"])
+            op.action = tool_data["operator"]
+            op.tool_tooltip = tool_data.get("tooltip", "")
+        else:
+            op = row.operator(tool_data["operator"], 
+                            text=tool_data["name"], 
+                            icon=tool_data["icon"])
     
-    def draw_content_column(self, context, layout, toolbar_props):
-        """Draw the content sections in the right column"""
-        ps_ctx = self.parse_context(context)
+    def draw_color_picker_section(self, context, layout, toolbar_props, ps_ctx):
+        """Draw the color picker section"""
         settings = self.paint_settings(context)
-        
-        # Return early if no paint settings available
         if not settings or not hasattr(settings, 'brush'):
             return
         
         brush = settings.brush
         
-        # Draw color picker
-        if ps_ctx.ps_object and ps_ctx.ps_object.type == 'MESH':
-            col = layout.column()
+        expanded, box = self.draw_collapsible_header(
+            layout, toolbar_props, 'color_picker_expanded', 
+            "Color Picker", 'COLOR'
+        )
+        
+        if expanded:
+            col = box.column(align=True)
+            
+            # Settings button
             row = col.row(align=True)
             row.scale_y = 1.2
             row.popover(
                 panel="MAT_PT_BrushColorSettings",
-                icon="SETTINGS"
+                icon="SETTINGS",
+                text=""
             )
+            
+            # Color picker
             from ..utils.unified_brushes import get_unified_settings
             prop_owner = get_unified_settings(context, "use_unified_color")
             row = col.row()
-            row.scale_y = ps_ctx.ps_settings.color_picker_scale
+            row.scale_y = 1.5 if ps_ctx.ps_settings and hasattr(ps_ctx.ps_settings, 'color_picker_scale') else 1.5
             
-            # Use the color picker from UnifiedPaintPanel
             if hasattr(self, 'prop_unified_color_picker'):
                 self.prop_unified_color_picker(row, context, brush, "color", value_slider=True)
             else:
-                # Fallback to standard color picker
                 row.template_color_picker(prop_owner, "color", value_slider=True)
             
+            # HSV sliders
+            col.separator(factor=0.5)
             if not context.preferences.view.color_picker_type == "SQUARE_SV":
-                col.prop(ps_ctx.ps_scene_data, "hue", text="Hue")
-            col.prop(ps_ctx.ps_scene_data, "saturation", text="Saturation")
-            col.prop(ps_ctx.ps_scene_data, "value", text="Value")
-            if ps_ctx.ps_settings.show_hex_color:
-                row = col.row()
-                row.prop(ps_ctx.ps_scene_data, "hex_color", text="Hex")
+                col.prop(ps_ctx.ps_scene_data, "hue", text="Hue", slider=True)
+            col.prop(ps_ctx.ps_scene_data, "saturation", text="Saturation", slider=True)
+            col.prop(ps_ctx.ps_scene_data, "value", text="Value", slider=True)
             
-            # Draw color palette
+            # Hex color
+            if ps_ctx.ps_settings and hasattr(ps_ctx.ps_settings, 'show_hex_color') and ps_ctx.ps_settings.show_hex_color:
+                col.separator(factor=0.5)
+                col.prop(ps_ctx.ps_scene_data, "hex_color", text="Hex")
+            
+            # Color palette
             col.separator()
-            col.label(text="Palette", icon='COLOR')
-            
-            # Use Blender's built-in palette UI
             if hasattr(context.tool_settings, 'image_paint'):
                 image_paint = context.tool_settings.image_paint
                 col.template_palette(image_paint, "palette", color=True)
+    
+    def draw_brush_settings_section(self, context, layout, toolbar_props, ps_ctx):
+        """Draw the brush settings section"""
+        settings = self.paint_settings(context)
+        if not settings or not hasattr(settings, 'brush'):
+            return
+        
+        brush = settings.brush
+        
+        expanded, box = self.draw_collapsible_header(
+            layout, toolbar_props, 'brush_settings_expanded',
+            "Brush Settings", 'BRUSH_DATA'
+        )
+        
+        if expanded:
+            col = box.column(align=True)
             
-            # Draw brush settings
-            col.separator()
-            row = col.row()
-            row.label(text="Settings:", icon="SETTINGS")
+            # Tooltips button
             if ps_ctx.ps_settings and hasattr(ps_ctx.ps_settings, 'show_tooltips') and ps_ctx.ps_settings.show_tooltips:
+                row = col.row()
                 row.popover(
                     panel="MAT_PT_BrushTooltips",
-                    text='Shortcuts!',
+                    text='Shortcuts',
                     icon='INFO_LARGE' if is_newer_than(4, 3) else 'INFO'
                 )
+                col.separator(factor=0.5)
             
-            box = col.box()
-            brush_col = box.column(align=True)
-            
+            # Brush settings
             from bl_ui.properties_paint_common import brush_settings
-            from .common import scale_content
-            scale_content(context, brush_col, scale_x=1, scale_y=1.2)
-            brush_settings(brush_col, context, brush, popover=self.is_popover)
+            scale_content(context, col, scale_x=1, scale_y=1.1)
+            brush_settings(col, context, brush, popover=self.is_popover)
             
-            # Check if preset brushes are imported
+            # Preset brushes
             brush_imported = False
             for ps_brush in bpy.data.brushes:
                 if ps_brush.name.startswith("PS_"):
                     brush_imported = True
                     break
+            
             if not brush_imported:
+                col.separator()
                 col.operator("paint_system.add_preset_brushes",
                            text="Add Preset Brushes", icon="IMPORT")
+    
+    def draw_layer_tools_section(self, context, layout, toolbar_props):
+        """Draw the layer creation tools section"""
+        expanded, box = self.draw_collapsible_header(
+            layout, toolbar_props, 'layer_tools_expanded',
+            "Layer Tools", 'RENDERLAYERS'
+        )
+        
+        if expanded:
+            col = box.column(align=True)
+            for tool in LAYER_TOOLS:
+                self.draw_tool_button(col, tool)
+    
+    def draw_bake_tools_section(self, context, layout, toolbar_props):
+        """Draw the baking tools section"""
+        expanded, box = self.draw_collapsible_header(
+            layout, toolbar_props, 'bake_tools_expanded',
+            "Bake Tools", 'RENDER_RESULT'
+        )
+        
+        if expanded:
+            col = box.column(align=True)
+            for tool in BAKE_TOOLS:
+                self.draw_tool_button(col, tool)
+    
+    def draw_export_tools_section(self, context, layout, toolbar_props):
+        """Draw the export tools section"""
+        expanded, box = self.draw_collapsible_header(
+            layout, toolbar_props, 'export_tools_expanded',
+            "Export Tools", 'EXPORT'
+        )
+        
+        if expanded:
+            col = box.column(align=True)
+            for tool in EXPORT_TOOLS:
+                self.draw_tool_button(col, tool)
+    
+    def draw_layer_actions_section(self, context, layout, toolbar_props):
+        """Draw the layer actions section"""
+        expanded, box = self.draw_collapsible_header(
+            layout, toolbar_props, 'layer_actions_expanded',
+            "Layer Actions", 'MODIFIER'
+        )
+        
+        if expanded:
+            col = box.column(align=True)
+            for tool in LAYER_ACTIONS:
+                self.draw_tool_button(col, tool)
+    
+    def draw_advanced_section(self, context, layout, toolbar_props, ps_ctx):
+        """Draw the advanced settings section"""
+        expanded, box = self.draw_collapsible_header(
+            layout, toolbar_props, 'advanced_expanded',
+            "Advanced Settings", 'SETTINGS'
+        )
+        
+        if expanded:
+            col = box.column(align=True)
             
-            # Draw Advanced Settings
-            col.separator()
-            advanced_row = col.row()
-            advanced_expanded = toolbar_props.quick_tools_expanded
-            advanced_row.prop(toolbar_props, 'quick_tools_expanded', 
-                             icon='DOWNARROW_HLT' if advanced_expanded else 'RIGHTARROW',
-                             icon_only=True, emboss=False)
-            advanced_row.label(text="Advanced Settings", icon='SETTINGS')
+            image_paint = context.tool_settings.image_paint
+            if image_paint:
+                col.prop(image_paint, "use_occlude", text="Occlude Faces")
+                col.prop(image_paint, "use_backface_culling", text="Backface Culling")
+                col.prop(image_paint, "use_normal_falloff", text="Normal Falloff")
+                
+                if image_paint.use_normal_falloff:
+                    col.separator(factor=0.5)
+                    col.prop(image_paint, "normal_angle", text="Angle", slider=True)
             
-            if advanced_expanded:
-                box = col.box()
-                advanced_col = box.column(align=True)
-                
-                image_paint = context.tool_settings.image_paint
-                if image_paint:
-                    advanced_col.prop(image_paint, "use_occlude", text="Occlude Faces")
-                    advanced_col.prop(image_paint, "use_backface_culling", text="Backface Culling")
-                    advanced_col.prop(image_paint, "use_normal_falloff", text="Normal Falloff")
-                    
-                    angle_col = advanced_col.column(align=True)
-                    angle_col.use_property_split = True
-                    angle_col.use_property_decorate = False
-                    angle_col.prop(image_paint, "normal_angle", text="Angle")
-                
-                if ps_ctx.ps_settings and hasattr(ps_ctx.ps_settings, 'allow_image_overwrite'):
-                    advanced_col.prop(ps_ctx.ps_settings, "allow_image_overwrite",
-                                    text="Auto Image Select", icon='FILE_IMAGE')
+            if ps_ctx.ps_settings and hasattr(ps_ctx.ps_settings, 'allow_image_overwrite'):
+                col.separator()
+                col.prop(ps_ctx.ps_settings, "allow_image_overwrite",
+                        text="Auto Image Select", icon='FILE_IMAGE')
 
 
 classes = (

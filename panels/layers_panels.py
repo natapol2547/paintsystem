@@ -1167,6 +1167,57 @@ class MAT_PT_Actions(PSContextMixin, Panel):
         actions_col.prop(active_action, "action_type", text="Action")
 
 
+class MAT_PT_BakeExport(PSContextMixin, Panel):
+    """Bake and Export Panel"""
+    bl_label = "Bake & Export"
+    bl_idname = 'MAT_PT_BakeExport'
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = 'Paint System'
+    bl_parent_id = 'MAT_PT_ChannelsPanel'
+    bl_options = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_group is not None
+    
+    def draw_header(self, context):
+        layout = self.layout
+        layout.label(icon='RENDER_RESULT')
+
+    def draw(self, context):
+        ps_ctx = self.parse_context(context)
+        layout = self.layout
+        layout.use_property_split = False
+        
+        # Bake section
+        box = layout.box()
+        col = box.column(align=True)
+        col.label(text="Bake Operations:", icon='RENDER_STILL')
+        
+        # Bake object to layer(s)
+        col.operator("paint_system.bake_object_to_layer", text="Bake from Object...", icon='IMPORT')
+        
+        # Bake channel operations
+        col.separator()
+        col.operator("paint_system.bake_channel", text="Bake Active Channel", icon='TEXTURE_DATA')
+        if ps_ctx.active_channel and ps_ctx.active_channel.bake_image:
+            col.operator("paint_system.rebake_channel", text="Rebake Channel", icon='FILE_REFRESH')
+        # col.operator("paint_system.bake_all_channels", text="Bake All Channels", icon='RENDERLAYERS')
+        
+        # Export section
+        box = layout.box()
+        col = box.column(align=True)
+        col.label(text="Export Operations:", icon='EXPORT')
+        
+        if ps_ctx.active_channel and ps_ctx.active_channel.bake_image:
+            col.operator("paint_system.export_image", text="Export Baked Image", icon='FILE_TICK').image_name = ps_ctx.active_channel.bake_image.name
+            col.operator("paint_system.export_all_images", text="Export All Images", icon='COLLECTION_COLOR_01')
+        else:
+            col.label(text="Bake a channel first", icon='INFO')
+
+
 classes = (
     MAT_PT_UL_LayerList,
     MAT_MT_AddLayerMenu,
@@ -1188,6 +1239,7 @@ classes = (
     MAT_PT_LayerTransformSettings,
     MAT_PT_ImageLayerSettings,
     MAT_PT_Actions,
+    MAT_PT_BakeExport,
     PAINTSYSTEM_UL_Actions,
 )
 

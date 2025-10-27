@@ -475,6 +475,329 @@ class PAINTSYSTEM_OT_ConvertToImageLayer(PSContextMixin, PSUVOptionsMixin, PSIma
         return {'FINISHED'}
 
 
+class PAINTSYSTEM_OT_BakeObjectToLayer(PSContextMixin, PSImageCreateMixin, Operator):
+    """Open baking window to bake textures from another object"""
+    bl_idname = "paint_system.bake_object_to_layer"
+    bl_label = "Bake Object to Layers"
+    bl_description = "Bake textures from another object onto Paint System layers"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    source_object: StringProperty(
+        name="Source Object",
+        description="Object to bake from",
+        default=""
+    )
+    
+    # Individual bake type buttons
+    bake_combined: bpy.props.BoolProperty(name="Combined", default=False)
+    bake_diffuse: bpy.props.BoolProperty(name="Diffuse", default=False)
+    bake_glossy: bpy.props.BoolProperty(name="Glossy", default=False)
+    bake_transmission: bpy.props.BoolProperty(name="Transmission", default=False)
+    bake_subsurface: bpy.props.BoolProperty(name="Subsurface", default=False)
+    bake_emit: bpy.props.BoolProperty(name="Emit", default=False)
+    bake_ao: bpy.props.BoolProperty(name="AO", default=False)
+    bake_shadow: bpy.props.BoolProperty(name="Shadow", default=False)
+    bake_normal: bpy.props.BoolProperty(name="Normal", default=False)
+    bake_roughness: bpy.props.BoolProperty(name="Roughness", default=False)
+    bake_metallic: bpy.props.BoolProperty(name="Metallic", default=False)
+    bake_environment: bpy.props.BoolProperty(name="Environment", default=False)
+    bake_uv: bpy.props.BoolProperty(name="UV", default=False)
+    bake_position: bpy.props.BoolProperty(name="Position", default=False)
+    
+    margin: bpy.props.IntProperty(
+        name="Margin",
+        description="Margin in pixels to extend the baked result",
+        default=16,
+        min=0,
+        max=64
+    )
+    
+    use_clear: bpy.props.BoolProperty(
+        name="Clear Images",
+        description="Clear images before baking",
+        default=False
+    )
+    
+    samples: bpy.props.IntProperty(
+        name="Samples",
+        description="Number of samples for baking",
+        default=32,
+        min=1,
+        max=4096
+    )
+    
+    # Advanced options
+    use_selected_to_active: bpy.props.BoolProperty(
+        name="Selected to Active",
+        description="Bake shading on the surface of selected objects to the active object",
+        default=False
+    )
+    
+    cage_extrusion: bpy.props.FloatProperty(
+        name="Ray Distance",
+        description="Distance to use for the inward ray cast when using selected to active",
+        default=0.0,
+        min=0.0
+    )
+    
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_group is not None
+    
+    def invoke(self, context, event):
+        ps_ctx = self.parse_context(context)
+        
+        # Set default image size
+        if ps_ctx.active_global_layer and ps_ctx.active_global_layer.type == 'IMAGE' and ps_ctx.active_global_layer.image:
+            target_image = ps_ctx.active_global_layer.image
+            self.image_width = target_image.size[0]
+            self.image_height = target_image.size[1]
+            if self.image_width == self.image_height:
+                size_str = str(self.image_width)
+                if size_str in ['1024', '2048', '4096', '8192']:
+                    self.image_resolution = size_str
+                else:
+                    self.image_resolution = 'CUSTOM'
+            else:
+                self.image_resolution = 'CUSTOM'
+        else:
+            self.image_resolution = '2048'
+            self.image_width = 2048
+            self.image_height = 2048
+        
+        return context.window_manager.invoke_props_dialog(self, width=500)
+    
+    def draw(self, context):
+        layout = self.layout
+        ps_ctx = self.parse_context(context)
+        
+        # Source Object
+        box = layout.box()
+        box.label(text="Source Object", icon='OBJECT_DATA')
+        box.prop_search(self, "source_object", bpy.data, "objects", text="")
+        
+        # Bake Types - organized in grid
+        box = layout.box()
+        box.label(text="Bake Types (Select Multiple)", icon='RENDERLAYERS')
+        
+        # Row 1: Main types
+        split = box.split(factor=0.5)
+        col1 = split.column(align=True)
+        col1.prop(self, "bake_combined", toggle=True)
+        col1.prop(self, "bake_diffuse", toggle=True)
+        col1.prop(self, "bake_glossy", toggle=True)
+        col1.prop(self, "bake_transmission", toggle=True)
+        
+        col2 = split.column(align=True)
+        col2.prop(self, "bake_subsurface", toggle=True)
+        col2.prop(self, "bake_emit", toggle=True)
+        col2.prop(self, "bake_ao", toggle=True)
+        col2.prop(self, "bake_shadow", toggle=True)
+        
+        # Row 2: Surface properties
+        split = box.split(factor=0.5)
+        col1 = split.column(align=True)
+        col1.prop(self, "bake_normal", toggle=True)
+        col1.prop(self, "bake_roughness", toggle=True)
+        
+        col2 = split.column(align=True)
+        col2.prop(self, "bake_metallic", toggle=True)
+        col2.prop(self, "bake_environment", toggle=True)
+        
+        # Row 3: Utility bakes
+        split = box.split(factor=0.5)
+        col1 = split.column(align=True)
+        col1.prop(self, "bake_uv", toggle=True)
+        
+        col2 = split.column(align=True)
+        col2.prop(self, "bake_position", toggle=True)
+        
+        # Image Settings
+        self.image_create_ui(layout, context, show_name=False)
+        
+        # Bake Settings
+        box = layout.box()
+        box.label(text="Bake Settings", icon='SETTINGS')
+        box.prop(self, "samples")
+        box.prop(self, "margin")
+        box.prop(self, "use_clear")
+        
+        # Advanced Options
+        box = layout.box()
+        box.label(text="Advanced Options", icon='PREFERENCES')
+        box.prop(self, "use_selected_to_active")
+        if self.use_selected_to_active:
+            box.prop(self, "cage_extrusion")
+    
+    def find_channel_by_name(self, channels, keywords):
+        """Find a channel that matches any of the keywords"""
+        for ch in channels:
+            ch_name = ch.name.lower()
+            if any(keyword in ch_name for keyword in keywords):
+                return ch
+        return None
+    
+    def find_image_layer_in_channel(self, channel):
+        """Find the first image layer in a channel"""
+        from ..paintsystem.data import get_global_layer
+        for layer in channel.layers:
+            global_layer = get_global_layer(layer)
+            if global_layer and global_layer.type == 'IMAGE' and global_layer.image:
+                return global_layer.image
+        return None
+    
+    def bake_to_image(self, context, source_obj, target_image, bake_type):
+        """Bake source object to target image"""
+        # Create temporary image node in source material
+        mat = source_obj.active_material
+        if not mat.use_nodes:
+            mat.use_nodes = True
+        
+        node_tree = mat.node_tree
+        temp_node = node_tree.nodes.new('ShaderNodeTexImage')
+        temp_node.image = target_image
+        
+        # Deselect all nodes and make temp node active
+        for node in node_tree.nodes:
+            node.select = False
+        temp_node.select = True
+        node_tree.nodes.active = temp_node
+        
+        # Use temp_override to set proper context for baking
+        with context.temp_override(active_object=source_obj, selected_objects=[source_obj]):
+            # Bake
+            bpy.ops.object.bake(
+                type=bake_type,
+                use_clear=self.use_clear,
+                margin=self.margin
+            )
+        
+        # Cleanup temp node
+        node_tree.nodes.remove(temp_node)
+    
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        
+        if not self.source_object:
+            self.report({'ERROR'}, "Please select a source object")
+            return {'CANCELLED'}
+        
+        source_obj = bpy.data.objects.get(self.source_object)
+        if not source_obj:
+            self.report({'ERROR'}, "Source object not found")
+            return {'CANCELLED'}
+        
+        if not source_obj.active_material:
+            self.report({'ERROR'}, "Source object has no active material")
+            return {'CANCELLED'}
+        
+        # Build list of bake operations
+        bake_operations = []
+        
+        # Map bake toggles to (bake_type, channel_keywords)
+        bake_mapping = {
+            'bake_combined': ('COMBINED', ['color', 'diffuse', 'base', 'albedo']),
+            'bake_diffuse': ('DIFFUSE', ['color', 'diffuse', 'base', 'albedo']),
+            'bake_glossy': ('GLOSSY', ['glossy', 'specular']),
+            'bake_transmission': ('TRANSMISSION', ['transmission', 'refraction']),
+            'bake_subsurface': ('SUBSURFACE', ['subsurface', 'sss']),
+            'bake_emit': ('EMIT', ['emit', 'emission']),
+            'bake_ao': ('AO', ['ao', 'occlusion', 'ambient']),
+            'bake_shadow': ('SHADOW', ['shadow']),
+            'bake_normal': ('NORMAL', ['normal']),
+            'bake_roughness': ('ROUGHNESS', ['rough', 'roughness']),
+            'bake_metallic': ('METALLIC', ['metal', 'metallic']),
+            'bake_environment': ('ENVIRONMENT', ['environment', 'env']),
+            'bake_uv': ('UV', ['uv']),
+            'bake_position': ('POSITION', ['position', 'pos']),
+        }
+        
+        for prop_name, (bake_type, keywords) in bake_mapping.items():
+            if getattr(self, prop_name):
+                bake_operations.append((bake_type, keywords))
+        
+        if not bake_operations:
+            self.report({'ERROR'}, "Please select at least one bake type")
+            return {'CANCELLED'}
+        
+        # Store original settings
+        original_engine = context.scene.render.engine
+        original_samples = context.scene.cycles.samples if context.scene.render.engine == 'CYCLES' else None
+        
+        baked_count = 0
+        channels = ps_ctx.active_group.channels if ps_ctx.active_group else []
+        
+        try:
+            # Setup for baking
+            context.scene.render.engine = 'CYCLES'
+            context.scene.cycles.samples = self.samples
+            
+            # Process each bake operation
+            for bake_type, keywords in bake_operations:
+                # Try to find matching channel
+                channel = self.find_channel_by_name(channels, keywords)
+                
+                if channel:
+                    # Found channel - bake to its image layer
+                    target_image = self.find_image_layer_in_channel(channel)
+                    if not target_image:
+                        self.report({'WARNING'}, f"No image layer found in channel '{channel.name}' for {bake_type}")
+                        continue
+                    
+                    # Resize if needed
+                    if target_image.size[0] != self.image_width or target_image.size[1] != self.image_height:
+                        target_image.scale(self.image_width, self.image_height)
+                    
+                    # Clear if requested
+                    if self.use_clear:
+                        pixels_count = self.image_width * self.image_height * 4
+                        target_image.pixels = [0.0] * pixels_count
+                    
+                    self.bake_to_image(context, source_obj, target_image, bake_type)
+                    baked_count += 1
+                    self.report({'INFO'}, f"Baked {bake_type} to channel '{channel.name}'")
+                else:
+                    # No matching channel - bake to active layer if it's an image
+                    if ps_ctx.active_global_layer and ps_ctx.active_global_layer.type == 'IMAGE':
+                        target_image = ps_ctx.active_global_layer.image
+                        if not target_image:
+                            self.report({'WARNING'}, f"Active layer has no image for {bake_type}")
+                            continue
+                        
+                        # Resize if needed
+                        if target_image.size[0] != self.image_width or target_image.size[1] != self.image_height:
+                            target_image.scale(self.image_width, self.image_height)
+                        
+                        # Clear if requested
+                        if self.use_clear:
+                            pixels_count = self.image_width * self.image_height * 4
+                            target_image.pixels = [0.0] * pixels_count
+                        
+                        self.bake_to_image(context, source_obj, target_image, bake_type)
+                        baked_count += 1
+                        self.report({'INFO'}, f"Baked {bake_type} to active layer")
+                    else:
+                        self.report({'WARNING'}, f"No suitable target for {bake_type}")
+            
+            if baked_count > 0:
+                self.report({'INFO'}, f"Successfully baked {baked_count} texture(s) ({self.image_width}x{self.image_height})")
+            else:
+                self.report({'WARNING'}, "No textures were baked")
+            
+        except Exception as e:
+            self.report({'ERROR'}, f"Baking failed: {str(e)}")
+            return {'CANCELLED'}
+        
+        finally:
+            # Restore original settings
+            context.scene.render.engine = original_engine
+            if original_samples is not None:
+                context.scene.cycles.samples = original_samples
+        
+        return {'FINISHED'}
+
+
 classes = (
     PAINTSYSTEM_OT_BakeChannel,
     PAINTSYSTEM_OT_RebakeChannel,
@@ -484,6 +807,7 @@ classes = (
     PAINTSYSTEM_OT_ExportAllImages,
     PAINTSYSTEM_OT_DeleteBakedImage,
     PAINTSYSTEM_OT_ConvertToImageLayer,
+    PAINTSYSTEM_OT_BakeObjectToLayer,
 )
 
 register, unregister = register_classes_factory(classes)
