@@ -100,17 +100,24 @@ class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSUVOptionsMixin, PSImageCreateMix
         # Create image name with group name prefix for production use
         group_name = ps_ctx.active_group.name if ps_ctx.active_group else "PS"
         
+        # Keep the simple layer name separate from the image filename
+        layer_name = self.image_name
+        
         if self.image_add_type == 'NEW':
-            # Override image_name with the production naming convention
+            # Create image with production naming convention
             image_filename = f"{group_name}-{self.image_name}.png"
+            # Temporarily store the original name
+            original_name = self.image_name
             self.image_name = image_filename
             img = self.create_image()
+            # Restore the simple name for layer_name
+            self.image_name = original_name
         elif self.image_add_type == 'IMPORT':
             img = bpy.data.images.load(self.filepath, check_existing=True)
             if not img:
                 self.report({'ERROR'}, "Failed to load image")
                 return False
-            self.image_name = img.name
+            layer_name = img.name
         elif self.image_add_type == 'EXISTING':
             if not self.image_name:
                 self.report({'ERROR'}, "No image selected")
@@ -120,8 +127,9 @@ class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSUVOptionsMixin, PSImageCreateMix
             if not img:
                 self.report({'ERROR'}, "Image not found")
                 return False
+            layer_name = self.image_name
         img.colorspace_settings.name = 'Non-Color' if ps_ctx.active_channel.color_space == 'NONCOLOR' else 'sRGB'
-        global_layer = add_global_layer("IMAGE", self.image_name)
+        global_layer = add_global_layer("IMAGE", layer_name)
         global_layer.image = img
         global_layer.coord_type = self.coord_type
         global_layer.uv_map_name = self.uv_map_name

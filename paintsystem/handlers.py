@@ -102,6 +102,31 @@ def refresh_image(scene: bpy.types.Scene):
 
 
 @bpy.app.handlers.persistent
+def image_paint_update(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph = None):
+    """Force update of painted images to sync between Image Editor and 3D viewport"""
+    try:
+        context = bpy.context
+        if context.mode != 'PAINT_TEXTURE':
+            return
+            
+        ps_ctx = parse_context(context)
+        active_layer = ps_ctx.active_global_layer
+        
+        if active_layer and active_layer.image and active_layer.image.is_dirty:
+            # Force update the image to refresh in all editors
+            active_layer.image.update()
+            active_layer.image.update_tag()
+            
+            # Refresh all areas showing this image
+            for window in context.window_manager.windows:
+                for area in window.screen.areas:
+                    if area.type in {'VIEW_3D', 'IMAGE_EDITOR'}:
+                        area.tag_redraw()
+    except:
+        pass
+
+
+@bpy.app.handlers.persistent
 def paint_system_object_update(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph = None):
     """Handle object changes and update paint canvas - based on UcuPaint's ypaint_last_object_update"""
     
@@ -173,11 +198,13 @@ def register():
     bpy.app.handlers.frame_change_pre.append(frame_change_pre)
     bpy.app.handlers.load_post.append(load_post)
     bpy.app.handlers.save_pre.append(save_handler)
+    bpy.app.handlers.save_post.append(save_handler)  # Also save on autosaves
     bpy.app.handlers.load_post.append(refresh_image)
     if hasattr(bpy.app.handlers, 'scene_update_pre'):
         bpy.app.handlers.scene_update_pre.append(paint_system_object_update)
     else:
         bpy.app.handlers.depsgraph_update_post.append(paint_system_object_update)
+    bpy.app.handlers.depsgraph_update_post.append(image_paint_update)
     bpy.app.timers.register(on_addon_enable, first_interval=0.1)
     bpy.msgbus.subscribe_rna(
         key=(bpy.types.UnifiedPaintSettings, "color"),
@@ -194,12 +221,13 @@ def register():
     bpy.app.handlers.depsgraph_update_post.append(material_name_change_handler)
 
 
+# Store material names globally for change detection
+_ps_material_names = {}
+
 @bpy.app.handlers.persistent
 def material_name_change_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph = None):
     """Update Paint System group names when material name changes"""
-    # Store material names to detect changes
-    if not hasattr(bpy.app, '_ps_material_names'):
-        bpy.app._ps_material_names = {}
+    global _ps_material_names
     
     current_names = {}
     for material in bpy.data.materials:
@@ -207,7 +235,7 @@ def material_name_change_handler(scene: bpy.types.Scene, depsgraph: bpy.types.De
             current_names[material.name_full] = material.name
     
     # Check for changes
-    prev_names = bpy.app._ps_material_names
+    prev_names = _ps_material_names
     
     # Find renamed materials
     for old_full_name, old_name in list(prev_names.items()):
@@ -222,16 +250,20 @@ def material_name_change_handler(scene: bpy.types.Scene, depsgraph: bpy.types.De
                     break
     
     # Update stored names
-    bpy.app._ps_material_names = current_names
+    _ps_material_names = current_names
 
 
 def unregister():
+    global _ps_material_names
+    _ps_material_names = {}
     bpy.msgbus.clear_by_owner(owner)
     bpy.app.handlers.frame_change_pre.remove(frame_change_pre)
     bpy.app.handlers.load_post.remove(load_post)
     bpy.app.handlers.save_pre.remove(save_handler)
+    bpy.app.handlers.save_post.remove(save_handler)
     bpy.app.handlers.load_post.remove(refresh_image)
     bpy.app.handlers.depsgraph_update_post.remove(material_name_change_handler)
+    bpy.app.handlers.depsgraph_update_post.remove(image_paint_update)
     if hasattr(bpy.app.handlers, 'scene_update_pre'):
         bpy.app.handlers.scene_update_pre.remove(paint_system_object_update)
     else:

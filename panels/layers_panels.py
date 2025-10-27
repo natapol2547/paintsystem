@@ -355,7 +355,39 @@ class MAT_PT_Layers(PSContextMixin, Panel):
                 image_node_settings(box, image_node, active_channel, "bake_image", text="Baked Image", icon="TEXTURE_DATA")
                 return
 
-            # if active_layer.mask_image:
+            # Opacity and Blend Mode controls - appear ABOVE the layer list window
+            active_layer = ps_ctx.active_layer
+            if active_layer:
+                global_layer = get_global_layer(active_layer)
+                if global_layer:
+                    color_mix_node = global_layer.mix_node
+                    
+                    # Use the existing box, don't create a new one
+                    settings_col = box.column(align=True)
+                    row = settings_col.row(align=True)
+                    row.scale_y = 1.2
+                    row.scale_x = 1.2
+                    scale_content(context, row, 1.7, 1.5)
+                    clip_row = row.row(align=True)
+                    clip_row.enabled = not global_layer.lock_layer
+                    clip_row.prop(global_layer, "is_clip", text="",
+                            icon="SELECT_INTERSECT")
+                    if global_layer.type == 'IMAGE':
+                        clip_row.prop(global_layer, "lock_alpha",
+                                text="", icon='TEXTURE')
+                    lock_row = row.row(align=True)
+                    lock_row.prop(global_layer, "lock_layer",
+                            text="", icon=icon_parser('VIEW_LOCKED', 'LOCKED'))
+                    blend_type_row = row.row(align=True)
+                    blend_type_row.enabled = not global_layer.lock_layer
+                    blend_type_row.prop(color_mix_node, "blend_type", text="")
+                    row = settings_col.row(align=True)
+                    scale_content(context, row, scale_x=1.2, scale_y=1.5)
+                    row.enabled = not global_layer.lock_layer
+                    row.prop(global_layer.pre_mix_node.inputs['Opacity'], "default_value",
+                            text="Opacity", slider=True)
+
+            # Layer list window
             #     row = box.row(align=True)
             #     if not ps.preferences.use_compact_design:
             #         row.scale_x = 1.2
@@ -500,47 +532,22 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
             global_layer = get_global_layer(active_layer)
             if not active_layer:
                 return
-                # Settings
-            row = layout.row(align=True)
-            scale_content(context, row)
-            row.popover(
-                panel="MAT_PT_Actions",
-                text=f"{len(global_layer.actions)} Active Actions" if global_layer.actions else "Add Layer Actions",
-                icon="KEYTYPE_KEYFRAME_VEC"
-            )
+            
             box = layout.box()
-
-            # if ps.preferences.show_tooltips:
-            #     row.menu("MAT_MT_LayersSettingsTooltips", text='', icon='QUESTION')
-
-            # Let user set opacity and blend mode:
-            color_mix_node = global_layer.mix_node
-            col = box.column(align=True)
-            row = col.row(align=True)
-            row.scale_y = 1.2
-            row.scale_x = 1.2
-            scale_content(context, row, 1.7, 1.5)
-            clip_row = row.row(align=True)
-            clip_row.enabled = not global_layer.lock_layer
-            clip_row.prop(global_layer, "is_clip", text="",
-                    icon="SELECT_INTERSECT")
-            if global_layer.type == 'IMAGE':
-                clip_row.prop(global_layer, "lock_alpha",
-                        text="", icon='TEXTURE')
-            lock_row = row.row(align=True)
-            lock_row.prop(global_layer, "lock_layer",
-                    text="", icon=icon_parser('VIEW_LOCKED', 'LOCKED'))
-            blend_type_row = row.row(align=True)
-            blend_type_row.enabled = not global_layer.lock_layer
-            blend_type_row.prop(color_mix_node, "blend_type", text="")
-            row = col.row(align=True)
-            scale_content(context, row, scale_x=1.2, scale_y=1.5)
-            row.enabled = not global_layer.lock_layer
-            row.prop(global_layer.pre_mix_node.inputs['Opacity'], "default_value",
-                    text="Opacity", slider=True)
+            
+            # Type-specific settings
             match global_layer.type:
                 case 'IMAGE':
-                    pass
+                    col = box.column()
+                    col.enabled = not global_layer.lock_layer
+                    if global_layer.image:
+                        col.label(text="Image Tools:", icon='IMAGE_DATA')
+                        row = col.row(align=True)
+                        scale_content(context, row, 1.7, 1.5)
+                        row.operator("paint_system.resize_image", text="", icon='FULLSCREEN_ENTER')
+                        row.operator("paint_system.clear_image", text="", icon='X')
+                        row.operator("paint_system.fill_image", text="", icon='BRUSH_DATA')
+                        row.operator("image.save_as", text="", icon='FILE_TICK')
                 case 'ADJUSTMENT':
                     col = box.column()
                     col.enabled = not global_layer.lock_layer
@@ -828,7 +835,7 @@ class MAT_PT_LayerTransformSettings(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_LayerCoordinateSettings'
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_label = "Transform"
+    bl_label = "Transform / UVs"
     bl_category = 'Paint System'
     bl_parent_id = 'MAT_PT_LayerSettings'
     bl_options = {'DEFAULT_CLOSED'}
@@ -1087,19 +1094,23 @@ class PAINTSYSTEM_UL_Actions(PSContextMixin, UIList):
 
 class MAT_PT_Actions(PSContextMixin, Panel):
     bl_idname = "MAT_PT_Actions"
-    bl_label = "Actions"
+    bl_label = "Layer Actions"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    # bl_category = 'Paint System'
-    # bl_parent_id = 'MAT_PT_LayerSettings'
-    # bl_options = {'DEFAULT_CLOSED'}
-    bl_ui_units_x = 12
+    bl_category = 'Paint System'
+    bl_parent_id = 'MAT_PT_LayerSettings'
+    bl_options = {'DEFAULT_CLOSED'}
+    # bl_ui_units_x = 12
 
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
         active_layer = ps_ctx.active_layer
         return active_layer is not None
+    
+    def draw_header(self, context):
+        layout = self.layout
+        layout.label(icon='ACTION')
 
     def draw(self, context):
         ps_ctx = self.parse_context(context)
@@ -1108,7 +1119,7 @@ class MAT_PT_Actions(PSContextMixin, Panel):
         layout.use_property_split = True
         layout.alignment = 'LEFT'
         layout.use_property_decorate = False
-        layout.label(text="Layer Actions")
+        # layout.label(text="Layer Actions")
         if ps_ctx.ps_settings.show_tooltips and not global_layer.actions:
             box = layout.box()
             col = box.column(align=True)
