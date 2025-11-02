@@ -10,7 +10,10 @@ def load_icons():
     # Custom Icon
     if not hasattr(bpy.utils, 'previews'):
         return
+    # Idempotent: avoid creating multiple preview collections
     global custom_icons
+    if custom_icons is not None:
+        return
     custom_icons = bpy.utils.previews.new()
 
     folder = os.path.dirname(bpy.path.abspath(
@@ -25,8 +28,9 @@ def load_icons():
 def unload_icons():
     global custom_icons
     if hasattr(bpy.utils, 'previews'):
-        bpy.utils.previews.remove(custom_icons)
-        custom_icons = None
+        if custom_icons is not None:
+            bpy.utils.previews.remove(custom_icons)
+            custom_icons = None
 
 
 def get_icon(custom_icon_name):
