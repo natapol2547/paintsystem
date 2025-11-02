@@ -14,6 +14,7 @@
 import bpy
 from bpy.utils import register_submodule_factory
 from .custom_icons import load_icons, unload_icons
+import importlib
 
 # from .paintsystem.data import parse_context
 
@@ -34,11 +35,23 @@ bl_info_copy = bl_info.copy()
 
 print("Paint System: Registering...")
 
+# Load icons early so EnumProperty item icons in submodules can resolve during import
+load_icons()
+
 submodules = [
     "paintsystem",
     "panels",
     "operators",
 ]
+
+# Pre-import inner packages to ensure attributes exist on this module namespace.
+# This avoids attribute resolution issues when the extension is loaded under bl_ext wrappers.
+for _mod in ("paintsystem", "panels", "operators"):
+    try:
+        globals()[_mod] = importlib.import_module(f"{__name__}.{_mod}")
+    except Exception:
+        # Leave missing ones unset to avoid masking real import errors later.
+        pass
 
 _register, _unregister = register_submodule_factory(__name__, submodules)
 

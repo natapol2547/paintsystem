@@ -80,9 +80,11 @@ LAYER_TYPE_ENUM = [
 ]
 
 CHANNEL_TYPE_ENUM = [
-    ('COLOR', "Color", "Color channel", get_icon('color_socket'), 1),
-    ('VECTOR', "Vector", "Vector channel", get_icon('vector_socket'), 2),
-    ('FLOAT', "Value", "Value channel", get_icon('float_socket'), 3),
+    # Note: Numeric identifiers set to 0,1,2 to maintain compatibility with older .blend files
+    # that stored '0' for Color. This avoids RNA warnings like: value '0' matches no enum.
+    ('COLOR', "Color", "Color channel", get_icon('color_socket'), 0),
+    ('VECTOR', "Vector", "Vector channel", get_icon('vector_socket'), 1),
+    ('FLOAT', "Value", "Value channel", get_icon('float_socket'), 2),
 ]
 
 GRADIENT_TYPE_ENUM = [

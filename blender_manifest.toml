@@ -40,9 +40,12 @@ license = [
 # Optional: bundle 3rd party Python modules.
 # https://docs.blender.org/manual/en/dev/advanced/extensions/python_wheels.html
 platforms = ["windows-x64", "macos-x64"]
+# NOTE: Pillow wheel temporarily disabled on Windows to avoid locked DLL removal errors during
+# development reloads (Windows keeps _imaging.pyd loaded, preventing uninstall cleanup).
+# Re-enable the Windows wheel when Pillow is actually used at runtime, or after adopting a
+# lazy import pattern. macOS wheel remains for testing on that platform.
 wheels = [
-   "./wheels/pillow-12.0.0-cp311-cp311-macosx_11_0_arm64.whl",
-   "./wheels/pillow-12.0.0-cp311-cp311-win_amd64.whl",
+  "./wheels/pillow-12.0.0-cp311-cp311-macosx_11_0_arm64.whl",
 ]
 
 

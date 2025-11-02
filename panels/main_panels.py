@@ -161,6 +161,10 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
         ps_ctx = self.parse_context(context)
         if not ps_ctx.ps_settings.use_legacy_ui and ps_ctx.active_channel:
             toggle_paint_mode_ui(layout, context)
+            # Expose Use Baked Image only in the main panel when a baked image exists
+            if ps_ctx.ps_object.type == 'MESH' and ps_ctx.active_channel.bake_image:
+                row = layout.row(align=True)
+                row.prop(ps_ctx.active_channel, "use_bake_image", text="Use Baked Image", icon="TEXTURE_DATA")
         ob = ps_ctx.ps_object
         if ob.type != 'MESH':
             return

@@ -48,13 +48,30 @@ class MAT_PT_BrushTooltips(Panel):
         # layout.operator("paint_system.disable_tool_tips",
         #                 text="Disable Tooltips", icon='CANCEL')
 
+class MAT_PT_PaintTools(PSContextMixin, Panel):
+    bl_idname = 'MAT_PT_PaintTools'
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_label = "Paint Tools"
+    bl_category = 'Paint System'
+    bl_options = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.ps_object is not None
+
+    def draw(self, context):
+        # Container panel; actual tools are in child panels
+        pass
+
 class MAT_PT_Brush(PSContextMixin, Panel, UnifiedPaintPanel):
     bl_idname = 'MAT_PT_Brush'
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_label = "Brush"
     bl_category = 'Paint System'
-    bl_parent_id = 'MAT_PT_PaintSystemMainPanel'
+    bl_parent_id = 'MAT_PT_PaintTools'
     bl_options = {'DEFAULT_CLOSED'}
 
     @classmethod
@@ -166,7 +183,7 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
     bl_region_type = "UI"
     bl_label = "Color"
     bl_category = 'Paint System'
-    bl_parent_id = 'MAT_PT_PaintSystemMainPanel'
+    bl_parent_id = 'MAT_PT_PaintTools'
     bl_options = {'DEFAULT_CLOSED'}
 
     @classmethod
@@ -240,8 +257,13 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
                 row = col.row()
                 row.prop(ps_ctx.ps_scene_data, "hex_color", text="Hex")
             if is_newer_than(4,5):
-                from bl_ui.properties_paint_common import color_jitter_panel
-                color_jitter_panel(col, context, brush)
+                # Bforartists/Blender variants may not expose color_jitter_panel; fail gracefully
+                try:
+                    from bl_ui.properties_paint_common import color_jitter_panel
+                except Exception:
+                    color_jitter_panel = None
+                if color_jitter_panel:
+                    color_jitter_panel(col, context, brush)
             # draw_color_settings(context, col, brush)
         if ps_ctx.ps_object.type == 'GREASEPENCIL':
             row = col.row()
@@ -288,6 +310,7 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
 
 classes = (
     MAT_PT_BrushTooltips,
+    MAT_PT_PaintTools,
     MAT_PT_Brush,
     MAT_PT_BrushAdvanced,
     MAT_PT_BrushColorSettings,

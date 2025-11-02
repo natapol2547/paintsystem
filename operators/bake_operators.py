@@ -491,10 +491,16 @@ class PAINTSYSTEM_OT_MergeDown(PSContextMixin, PSUVOptionsMixin, PSImageCreateMi
     def invoke(self, context, event):
         self.get_coord_type(context)
         below_layer = self.get_below_layer(context)
-        if below_layer.use_paint_system_uv:
-            self.uv_map = DEFAULT_PS_UV_MAP_NAME
-        else:
-            self.uv_map = below_layer.uv_map_name
+        # Choose UV based on the layer below. If it uses AUTO, use the Paint System UV.
+        # If it uses a specific UV map, adopt that map. Otherwise, fall back to operator settings.
+        if below_layer:
+            if getattr(below_layer, 'coord_type', 'UV') == 'AUTO':
+                self.uv_map = DEFAULT_PS_UV_MAP_NAME
+            elif getattr(below_layer, 'coord_type', 'UV') == 'UV' and getattr(below_layer, 'uv_map_name', ''):
+                self.uv_map = below_layer.uv_map_name
+            else:
+                # Non-UV coordinate types (OBJECT/CAMERA/etc.) don't provide a UV map; use current selection
+                self.uv_map = DEFAULT_PS_UV_MAP_NAME if self.use_paint_system_uv else self.uv_map_name
         if below_layer.type == "IMAGE":
             self.image_width = below_layer.image.size[0]
             self.image_height = below_layer.image.size[1]
@@ -561,6 +567,117 @@ class PAINTSYSTEM_OT_MergeDown(PSContextMixin, PSUVOptionsMixin, PSImageCreateMi
         return {'FINISHED'}
 
 
+class PAINTSYSTEM_OT_MergeUp(PSContextMixin, PSUVOptionsMixin, PSImageCreateMixin, Operator):
+    bl_idname = "paint_system.merge_up"
+    bl_label = "Merge Up"
+    bl_description = "Merge the layer into the one above"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    uv_map: StringProperty(
+        name= "UV Map",
+        default="UVMap",
+        options={'SKIP_SAVE'},
+    )
+
+    def get_above_layer(self, context):
+        ps_ctx = self.parse_context(context)
+        active_channel = ps_ctx.active_channel
+        active_layer = ps_ctx.active_layer
+        flattened_layers = active_channel.flattened_layers
+        if active_layer and flattened_layers.index(active_layer) > 0:
+            return flattened_layers[flattened_layers.index(active_layer) - 1]
+        return None
+
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        active_layer = ps_ctx.active_layer
+        above_layer = cls.get_above_layer(cls, context)
+        if not above_layer:
+            return False
+        return (
+            active_layer
+            and above_layer
+            and active_layer.type != "FOLDER"
+            and above_layer.type != "FOLDER"
+        )
+
+    def invoke(self, context, event):
+        self.get_coord_type(context)
+        above_layer = self.get_above_layer(context)
+        # Choose UV based on the layer above
+        if above_layer:
+            if getattr(above_layer, 'coord_type', 'UV') == 'AUTO':
+                self.uv_map = DEFAULT_PS_UV_MAP_NAME
+            elif getattr(above_layer, 'coord_type', 'UV') == 'UV' and getattr(above_layer, 'uv_map_name', ''):
+                self.uv_map = above_layer.uv_map_name
+            else:
+                self.uv_map = DEFAULT_PS_UV_MAP_NAME if self.use_paint_system_uv else self.uv_map_name
+        if above_layer.type == "IMAGE":
+            self.image_width = above_layer.image.size[0]
+            self.image_height = above_layer.image.size[1]
+            return self.execute(context)
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        layout = self.layout
+        self.image_create_ui(layout, context, show_name=False)
+        box = layout.box()
+        box.label(text="UV Map", icon='UV')
+        box.prop_search(self, "uv_map", context.object.data, "uv_layers", text="")
+
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        active_channel = ps_ctx.active_channel
+        active_layer = ps_ctx.active_layer
+        above_layer = self.get_above_layer(context)
+
+        if not active_channel:
+            return {'CANCELLED'}
+
+        image = self.create_image()
+
+        to_be_enabled_layers = []
+        # Enable both active layer and above layer, disable all others
+        for layer in active_channel.layers:
+            if layer.type != "FOLDER" and layer.enabled and layer != active_layer and layer != above_layer:
+                to_be_enabled_layers.append(layer)
+                layer.enabled = False
+
+        # Ensure the above layer is enabled
+        if not above_layer.enabled:
+            above_layer.enabled = True
+
+        # Store original blend modes
+        original_active_blend_mode = get_layer_blend_type(active_layer)
+        original_above_blend_mode = get_layer_blend_type(above_layer)
+
+        # Set both layers to MIX for proper blending
+        set_layer_blend_type(active_layer, 'MIX')
+        set_layer_blend_type(above_layer, 'MIX')
+
+        # Bake both layers into the new image
+        active_channel.bake(context, ps_ctx.active_material, image, self.uv_map, use_group_tree=False)
+
+        # Restore original blend modes
+        set_layer_blend_type(active_layer, original_active_blend_mode)
+        set_layer_blend_type(above_layer, original_above_blend_mode)
+
+        # Replace the above layer with the merged result
+        above_layer.type = 'IMAGE'
+        above_layer.coord_type = 'UV'
+        above_layer.uv_map_name = self.uv_map
+        above_layer.image = image
+
+        # Restore other layers
+        for layer in to_be_enabled_layers:
+            layer.enabled = True
+
+        # Remove the current layer since it's been merged into the layer above
+        bpy.ops.paint_system.delete_item('EXEC_DEFAULT')
+
+        return {'FINISHED'}
+
 
 
 classes = (
@@ -572,6 +689,7 @@ classes = (
     PAINTSYSTEM_OT_DeleteBakedImage,
     PAINTSYSTEM_OT_ConvertToImageLayer,
     PAINTSYSTEM_OT_MergeDown,
+    PAINTSYSTEM_OT_MergeUp,
 )
 
 register, unregister = register_classes_factory(classes)

@@ -220,10 +220,6 @@ class MAT_PT_Layers(PSContextMixin, Panel):
                 text=ps_ctx.active_channel.name if ps_ctx.active_channel else "No Channel",
                 icon_value=get_icon_from_channel(ps_ctx.active_channel)
             )
-        else:
-            if ps_ctx.ps_object.type == 'MESH' and ps_ctx.active_channel.bake_image:
-                layout.prop(ps_ctx.active_channel, "use_bake_image",
-                        text="Use Baked", icon="TEXTURE_DATA")
 
     def draw(self, context):
         ps_ctx = self.parse_context(context)
@@ -752,20 +748,54 @@ class MAT_MT_LayerMenu(PSContextMixin, Menu):
     def draw(self, context):
         ps_ctx = self.parse_context(context)
         layout = self.layout
+
         if ps_ctx.active_layer and ps_ctx.active_layer.type != 'IMAGE':
-            layout.operator("paint_system.convert_to_image_layer", text="Convert to Image Layer", icon_value=get_icon('image'))
+            layout.operator(
+                "paint_system.convert_to_image_layer",
+                text="Convert to Image Layer",
+                icon_value=get_icon('image')
+            )
             layout.separator()
-        layout.operator("paint_system.copy_layer",
-                        text="Copy Layer", icon="COPYDOWN")
-        layout.operator("paint_system.copy_all_layers",
-                        text="Copy All Layers", icon="COPYDOWN")
-        layout.operator("paint_system.paste_layer",
-                        text="Paste Layer(s)", icon="PASTEDOWN").linked = False
-        layout.operator("paint_system.paste_layer",
-                        text="Paste Linked Layer(s)", icon="LINKED").linked = True
-        # layout.operator("paint_system.merge_layer", text="Merge Up", icon="TRIA_UP_BAR").merge_direction = 'UP'
+
+        layout.operator(
+            "paint_system.copy_layer",
+            text="Copy Layer",
+            icon="COPYDOWN"
+        )
+        layout.operator(
+            "paint_system.copy_all_layers",
+            text="Copy All Layers",
+            icon="COPYDOWN"
+        )
+        layout.operator(
+            "paint_system.paste_layer",
+            text="Paste Layer(s)",
+            icon="PASTEDOWN"
+        ).linked = False
+        layout.operator(
+            "paint_system.paste_layer",
+            text="Paste Linked Layer(s)",
+            icon="LINKED"
+        ).linked = True
+        layout.operator(
+            "paint_system.duplicate_as_linked",
+            text="Duplicate as Linked",
+            icon="LINKED"
+        )
+
+        # Divider before merge actions
         layout.separator()
-        layout.operator("paint_system.merge_down", text="Merge Down", icon="TRIA_DOWN_BAR")
+        # Merge actions: Up above Down, both below the divider
+        layout.operator(
+            "paint_system.merge_up",
+            text="Merge Up",
+            icon="TRIA_UP_BAR"
+        )
+        layout.operator(
+            "paint_system.merge_down",
+            text="Merge Down",
+            icon="TRIA_DOWN_BAR"
+        )
 
 
 class MAT_MT_AddImageLayerMenu(Menu):
