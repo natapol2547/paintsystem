@@ -3,6 +3,7 @@
 import bpy
 
 addon_keymaps = []
+disabled_builtin_kmis = []  # Track disabled built-in keymap items so we can restore them
 
 # Toggleable shortcuts
 # 1) Optional Shift+RMB fallback (off by default to avoid duplicates)
@@ -37,6 +38,48 @@ def _has_builtin_texpaint_rmb() -> bool:
     return False
 
 
+def _disable_builtin_texture_paint_rmb_menus() -> None:
+    """Disable built-in RMB context menu keymaps in texture paint modes to prevent conflicts."""
+    try:
+        wm = bpy.context.window_manager
+        if not wm:
+            return
+        
+        print("Paint System: Disabling built-in RMB menus...")
+        
+        # Check all keyconfig sources (user, addon, default)
+        for kc_name in ('default', 'addon', 'user'):
+            kc = getattr(wm.keyconfigs, kc_name, None)
+            if not kc:
+                continue
+            
+            # Look for texture paint related keymaps
+            for km_name in (
+                '3D View Tool: Paint Draw',
+                'Image Paint',
+                'Paint',
+                '3D View',
+            ):
+                km = kc.keymaps.get(km_name)
+                if not km:
+                    continue
+                
+                # Find and disable ANY RMB menu/panel triggers
+                for kmi in km.keymap_items:
+                    if (kmi.type == 'RIGHTMOUSE' and kmi.active):
+                        if kmi.idname in ('wm.call_menu', 'wm.call_panel', 'wm.call_menu_pie'):
+                            menu_name = getattr(kmi.properties, 'name', '')
+                            print(f"  Disabling RMB {kmi.idname}: '{menu_name}' in '{km_name}' ({kc_name})")
+                            kmi.active = False
+                            disabled_builtin_kmis.append((km, kmi))
+                        
+        print(f"Paint System: Disabled {len(disabled_builtin_kmis)} built-in RMB menu items")
+    except Exception as e:
+        print(f"Paint System: Error disabling built-in menus: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def register() -> None:
     try:
         kc = getattr(getattr(bpy.context, 'window_manager', None), 'keyconfigs', None)
@@ -49,6 +92,10 @@ def register() -> None:
 
         # Plain RMB override in Texture Paint tool context (preferred on Bforartists)
         if do_override:
+            # First, disable any built-in RMB context menu keymaps in texture paint modes
+            # to prevent them from appearing alongside our popover
+            _disable_builtin_texture_paint_rmb_menus()
+            
             # Tool-specific keymap names vary slightly across versions; add to a couple of common ones
             for km_name, space in (
                 ('3D View Tool: Paint Draw', 'VIEW_3D'),
@@ -80,6 +127,15 @@ def register() -> None:
 
 
 def unregister() -> None:
+    # Restore any disabled built-in keymap items
+    for km, kmi in disabled_builtin_kmis:
+        try:
+            kmi.active = True
+        except Exception:
+            pass
+    disabled_builtin_kmis.clear()
+    
+    # Remove our addon keymaps
     for km, kmi in addon_keymaps:
         try:
             km.keymap_items.remove(kmi)
