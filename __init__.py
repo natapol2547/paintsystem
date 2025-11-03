@@ -42,6 +42,7 @@ submodules = [
     "paintsystem",
     "panels",
     "operators",
+    "keymaps",
 ]
 
 # Pre-import inner packages to ensure attributes exist on this module namespace.
