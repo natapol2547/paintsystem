@@ -5,6 +5,7 @@ from ..paintsystem.data import parse_context
 
 
 _APPENDED_MENUS = []
+_RMB_FROM_OPERATOR = False  # internal flag to suppress extra popovers when helper operator is used
 
 # Disable RMB override - we'll use menu appending instead
 # This ensures users get native brush controls + our Paint System menu
@@ -64,55 +65,47 @@ class VIEW3D_PT_paintsystem_brush_color(Panel):
             settings_col.prop(brush, 'use_alpha', text='Use Alpha')
 
 
+class VIEW3D_PT_paintsystem_color_settings(Panel):
+    """Extra brush/color options shown as a separate popover"""
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'WINDOW'
+    bl_label = "Color Picker Settings"
+    bl_ui_units_x = 12
+
+    def draw(self, context):
+        layout = self.layout
+
+        tool_settings = context.tool_settings
+        image_paint = getattr(tool_settings, 'image_paint', None)
+        brush = getattr(image_paint, 'brush', None) if image_paint else None
+        ups = getattr(tool_settings, 'unified_paint_settings', None)
+
+        if not brush:
+            layout.label(text="No brush active", icon='INFO')
+            return
+
+        col = layout.column(align=True)
+        if ups:
+            col.prop(ups, 'use_unified_color', text='Unified Color')
+            col.prop(ups, 'use_unified_size', text='Unified Size')
+            col.prop(ups, 'use_unified_strength', text='Unified Strength')
+
+        # A few extra brush controls when available
+        if hasattr(brush, 'spacing'):
+            col.prop(brush, 'spacing', text='Spacing')
+        if hasattr(brush, 'falloff_curve'):  # show a button to edit curve if present
+            col.prop(brush, 'curve_preset', text='Falloff')
+
+
 class VIEW3D_MT_paintsystem_texture_paint_context(Menu):
     bl_label = "Paint System"
     bl_idname = "VIEW3D_MT_paintsystem_texture_paint_context"
 
     def draw(self, context):
         layout = self.layout
-        ps_ctx = parse_context(context)
-
-        if not ps_ctx or not ps_ctx.active_channel:
-            layout.label(text="No Paint System channel", icon='INFO')
-            return
-
-        # Brush color popover (like native menu)
-        try:
-            tool_settings = context.tool_settings
-            image_paint = getattr(tool_settings, 'image_paint', None)
-            brush = getattr(image_paint, 'brush', None) if image_paint else None
-            
-            if tool_settings and brush:
-                # Use popover for color picker - this is stable and works in menus
-                layout.popover(
-                    panel="VIEW3D_PT_paintsystem_brush_color",
-                    text="Brush Color",
-                    icon='BRUSH_DATA'
-                )
-                layout.separator()
-        except Exception:
-            pass
-
-        # Common quick actions that make sense while texture painting
-        col = layout.column(align=True)
-        col.operator("paint_system.duplicate_as_linked", text="Duplicate as Linked", icon='DUPLICATE')
-
-        # Merge operators (only useful when a sibling exists)
-        row = layout.row(align=True)
-        row.operator("paint_system.merge_up", text="Merge Up", icon='TRIA_UP')
-        row.operator("paint_system.merge_down", text="Merge Down", icon='TRIA_DOWN')
-
-        layout.separator()
-        add_col = layout.column(align=True)
-        add_col.operator("paint_system.new_image_layer", text="New Image Layer", icon='IMAGE_DATA')
-        add_col.operator("paint_system.new_folder_layer", text="New Folder", icon='FILE_FOLDER')
-        
-        # Quick access to the existing Layer actions menu
-        layout.menu("MAT_MT_LayerMenu", text="Layer Actions", icon='COLLAPSEMENU')
-        
-        # Quick access to full Layers UI as a popover (panel content in a floating UI)
-        layout.separator()
-        layout.popover(panel="MAT_PT_Layers", text="Open Layers Panel", icon='RENDERLAYERS')
+        # Only show the color wheel (brush color popover) and Layers popover
+        layout.popover(panel="VIEW3D_PT_paintsystem_brush_color", text="Color Wheel")
+        layout.popover(panel="MAT_PT_Layers", text="Layers")
 
 
 class PAINTSYSTEM_OT_open_texpaint_menu(Operator):
@@ -126,6 +119,12 @@ class PAINTSYSTEM_OT_open_texpaint_menu(Operator):
     bl_label = "Open Paint System Menu"
     bl_options = {"INTERNAL"}
 
+    def invoke(self, context, event):
+        # Record mouse position so we can place popups relative to it
+        self._mouse_x = getattr(event, 'mouse_x', None)
+        self._mouse_y = getattr(event, 'mouse_y', None)
+        return self.execute(context)
+
     def execute(self, context):
         # Only act in texture paint-like contexts; otherwise do nothing
         is_texpaint = False
@@ -137,13 +136,7 @@ class PAINTSYSTEM_OT_open_texpaint_menu(Operator):
             is_texpaint = False
 
         if is_texpaint:
-            # Best-effort: show brush color panel as a popup near the cursor
-            try:
-                bpy.ops.wm.call_panel(name="VIEW3D_PT_paintsystem_brush_color")
-            except Exception:
-                pass
-
-            # Then open our Paint System context menu
+            # Then open our Paint System context menu at the current cursor
             try:
                 bpy.ops.wm.call_menu(name=VIEW3D_MT_paintsystem_texture_paint_context.bl_idname)
                 return {'FINISHED'}
@@ -248,6 +241,9 @@ def _append_to_texture_paint_context_menu():
                 # Some variants may drop "context" but still be RMB paint menus
                 "view3d" in name_l and ("paint_texture" in name_l or "texture_paint" in name_l)
             ):
+                # Avoid appending to our own submenu to prevent recursion/duplicates
+                if cls is VIEW3D_MT_paintsystem_texture_paint_context:
+                    continue
                 found_menus.append(attr_name)
                 if cls not in _APPENDED_MENUS:
                     try:
@@ -290,34 +286,20 @@ def draw_entry(self, context):
 
     if is_texpaint:
         layout.separator()
-        # Expose Brush Color picker directly at top level as a popover
-        try:
-            layout.popover(panel="VIEW3D_PT_paintsystem_brush_color", text="Brush Color", icon='BRUSH_DATA')
-        except Exception:
-            pass
 
-        # Add Layers panel popover directly to RMB menu
-        try:
-            from ..paintsystem.data import parse_context
-            ps_ctx = parse_context(context)
-            if ps_ctx and ps_ctx.active_channel:
-                layout.popover(panel="MAT_PT_Layers", text="Paint System Layers", icon='RENDERLAYERS')
-        except Exception:
-            pass
-        
         # Also add the full submenu for additional options
         layout.menu(
             VIEW3D_MT_paintsystem_texture_paint_context.bl_idname,
-            text="Paint System Actions",
+            text="Paint System",
             icon='BRUSH_DATA'
         )
 
 
 def register():
     bpy.utils.register_class(VIEW3D_PT_paintsystem_brush_color)
+    bpy.utils.register_class(VIEW3D_PT_paintsystem_color_settings)
     bpy.utils.register_class(VIEW3D_MT_paintsystem_texture_paint_context)
     bpy.utils.register_class(PAINTSYSTEM_OT_open_texpaint_menu)
-    
     # Always append to built-in menus - this gives users native brush controls
     # plus our Paint System menu in the same RMB menu
     _append_to_texture_paint_context_menu()
@@ -337,6 +319,8 @@ def unregister():
     try:
         bpy.utils.unregister_class(PAINTSYSTEM_OT_open_texpaint_menu)
         bpy.utils.unregister_class(VIEW3D_MT_paintsystem_texture_paint_context)
+        bpy.utils.unregister_class(VIEW3D_PT_paintsystem_color_settings)
         bpy.utils.unregister_class(VIEW3D_PT_paintsystem_brush_color)
     except Exception:
         pass
+

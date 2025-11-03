@@ -2213,7 +2213,20 @@ _register, _unregister = register_classes_factory(classes)
 
 def register():
     """Register the Paint System data module."""
-    _register()
+    # Try to unregister first in case of hot reload
+    try:
+        _unregister()
+    except Exception:
+        pass
+    
+    # Now register classes
+    try:
+        _register()
+    except ValueError as e:
+        # Skip if already registered (hot reload scenario)
+        if "already registered" not in str(e):
+            raise
+    
     bpy.types.Scene.ps_scene_data = PointerProperty(
         type=PaintSystemGlobalData,
         name="Paint System Data",
@@ -2228,7 +2241,19 @@ def register():
     
 def unregister():
     """Unregister the Paint System data module."""
-    del bpy.types.Material.paint_system
-    del bpy.types.Material.ps_mat_data
-    del bpy.types.Scene.ps_scene_data
-    _unregister()
+    try:
+        del bpy.types.Material.paint_system
+    except AttributeError:
+        pass
+    try:
+        del bpy.types.Material.ps_mat_data
+    except AttributeError:
+        pass
+    try:
+        del bpy.types.Scene.ps_scene_data
+    except AttributeError:
+        pass
+    try:
+        _unregister()
+    except Exception:
+        pass
