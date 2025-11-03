@@ -28,6 +28,11 @@ from ..paintsystem.data import (
     sort_actions
 )
 
+# Helper: detect when the Layers popover is requested to show only the layer UI
+def _is_layers_popover_only(context) -> bool:
+    wm = getattr(context, 'window_manager', None)
+    return bool(getattr(wm, 'ps_layers_popover_only', False))
+
 if is_newer_than(4,3):
     from bl_ui.properties_data_grease_pencil import (
         GreasePencil_LayerMaskPanel,
@@ -202,6 +207,7 @@ class MAT_PT_Layers(PSContextMixin, Panel):
 
     @classmethod
     def poll(cls, context):
+        # Always allow base Layers panel; child panels may be hidden separately
         ps_ctx = cls.parse_context(context)
         if ps_ctx.active_group and check_group_multiuser(ps_ctx.active_group.node_tree):
             return False
@@ -225,6 +231,8 @@ class MAT_PT_Layers(PSContextMixin, Panel):
         ps_ctx = self.parse_context(context)
 
         layout = self.layout
+        wm = getattr(context, 'window_manager', None)
+        show_layers_only = bool(getattr(wm, 'ps_layers_popover_only', False))
         if ps_ctx.ps_settings.use_legacy_ui:
             box = layout.box()
             toggle_paint_mode_ui(box, context)
@@ -278,9 +286,11 @@ class MAT_PT_Layers(PSContextMixin, Panel):
                 #             text="", icon="TRASH")
                 main_row = layout.row()
                 box = main_row.box()
-                if ps_ctx.active_layer and ps_ctx.active_layer.node_tree:
-                    settings_box = box.box()
-                    layer_settings_ui(settings_box, context)
+                # When opened as a popover via RMB, suppress the inline Layer Settings block
+                if not show_layers_only:
+                    if ps_ctx.active_layer and ps_ctx.active_layer.node_tree:
+                        settings_box = box.box()
+                        layer_settings_ui(settings_box, context)
             else:
                 box = layout.box()
         
@@ -386,6 +396,9 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
 
     @classmethod
     def poll(cls, context):
+        # Hide this panel when showing Layers popover-only mode
+        if _is_layers_popover_only(context):
+            return False
         ps_ctx = cls.parse_context(context)
         if ps_ctx.ps_object.type == 'MESH':
             if ps_ctx.active_channel.use_bake_image:
@@ -589,6 +602,8 @@ class MAT_PT_GreasePencilMaskSettings(PSContextMixin, Panel):
     
     @classmethod
     def poll(cls, context):
+        if _is_layers_popover_only(context):
+            return False
         ps_ctx = cls.parse_context(context)
         return ps_ctx.ps_object.type == 'GREASEPENCIL' and is_newer_than(4,3)
 
@@ -611,6 +626,8 @@ class MAT_PT_GreasePencilOnionSkinningSettings(PSContextMixin, Panel):
     
     @classmethod
     def poll(cls, context):
+        if _is_layers_popover_only(context):
+            return False
         ps_ctx = cls.parse_context(context)
         return ps_ctx.ps_object.type == 'GREASEPENCIL' and is_newer_than(4,3)
     
@@ -638,6 +655,8 @@ class MAT_PT_LayerTransformSettings(PSContextMixin, Panel):
 
     @classmethod
     def poll(cls, context):
+        if _is_layers_popover_only(context):
+            return False
         ps_ctx = cls.parse_context(context)
         active_layer = ps_ctx.active_layer
         if ps_ctx.ps_object.type != 'MESH' or active_layer.type not in ('IMAGE', 'TEXTURE'):
@@ -707,6 +726,8 @@ class MAT_PT_ImageLayerSettings(PSContextMixin, Panel):
 
     @classmethod
     def poll(cls, context):
+        if _is_layers_popover_only(context):
+            return False
         ps_ctx = cls.parse_context(context)
         active_layer = ps_ctx.active_layer
         if ps_ctx.ps_object.type != 'MESH' or ps_ctx.active_channel.use_bake_image:
@@ -928,6 +949,8 @@ class MAT_PT_Actions(PSContextMixin, Panel):
 
     @classmethod
     def poll(cls, context):
+        if _is_layers_popover_only(context):
+            return False
         ps_ctx = cls.parse_context(context)
         active_layer = ps_ctx.active_layer
         return active_layer is not None
