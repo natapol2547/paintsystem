@@ -35,7 +35,7 @@ def unload_icons():
 
 def get_icon(custom_icon_name):
     if custom_icons is None:
-        return 0  # Return 0 instead of None when icons not loaded
+        return None
     if custom_icon_name not in custom_icons:
-        return 0  # Return 0 instead of None for missing icons
+        return None
     return custom_icons[custom_icon_name].icon_id

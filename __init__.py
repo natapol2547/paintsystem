@@ -35,7 +35,7 @@ bl_info_copy = bl_info.copy()
 
 print("Paint System: Registering...")
 
-# Load icons BEFORE importing submodules so EnumProperty definitions can use get_icon()
+# Load icons early so EnumProperty item icons in submodules can resolve during import
 load_icons()
 
 submodules = [
@@ -47,7 +47,7 @@ submodules = [
 
 # Pre-import inner packages to ensure attributes exist on this module namespace.
 # This avoids attribute resolution issues when the extension is loaded under bl_ext wrappers.
-for _mod in ("paintsystem", "panels", "operators", "keymaps"):
+for _mod in ("paintsystem", "panels", "operators"):
     try:
         globals()[_mod] = importlib.import_module(f"{__name__}.{_mod}")
     except Exception:
@@ -57,12 +57,10 @@ for _mod in ("paintsystem", "panels", "operators", "keymaps"):
 _register, _unregister = register_submodule_factory(__name__, submodules)
 
 def register():
-    """Register Paint System add-on."""
-    # Icons already loaded at module import time
+    load_icons()
     _register()
     
 def unregister():
-    """Unregister Paint System add-on."""
     _unregister()
     unload_icons()
     print("Paint System: Unregistered", __package__)
