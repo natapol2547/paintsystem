@@ -944,6 +944,44 @@ class PAINTSYSTEM_OT_PasteLayer(PSContextMixin, Operator):
         return {'FINISHED'}
 
 
+class PAINTSYSTEM_OT_DuplicateAsLinked(PSContextMixin, Operator):
+    """Duplicate the active layer as a local linked layer (same material)"""
+    bl_idname = "paint_system.duplicate_as_linked"
+    bl_label = "Duplicate as Linked"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_channel is not None and ps_ctx.active_layer is not None
+
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        active_channel = ps_ctx.active_channel
+
+        # Access the actual selected layer entry (not dereferenced)
+        try:
+            selected_stub = active_channel.layers[active_channel.active_index]
+        except Exception:
+            return {'CANCELLED'}
+
+        # Resolve the source layer data
+        source_layer = selected_stub.get_layer_data()
+        if not source_layer:
+            self.report({'ERROR'}, "Unable to resolve source layer for linking")
+            return {'CANCELLED'}
+
+        # Create a new blank layer and set link to the source
+        new_layer = active_channel.create_layer(f"{source_layer.layer_name} (linked)", "BLANK", update_active_index=True, handle_folder=False)
+        new_layer.linked_layer_uid = source_layer.uid
+        new_layer.linked_material = ps_ctx.active_material
+
+        # Ensure graph updates
+        active_channel.update_node_tree(context)
+        redraw_panel(context)
+        return {'FINISHED'}
+
+
 class PAINTSYSTEM_OT_AddAction(PSContextMixin, Operator):
     """Add an action to the active layer"""
     bl_idname = "paint_system.add_action"
@@ -1051,6 +1089,7 @@ classes = (
     PAINTSYSTEM_OT_CopyLayer,
     PAINTSYSTEM_OT_CopyAllLayers,
     PAINTSYSTEM_OT_PasteLayer,
+    PAINTSYSTEM_OT_DuplicateAsLinked,
     PAINTSYSTEM_OT_AddAction,
     PAINTSYSTEM_OT_DeleteAction,
 )

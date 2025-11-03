@@ -1,9 +1,17 @@
 import bpy
 import numpy as np
-from PIL import Image, ImageFilter
+try:
+    from PIL import Image, ImageFilter
+    _PIL_AVAILABLE = True
+except Exception:
+    Image = None
+    ImageFilter = None
+    _PIL_AVAILABLE = False
 from .common import blender_image_to_numpy, numpy_to_blender_image, numpy_to_pil, pil_to_numpy
 
 def gaussian_blur(numpy_array, gaussian_sigma):
+    if not _PIL_AVAILABLE:
+        raise RuntimeError("Pillow (PIL) is not installed. Gaussian Blur requires Pillow.")
     img_pil = numpy_to_pil(numpy_array)
     radius = int(gaussian_sigma * 2)
     blurred_pil = img_pil.filter(ImageFilter.GaussianBlur(radius=radius))
@@ -12,6 +20,8 @@ def gaussian_blur(numpy_array, gaussian_sigma):
 
 
 def sharpen_image(numpy_array, sharpen_amount):
+    if not _PIL_AVAILABLE:
+        raise RuntimeError("Pillow (PIL) is not installed. Sharpen requires Pillow.")
     img_uint8 = (np.clip(numpy_array, 0, 1) * 255).astype(np.uint8)
     img_pil = Image.fromarray(img_uint8, mode='RGBA')
     sharpened_pil = img_pil.filter(ImageFilter.UnsharpMask(amount=sharpen_amount, radius=1, threshold=0))
@@ -20,6 +30,8 @@ def sharpen_image(numpy_array, sharpen_amount):
 
 
 def smooth_image(numpy_array, smooth_amount):
+    if not _PIL_AVAILABLE:
+        raise RuntimeError("Pillow (PIL) is not installed. Smooth requires Pillow.")
     img_pil = numpy_to_pil(numpy_array)
     smoothed_pil = img_pil.filter(ImageFilter.SMOOTH)
     img_smoothed = pil_to_numpy(smoothed_pil)

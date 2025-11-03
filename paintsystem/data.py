@@ -80,9 +80,11 @@ LAYER_TYPE_ENUM = [
 ]
 
 CHANNEL_TYPE_ENUM = [
-    ('COLOR', "Color", "Color channel", get_icon('color_socket'), 1),
-    ('VECTOR', "Vector", "Vector channel", get_icon('vector_socket'), 2),
-    ('FLOAT', "Value", "Value channel", get_icon('float_socket'), 3),
+    # Note: Numeric identifiers set to 0,1,2 to maintain compatibility with older .blend files
+    # that stored '0' for Color. This avoids RNA warnings like: value '0' matches no enum.
+    ('COLOR', "Color", "Color channel", get_icon('color_socket'), 0),
+    ('VECTOR', "Vector", "Vector channel", get_icon('vector_socket'), 1),
+    ('FLOAT', "Value", "Value channel", get_icon('float_socket'), 2),
 ]
 
 GRADIENT_TYPE_ENUM = [
@@ -2211,7 +2213,20 @@ _register, _unregister = register_classes_factory(classes)
 
 def register():
     """Register the Paint System data module."""
-    _register()
+    # Try to unregister first in case of hot reload
+    try:
+        _unregister()
+    except Exception:
+        pass
+    
+    # Now register classes
+    try:
+        _register()
+    except ValueError as e:
+        # Skip if already registered (hot reload scenario)
+        if "already registered" not in str(e):
+            raise
+    
     bpy.types.Scene.ps_scene_data = PointerProperty(
         type=PaintSystemGlobalData,
         name="Paint System Data",
@@ -2226,7 +2241,19 @@ def register():
     
 def unregister():
     """Unregister the Paint System data module."""
-    del bpy.types.Material.paint_system
-    del bpy.types.Material.ps_mat_data
-    del bpy.types.Scene.ps_scene_data
-    _unregister()
+    try:
+        del bpy.types.Material.paint_system
+    except AttributeError:
+        pass
+    try:
+        del bpy.types.Material.ps_mat_data
+    except AttributeError:
+        pass
+    try:
+        del bpy.types.Scene.ps_scene_data
+    except AttributeError:
+        pass
+    try:
+        _unregister()
+    except Exception:
+        pass

@@ -57,6 +57,8 @@ class PaintSystemPreferences(AddonPreferences):
         default=False
     )
 
+    # Pie menu and auto-open settings removed to prevent overlaps and simplify UX
+
     def draw_shortcut(self, layout, kmi, text):
         row = layout.row(align=True)
         row.prop(kmi, "active", text="", emboss=False)
@@ -87,6 +89,7 @@ class PaintSystemPreferences(AddonPreferences):
         layout.prop(self, "show_tooltips", text="Show Tooltips")
         layout.prop(self, "use_compact_design", text="Use Compact Design")
         layout.prop(self, "use_legacy_ui", text="Use Legacy UI")
+    # Pie menu and auto-open settings intentionally removed
         # layout.prop(self, "name_layers_group",
         #             text="Name Layers According to Group Name")
 
