@@ -87,20 +87,12 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, Panel):
         layout = self.layout
         ps_ctx = self.parse_context(context)
         
-        if not ps_ctx.active_material:
-            layout.label(text="No Paint System Material", icon='INFO')
-            return
-        
-        if not ps_ctx.active_channel:
-            layout.label(text="No Active Channel", icon='INFO')
-            return
-        
         # Import needed functions
         from .common import scale_content, get_icon
         from .layers_panels import layer_settings_ui
         from ..utils.nodes import find_node
         
-        # Add color picker at the very top
+        # Add color picker at the very top (before material/channel checks)
         tool_settings = context.tool_settings
         image_paint = getattr(tool_settings, 'image_paint', None)
         brush = getattr(image_paint, 'brush', None) if image_paint else None
@@ -114,9 +106,29 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, Panel):
             use_unified = ups.use_unified_color if ups else False
             prop_owner = ups if use_unified else brush
             
+            # Color palette above color wheel
+            if image_paint:
+                palette = getattr(image_paint, 'palette', None)
+                
+                    # Palette selector row with custom controls only (no picker buttons)
+                    row = color_col.row(align=True)
+                    if image_paint.palette:
+                        row.label(text=image_paint.palette.name, icon='COLOR')
+                        row.operator("paint.palette_color_add", text="+", icon="ADD")
+                        row.operator("paint.palette_color_delete", text="-", icon="REMOVE")
+                        row.operator("paint.palette_color_sort", text="", icon="SORTALPHA")
+                    else:
+                        row.label(text="No Palette", icon='COLOR')
+                    # Palette swatches only (no built-in controls)
+                    if image_paint.palette:
+                        color_col.template_palette(image_paint, "palette", color=False)
+            
+            # Add a small separator between palette and color wheel
+            color_col.separator(factor=0.3)
+            
             # Color picker with value slider and size control
             picker_row = color_col.row()
-            picker_row.scale_y = 0.9  # Slightly reduce color wheel size
+            picker_row.scale_y = 1.5  # Make color wheel bigger
             picker_row.template_color_picker(prop_owner, "color", value_slider=True)
             
             # RGB color input with secondary color and swap (no separator above)
@@ -126,15 +138,17 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, Panel):
             split = row.split(factor=0.5, align=True)
             split.prop(prop_owner, "color", text="")
             
-            # Secondary color (use brush.secondary_color if available)
-            if hasattr(brush, 'secondary_color'):
+            # Secondary color - use unified settings for texture paint
+            if ups and hasattr(ups, 'secondary_color'):
+                split.prop(ups, 'secondary_color', text="")
+            elif hasattr(brush, 'secondary_color'):
                 split.prop(brush, 'secondary_color', text="")
             else:
-                # Fallback to showing primary again if no secondary
+                # Fallback: show primary again
                 split.prop(prop_owner, "color", text="")
             
             # Swap colors button
-            if hasattr(brush, 'secondary_color'):
+            if (ups and hasattr(ups, 'secondary_color')) or hasattr(brush, 'secondary_color'):
                 row.operator("paint.brush_colors_flip", text="", icon='FILE_REFRESH')
             
             # HSV sliders (no separator above)
@@ -163,6 +177,15 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, Panel):
                 row.prop(strength_owner, 'strength', text='Strength', slider=True)
                 if hasattr(brush, 'use_pressure_strength'):
                     row.prop(brush, 'use_pressure_strength', text="", icon='STYLUS_PRESSURE')
+        
+        # Now check for Paint System material/channel after color picker is drawn
+        if not ps_ctx.active_material:
+            layout.label(text="No Paint System Material", icon='INFO')
+            return
+        
+        if not ps_ctx.active_channel:
+            layout.label(text="No Active Channel", icon='INFO')
+            return
         
         # Reduced separator between brush and layer settings
         layout.separator(factor=0.5)
