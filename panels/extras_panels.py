@@ -480,6 +480,33 @@ class MAT_PT_BrushColor2(PSContextMixin, Panel, UnifiedPaintPanel):
         settings = self.paint_settings(context)
         brush = settings.brush
         if ps_ctx.ps_object.type == 'MESH':
+            # Add palette section at the top for Paint Tools 2
+            tool_settings = context.tool_settings
+            image_paint = getattr(tool_settings, 'image_paint', None)
+            if image_paint:
+                palette = getattr(image_paint, 'palette', None)
+                
+                # Palette selector row with editing controls instead of default buttons
+                palette_row = col.row(align=True)
+                
+                # Palette dropdown (without new/unlink buttons)
+                palette_row.template_ID(image_paint, "palette", new="", unlink="")
+                
+                # Add palette editing controls to the right of dropdown
+                if palette:
+                    palette_row.operator("palette.color_add", icon='ADD', text="")
+                    palette_row.operator("palette.color_delete", icon='REMOVE', text="")
+                    palette_row.operator("palette.sort", icon='SORTALPHA', text="").type = 'HSV'
+                else:
+                    # Show new palette button if no palette exists
+                    palette_row.operator("palette.new", icon='ADD', text="")
+                
+                # Show palette color swatches if palette exists (without controls)
+                if palette:
+                    col.template_palette(image_paint, "palette", color=False)
+                
+                col.separator()
+            
             row = col.row(align=True)
             row.scale_y = 1.2
             row.popover(
