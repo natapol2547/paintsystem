@@ -175,27 +175,33 @@ def paint_system_object_update(scene: bpy.types.Scene, depsgraph: bpy.types.Deps
     
     ps_scene_data = scene.ps_scene_data
     
-    if not hasattr(ps_scene_data, 'last_selected_object'):
-        ps_scene_data.last_selected_object = None
-    if not hasattr(ps_scene_data, 'last_selected_material'):
-        ps_scene_data.last_selected_material = None
-        
+    # Read-only comparison - don't write in depsgraph_update_post
     current_obj = obj
     current_mat = mat
     
-    if (ps_scene_data.last_selected_object != current_obj or 
-        ps_scene_data.last_selected_material != current_mat):
-        
-        # Update tracking variables
-        ps_scene_data.last_selected_object = current_obj
-        ps_scene_data.last_selected_material = current_mat
-        
-        if obj and obj.type == 'MESH' and mat and hasattr(mat, 'ps_mat_data'):
-            from .data import update_active_image
+    # Check if changed without writing (getattr handles missing attributes safely)
+    last_obj = getattr(ps_scene_data, 'last_selected_object', None)
+    last_mat = getattr(ps_scene_data, 'last_selected_material', None)
+    
+    if last_obj != current_obj or last_mat != current_mat:
+        # Schedule update via timer instead of writing directly
+        def update_tracking():
             try:
-                update_active_image(None, bpy.context) 
-            except Exception as e:
+                scene.ps_scene_data.last_selected_object = current_obj
+                scene.ps_scene_data.last_selected_material = current_mat
+                
+                if obj and obj.type == 'MESH' and mat and hasattr(mat, 'ps_mat_data'):
+                    from .data import update_active_image
+                    try:
+                        update_active_image(None, bpy.context) 
+                    except Exception:
+                        pass
+            except Exception:
                 pass
+            return None  # Run once
+        
+        # Schedule with minimal delay
+        bpy.app.timers.register(update_tracking, first_interval=0.0)
 
 
 # --- On Addon Enable ---

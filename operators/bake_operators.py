@@ -70,7 +70,12 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
         mat = ps_ctx.active_material
-        self.image_name = f"{active_channel.name}_Baked"
+        
+        # Build bake image name: "MaterialName_ChannelName"
+        mat_name = mat.name if mat else "Material"
+        channel_name = active_channel.name
+        self.image_name = f"{mat_name}_{channel_name}"
+        
         self.image_width = int(self.image_resolution)
         self.image_height = int(self.image_resolution)
         

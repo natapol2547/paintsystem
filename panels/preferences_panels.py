@@ -70,6 +70,11 @@ class PaintSystemPreferences(AddonPreferences):
         description="Show HSV sliders under the color wheel in the Texture Paint right-click popover",
         default=False
     )
+    show_active_palette_rmb: BoolProperty(
+        name="Show Active Palette (RMB)",
+        description="Show the active palette swatches in the Texture Paint right-click popover",
+        default=True
+    )
 
     def draw_shortcut(self, layout, kmi, text):
         row = layout.row(align=True)
@@ -108,6 +113,7 @@ class PaintSystemPreferences(AddonPreferences):
         rmb_box = layout.box()
         rmb_box.label(text="Texture Paint Right Click Menu", icon='MOUSE_RMB')
         rmb_box.prop(self, "show_hsv_sliders_rmb", text="Show HSV sliders in RMB popover")
+        rmb_box.prop(self, "show_active_palette_rmb", text="Show Active Palette in RMB popover")
 
         box = layout.box()
         box.label(text="Paint System Shortcuts:")

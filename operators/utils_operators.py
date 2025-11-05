@@ -23,6 +23,51 @@ from bl_ui.properties_paint_common import (
     UnifiedPaintPanel,
 )
 
+
+class PAINTSYSTEM_OT_PickPaletteColor(Operator):
+    """Pick this palette color as the active brush color"""
+    bl_idname = "paint_system.pick_palette_color"
+    bl_label = "Pick Palette Color"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    palette_index: IntProperty()
+    color: bpy.props.FloatVectorProperty(
+        size=3,
+        subtype='COLOR',
+        min=0.0,
+        max=1.0
+    )
+    
+    def execute(self, context):
+        tool_settings = context.tool_settings
+        image_paint = getattr(tool_settings, 'image_paint', None)
+        if not image_paint:
+            return {'CANCELLED'}
+        
+        palette = getattr(image_paint, 'palette', None)
+        if not palette or self.palette_index >= len(palette.colors):
+            return {'CANCELLED'}
+        
+        # Get the color from the palette
+        palette_color = palette.colors[self.palette_index].color
+        
+        # Set it as the active brush color (respecting unified settings)
+        ups = context.tool_settings.unified_paint_settings
+        use_unified = getattr(ups, 'use_unified_color', False)
+        
+        if use_unified:
+            ups.color = palette_color
+        else:
+            brush = getattr(image_paint, 'brush', None)
+            if brush:
+                brush.color = palette_color
+        
+        return {'FINISHED'}
+    
+    def invoke(self, context, event):
+        # Just execute immediately - we already have the color from properties
+        return self.execute(context)
+
 class PAINTSYSTEM_OT_TogglePaintMode(PSContextMixin, Operator):
     bl_idname = "paint_system.toggle_paint_mode"
     bl_label = "Toggle Paint Mode"
@@ -161,8 +206,37 @@ class PAINTSYSTEM_OT_ColorSampler(PSContextMixin, Operator):
         return context.mode == 'PAINT_TEXTURE'
 
     def execute(self, context):
+        # Hint the cursor to use the eyedropper for immediate visual feedback.
+        win = getattr(context, 'window', None)
+        if win:
+            try:
+                win.cursor_modal_set('EYEDROPPER')
+            except Exception:
+                pass
+
         if is_newer_than(4,4):
-            bpy.ops.paint.sample_color('INVOKE_DEFAULT', merged=True)
+            # Delegate to Blender's modal color sampler (canvas-local).
+            try:
+                bpy.ops.paint.sample_color('INVOKE_DEFAULT', merged=True)
+            finally:
+                # Schedule a safe cursor restore shortly after invoke.
+                def _restore_cursor():
+                    try:
+                        w = bpy.context.window
+                        if w:
+                            w.cursor_modal_restore()
+                    except Exception:
+                        pass
+                    return None
+                try:
+                    bpy.app.timers.register(_restore_cursor, first_interval=0.6)
+                except Exception:
+                    # Fallback: best-effort immediate restore
+                    if win:
+                        try:
+                            win.cursor_modal_restore()
+                        except Exception:
+                            pass
             return {'FINISHED'}
         # Get the screen dimensions
         x, y = self.x, self.y
@@ -178,11 +252,26 @@ class PAINTSYSTEM_OT_ColorSampler(PSContextMixin, Operator):
         unified_settings.color = pix_value
         brush_settings.color = pix_value
 
+        # Restore cursor right away for the non-modal sampling path
+        if win:
+            try:
+                win.cursor_modal_restore()
+            except Exception:
+                pass
         return {'FINISHED'}
 
     @classmethod
     def poll(cls, context):
-        return context.area.type == 'VIEW_3D' and context.mode == 'PAINT_TEXTURE'
+        try:
+            area_ok = getattr(context, 'area', None) and context.area.type == 'VIEW_3D'
+            mode_ok = getattr(context, 'mode', '') in {
+                'PAINT_TEXTURE',
+                'PAINT_GREASE_PENCIL',
+                'VERTEX_GREASE_PENCIL',
+            }
+            return bool(area_ok and mode_ok)
+        except Exception:
+            return False
 
     def invoke(self, context, event):
         self.x = event.mouse_x
@@ -343,6 +432,7 @@ class PAINTSYSTEM_OT_DuplicatePaintSystemData(PSContextMixin, MultiMaterialOpera
 
 
 classes = (
+    PAINTSYSTEM_OT_PickPaletteColor,
     PAINTSYSTEM_OT_TogglePaintMode,
     PAINTSYSTEM_OT_AddPresetBrushes,
     PAINTSYSTEM_OT_SelectMaterialIndex,
