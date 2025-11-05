@@ -1,3 +1,4 @@
+
 import bpy
 from bpy.types import Panel, Menu
 from bpy.utils import register_classes_factory
@@ -486,24 +487,35 @@ class MAT_PT_BrushColor2(PSContextMixin, Panel, UnifiedPaintPanel):
             if image_paint:
                 palette = getattr(image_paint, 'palette', None)
                 
-                # Palette selector row with editing controls instead of default buttons
+                # Minimal palette selector row (dropdown only)
                 palette_row = col.row(align=True)
-                
-                # Palette dropdown (without new/unlink buttons)
-                palette_row.template_ID(image_paint, "palette", new="", unlink="")
-                
-                # Add palette editing controls to the right of dropdown
+                wm = context.window_manager
+                try:
+                    if palette is None and getattr(wm, 'ps_palette_picker', 'NONE') != 'NONE':
+                        wm.ps_palette_picker = 'NONE'
+                    elif palette is not None and getattr(wm, 'ps_palette_picker', '') != palette.name:
+                        wm.ps_palette_picker = palette.name
+                except Exception:
+                    pass
+                palette_row.prop(wm, 'ps_palette_picker', text="")
+                # Palette controls to the right of dropdown
                 if palette:
                     palette_row.operator("palette.color_add", icon='ADD', text="")
                     palette_row.operator("palette.color_delete", icon='REMOVE', text="")
-                    palette_row.operator("palette.sort", icon='SORTALPHA', text="").type = 'HSV'
-                else:
-                    # Show new palette button if no palette exists
-                    palette_row.operator("palette.new", icon='ADD', text="")
+                    palette_row.operator("palette.color_move", icon='TRIA_UP', text="").type = 'UP'
+                    palette_row.operator("palette.color_move", icon='TRIA_DOWN', text="").type = 'DOWN'
+                    palette_row.operator_menu_enum("palette.sort", "type", icon='FILTER', text="")
                 
-                # Show palette color swatches if palette exists (without controls)
+                # Show palette color swatches if palette exists (no built-in controls)
                 if palette:
-                    col.template_palette(image_paint, "palette", color=False)
+                    # Draw swatches in a compact box grid; make them smaller than default
+                    swatch_box = col.box()
+                    swatch_grid = swatch_box.grid_flow(row_major=True, columns=14, even_columns=True, even_rows=True, align=True)
+                    for color in palette.colors:
+                        cell = swatch_grid.row(align=True)
+                        cell.scale_x = 0.7
+                        cell.scale_y = 0.7
+                        cell.prop(color, "color", text="")
                 
                 col.separator()
             
