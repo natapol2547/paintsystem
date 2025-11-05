@@ -117,6 +117,9 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, Panel):
     
     def draw(self, context):
         layout = self.layout
+        layout.use_property_split = False
+        layout.use_property_decorate = False
+        
         ps_ctx = self.parse_context(context)
         # Create two-column layout: left for color/brush, right for layers
         main_split = layout.split(factor=0.5)
@@ -143,43 +146,7 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, Panel):
             use_unified = ups.use_unified_color if ups else False
             prop_owner = ups if use_unified else brush
             
-            # Color palette above color wheel
-            if image_paint:
-                palette = getattr(image_paint, 'palette', None)
-                
-                # Palette selector row (dropdown only to avoid duplicate controls)
-                palette_row = color_col.row(align=True)
-                # Minimal custom palette picker: enum bound to WindowManager
-                wm = context.window_manager
-                # Keep enum in sync with current selection for display
-                try:
-                    if palette is None and getattr(wm, 'ps_palette_picker', 'NONE') != 'NONE':
-                        wm.ps_palette_picker = 'NONE'
-                    elif palette is not None and getattr(wm, 'ps_palette_picker', '') != palette.name:
-                        wm.ps_palette_picker = palette.name
-                except Exception:
-                    pass
-                palette_row.prop(wm, 'ps_palette_picker', text="")
-                # Palette controls to the right of dropdown
-                if palette:
-                    palette_row.operator("palette.color_add", icon='ADD', text="")
-                    palette_row.operator("palette.color_delete", icon='REMOVE', text="")
-                    palette_row.operator("palette.color_move", icon='TRIA_UP', text="").type = 'UP'
-                    palette_row.operator("palette.color_move", icon='TRIA_DOWN', text="").type = 'DOWN'
-                    palette_row.operator_menu_enum("palette.sort", "type", icon='FILTER', text="")
-                
-                # Show palette color swatches if palette exists (no built-in controls)
-                if palette:
-                    # Draw swatches in a compact box grid; make them smaller than default
-                    swatch_box = color_col.box()
-                    swatch_grid = swatch_box.grid_flow(row_major=True, columns=14, even_columns=True, even_rows=True, align=True)
-                    for color in palette.colors:
-                        cell = swatch_grid.row(align=True)
-                        cell.scale_x = 0.7
-                        cell.scale_y = 0.7
-                        cell.prop(color, "color", text="")
-            
-            # Add a small separator between palette and color wheel
+            # Add a small separator before the color wheel
             color_col.separator(factor=0.3)
             
             # Color picker with value slider and size control
@@ -207,18 +174,18 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, Panel):
             if (ups and hasattr(ups, 'secondary_color')) or hasattr(brush, 'secondary_color'):
                 row.operator("paint.brush_colors_flip", text="", icon='FILE_REFRESH')
 
-            # Local eyedropper: sample from canvas/viewport into brush color
+            # Eyedropper: use Blender's global eyedropper behavior and target the active color property
             try:
-                op_local = row.operator("paint.sample_color", text="", icon='EYEDROPPER')
-                # Some builds support properties like 'use_srgb' or 'merged_samples'; leave defaults
+                path = (
+                    "tool_settings.unified_paint_settings.color" if use_unified else
+                    "tool_settings.image_paint.brush.color"
+                )
+                props = row.operator("ui.eyedropper_color", text="", icon='EYEDROPPER')
+                props.prop_data_path = path
             except Exception:
                 pass
 
-            # Global eyedropper: OS/window-level color picker to set current color property
-            try:
-                row.operator("ui.eyedropper_color", text="", icon='EYEDROPPER')
-            except Exception:
-                pass
+            # Global eyedropper removed per request
             
             # HSV sliders (optional via preferences)
             if getattr(prefs, 'show_hsv_sliders_rmb', False):
@@ -247,6 +214,17 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, Panel):
                 row.prop(strength_owner, 'strength', text='Strength', slider=True)
                 if hasattr(brush, 'use_pressure_strength'):
                     row.prop(brush, 'use_pressure_strength', text="", icon='STYLUS_PRESSURE')
+
+            # Palette moved to the bottom under the color wheel
+            if image_paint and getattr(prefs, 'show_active_palette_rmb', True):
+                palette = getattr(image_paint, 'palette', None)
+                # Swatches using Blender's template (click-to-pick) - shows active palette
+                if palette:
+                    palette_container = color_col.box()
+                    palette_inner = palette_container.column()
+                    palette_inner.scale_x = 0.8
+                    palette_inner.scale_y = 0.8
+                    palette_inner.template_palette(image_paint, "palette", color=True)
         
         # Now check for Paint System material/channel after color picker is drawn
         if not ps_ctx.active_material:
@@ -345,6 +323,7 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, Panel):
         # Now the layer list inside the same box
         row = layers_box.row()
         layers_col = row.column()
+        # Removed fixed height to let content determine size naturally
         scale_content(context, row, scale_x=1, scale_y=1.5)
 
         # The layer list template

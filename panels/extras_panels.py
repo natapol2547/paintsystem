@@ -285,6 +285,18 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
                     color_jitter_panel = None
                 if color_jitter_panel:
                     color_jitter_panel(col, context, brush)
+            # Eyedropper: use Blender's global eyedropper and target the active color property
+            eyedrop_row = col.row(align=True)
+            try:
+                use_unified = getattr(context.tool_settings.unified_paint_settings, 'use_unified_color', False)
+                path = (
+                    "tool_settings.unified_paint_settings.color" if use_unified else
+                    "tool_settings.image_paint.brush.color"
+                )
+                props = eyedrop_row.operator("ui.eyedropper_color", text="", icon='EYEDROPPER')
+                props.prop_data_path = path
+            except Exception:
+                pass
             # draw_color_settings(context, col, brush)
         if ps_ctx.ps_object.type == 'GREASEPENCIL':
             row = col.row()
@@ -328,6 +340,11 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
                 sub_row.prop(brush, "secondary_color", text="")
 
             sub_row.operator("paint.brush_colors_flip", icon='FILE_REFRESH', text="")
+            # Eyedropper inline with GP colors (local only)
+            try:
+                sub_row.operator("paint_system.color_sampler", text="", icon='EYEDROPPER')
+            except Exception:
+                pass
 
 
 # ============================================================================
@@ -486,37 +503,40 @@ class MAT_PT_BrushColor2(PSContextMixin, Panel, UnifiedPaintPanel):
             image_paint = getattr(tool_settings, 'image_paint', None)
             if image_paint:
                 palette = getattr(image_paint, 'palette', None)
-                
-                # Minimal palette selector row (dropdown only)
+                used_template = False
+                # Compact palette selector (no Fake User button) + controls on the right
                 palette_row = col.row(align=True)
                 wm = context.window_manager
+                # Keep enum in sync with current selection for display
                 try:
                     if palette is None and getattr(wm, 'ps_palette_picker', 'NONE') != 'NONE':
                         wm.ps_palette_picker = 'NONE'
-                    elif palette is not None and getattr(wm, 'ps_palette_picker', '') != palette.name:
+                    elif palette is not None and getattr(wm, 'ps_palette_picker', '') != getattr(palette, 'name', ''):
                         wm.ps_palette_picker = palette.name
                 except Exception:
                     pass
-                palette_row.prop(wm, 'ps_palette_picker', text="")
-                # Palette controls to the right of dropdown
-                if palette:
+                if hasattr(wm, 'ps_palette_picker'):
+                    palette_row.prop(wm, 'ps_palette_picker', text="")
+                else:
+                    # Fallback to template_ID only if custom picker isn't registered
+                    try:
+                        palette_row.template_ID(image_paint, "palette", text="")
+                    except Exception:
+                        pass
+                # Controls to the right of the dropdown
+                if getattr(image_paint, 'palette', None):
                     palette_row.operator("palette.color_add", icon='ADD', text="")
                     palette_row.operator("palette.color_delete", icon='REMOVE', text="")
                     palette_row.operator("palette.color_move", icon='TRIA_UP', text="").type = 'UP'
                     palette_row.operator("palette.color_move", icon='TRIA_DOWN', text="").type = 'DOWN'
                     palette_row.operator_menu_enum("palette.sort", "type", icon='FILTER', text="")
-                
-                # Show palette color swatches if palette exists (no built-in controls)
+                # Swatches using template_palette - only way to get click-to-pick with color display
+                # The template unfortunately includes controls below, but they're minimal
                 if palette:
-                    # Draw swatches in a compact box grid; make them smaller than default
                     swatch_box = col.box()
-                    swatch_grid = swatch_box.grid_flow(row_major=True, columns=14, even_columns=True, even_rows=True, align=True)
-                    for color in palette.colors:
-                        cell = swatch_grid.row(align=True)
-                        cell.scale_x = 0.7
-                        cell.scale_y = 0.7
-                        cell.prop(color, "color", text="")
-                
+                    swatch_box.scale_x = 0.8
+                    swatch_box.scale_y = 0.8
+                    swatch_box.template_palette(image_paint, "palette", color=True)
                 col.separator()
             
             row = col.row(align=True)
@@ -545,6 +565,18 @@ class MAT_PT_BrushColor2(PSContextMixin, Panel, UnifiedPaintPanel):
                     color_jitter_panel = None
                 if color_jitter_panel:
                     color_jitter_panel(col, context, brush)
+            # Eyedropper: use Blender's global eyedropper and target the active color property
+            eyedrop_row = col.row(align=True)
+            try:
+                use_unified = getattr(context.tool_settings.unified_paint_settings, 'use_unified_color', False)
+                path = (
+                    "tool_settings.unified_paint_settings.color" if use_unified else
+                    "tool_settings.image_paint.brush.color"
+                )
+                props = eyedrop_row.operator("ui.eyedropper_color", text="", icon='EYEDROPPER')
+                props.prop_data_path = path
+            except Exception:
+                pass
         if ps_ctx.ps_object.type == 'GREASEPENCIL':
             row = col.row()
             row.prop(settings, "color_mode", expand=True)
@@ -586,6 +618,19 @@ class MAT_PT_BrushColor2(PSContextMixin, Panel, UnifiedPaintPanel):
                 sub_row.prop(brush, "secondary_color", text="")
 
             sub_row.operator("paint.brush_colors_flip", icon='FILE_REFRESH', text="")
+            # Eyedropper inline with GP colors: global eyedropper targeting the correct property
+            try:
+                use_unified_paint = (context.object.mode != 'PAINT_GREASE_PENCIL')
+                ups = context.tool_settings.unified_paint_settings
+                use_unified = (use_unified_paint and getattr(ups, 'use_unified_color', False))
+                path = (
+                    "tool_settings.unified_paint_settings.color" if use_unified else
+                    "tool_settings.gpencil_paint.brush.color"
+                )
+                props = sub_row.operator("ui.eyedropper_color", text="", icon='EYEDROPPER')
+                props.prop_data_path = path
+            except Exception:
+                pass
 
 
 classes = (
