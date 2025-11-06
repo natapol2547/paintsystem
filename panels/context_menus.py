@@ -62,8 +62,11 @@ class VIEW3D_PT_paintsystem_brush_color(Panel):
             layout.label(text="No brush active", icon='INFO')
             return
         
-        # Determine if using unified color
-        ups = tool_settings.unified_paint_settings
+        # Determine if using unified color (safe attribute access for Blender 5.0+)
+        if hasattr(tool_settings, "unified_paint_settings"):
+            ups = tool_settings.unified_paint_settings
+        else:
+            ups = getattr(tool_settings, 'unified_paint_settings', None)
         use_unified = ups.use_unified_color if ups else False
         prop_owner = ups if use_unified else brush
         
@@ -104,7 +107,7 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, Panel):
     bl_region_type = 'UI'
     bl_label = "Quick Layers"
     bl_category = 'Paint System'
-    bl_parent_id = 'MAT_PT_PaintTools2'
+    bl_parent_id = 'MAT_PT_PaintTools'
     bl_options = {'INSTANCED', 'HIDE_HEADER'}
     bl_order = 0  # Place at the top
     bl_ui_units_x = 20  # 10% smaller width
@@ -141,8 +144,11 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, Panel):
             color_box = left_col.box()
             color_col = color_box.column()
             
-            # Determine if using unified color
-            ups = tool_settings.unified_paint_settings
+            # Determine if using unified color (safe attribute access for Blender 5.0+)
+            if hasattr(tool_settings, "unified_paint_settings"):
+                ups = tool_settings.unified_paint_settings
+            else:
+                ups = getattr(tool_settings, 'unified_paint_settings', None)
             use_unified = ups.use_unified_color if ups else False
             prop_owner = ups if use_unified else brush
             
