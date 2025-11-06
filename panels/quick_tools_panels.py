@@ -28,14 +28,31 @@ class MAT_PT_PaintSystemQuickToolsDisplay(PSContextMixin, Panel):
         if obj:
             row = box.row()
             scale_content(context, row)
-            row.prop(obj,
-                 "show_wire", text="Toggle Wireframe", icon='MOD_WIREFRAME')
+            # Different wireframe toggle based on mode
+            if obj.mode == 'EDIT':
+                # In edit mode, toggle overlay wireframe
+                overlay = space.overlay
+                row.prop(overlay, "show_wireframes", text="Toggle Wireframe", icon='MOD_WIREFRAME')
+            else:
+                # In object mode, toggle object wireframe display
+                row.prop(obj, "show_wire", text="Toggle Wireframe", icon='MOD_WIREFRAME')
         row = box.row()
         if not ps_ctx.ps_settings.use_compact_design:
             row.scale_y = 1
             row.scale_x = 1
-        row.prop(space, "show_gizmo", text="Toggle Gizmo", icon='GIZMO')
+        
+        # Toggle gizmo button with state memory
+        space = context.area.spaces[0]
+        gizmos_enabled = (space.show_gizmo_object_translate or 
+                         space.show_gizmo_object_rotate or 
+                         space.show_gizmo_object_scale)
+        
+        # Main toggle button with pressed state
+        op = row.operator("paint_system.toggle_transform_gizmos", text="Transform Gizmo", icon='GIZMO', depress=gizmos_enabled)
+        
+        # Individual gizmo type toggles (grayed out when main toggle is off)
         row = row.row(align=True)
+        row.enabled = gizmos_enabled
         row.prop(space, "show_gizmo_object_translate",
                  text="", icon='EMPTY_ARROWS')
         row.prop(space, "show_gizmo_object_rotate",

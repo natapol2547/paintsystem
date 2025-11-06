@@ -448,6 +448,44 @@ class PAINTSYSTEM_OT_DuplicatePaintSystemData(PSContextMixin, MultiMaterialOpera
         return {'FINISHED'}
 
 
+class PAINTSYSTEM_OT_ToggleTransformGizmos(Operator):
+    """Toggle transform gizmos on/off while remembering which types were enabled"""
+    bl_idname = "paint_system.toggle_transform_gizmos"
+    bl_label = "Toggle Transform Gizmos"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Toggle transform gizmos (remembers which types were active)"
+    
+    def execute(self, context):
+        space = context.space_data
+        if not space or space.type != 'VIEW_3D':
+            return {'CANCELLED'}
+        
+        # Check if gizmos are currently enabled
+        gizmos_enabled = (space.show_gizmo_object_translate or 
+                         space.show_gizmo_object_rotate or 
+                         space.show_gizmo_object_scale)
+        
+        if gizmos_enabled:
+            # Store current state in window manager
+            wm = context.window_manager
+            wm["ps_gizmo_translate"] = space.show_gizmo_object_translate
+            wm["ps_gizmo_rotate"] = space.show_gizmo_object_rotate
+            wm["ps_gizmo_scale"] = space.show_gizmo_object_scale
+            
+            # Disable all gizmos
+            space.show_gizmo_object_translate = False
+            space.show_gizmo_object_rotate = False
+            space.show_gizmo_object_scale = False
+        else:
+            # Restore previous state from window manager
+            wm = context.window_manager
+            space.show_gizmo_object_translate = wm.get("ps_gizmo_translate", True)
+            space.show_gizmo_object_rotate = wm.get("ps_gizmo_rotate", True)
+            space.show_gizmo_object_scale = wm.get("ps_gizmo_scale", False)
+        
+        return {'FINISHED'}
+
+
 classes = (
     PAINTSYSTEM_OT_PickPaletteColor,
     PAINTSYSTEM_OT_TogglePaintMode,
@@ -463,6 +501,7 @@ classes = (
     PAINTSYSTEM_OT_AddCameraPlane,
     PAINTSYSTEM_OT_HidePaintingTips,
     PAINTSYSTEM_OT_DuplicatePaintSystemData,
+    PAINTSYSTEM_OT_ToggleTransformGizmos,
 )
 
 addon_keymaps = []

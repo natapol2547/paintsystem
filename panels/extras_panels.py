@@ -636,14 +636,10 @@ class MAT_PT_BrushColor2(PSContextMixin, Panel, UnifiedPaintPanel):
 classes = (
     MAT_PT_BrushTooltips,
     MAT_PT_PaintTools,
-    MAT_PT_PaintTools2,
     MAT_PT_Brush,
     MAT_PT_BrushAdvanced,
     MAT_PT_BrushColorSettings,
     MAT_PT_BrushColor,
-    MAT_PT_Brush2,
-    MAT_PT_BrushAdvanced2,
-    MAT_PT_BrushColor2,
 )
 
 register, unregister = register_classes_factory(classes)

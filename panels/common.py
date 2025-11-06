@@ -322,61 +322,59 @@ def layer_settings_ui(layout: bpy.types.UILayout, context: bpy.types.Context):
         row.prop(active_layer.pre_mix_node.inputs['Opacity'], "default_value",
                 text="Opacity", slider=True)
     else:
-        ui_scale = context.preferences.view.ui_scale
-        panel_width = context.region.width - 35*2 * ui_scale
+        # Use aligned column so header row and opacity have no vertical gap (RMB style)
+        header_col = layout.column(align=True)
         
-        # Check if in narrow context (RMB popover or narrow sidebar)
-        # Use region type to detect popover windows
-        is_narrow = panel_width < 400 * ui_scale or context.region.type == 'WINDOW'
+        # Layer controls row (without opacity)
+        main_row = header_col.row(align=True)
+        main_row.scale_y = 1.3
+        main_row.scale_x = 1.3
         
-        if is_narrow:
-            # Narrow layout: controls on first row, opacity on second row
-            main_row = layout.row(align=True)
-            main_row.scale_y = 1.3
-            main_row.scale_x = 1.3
-            
-            clip_row = main_row.row(align=True)
-            clip_row.enabled = not active_layer.lock_layer
-            clip_row.prop(active_layer, "is_clip", text="",
-                    icon="SELECT_INTERSECT")
-            if active_layer.type == 'IMAGE':
-                clip_row.prop(active_layer, "lock_alpha",
-                        text="", icon='TEXTURE')
-            lock_row = main_row.row(align=True)
-            lock_row.prop(active_layer, "lock_layer",
-                    text="", icon=icon_parser('VIEW_LOCKED', 'LOCKED'))
-            blend_type_row = main_row.row(align=True)
-            blend_type_row.enabled = not active_layer.lock_layer
-            blend_type_row.prop(color_mix_node, "blend_type", text="")
-            
-            # Opacity on separate line
-            opacity_row = layout.row(align=True)
-            opacity_row.scale_y = 1.3
-            opacity_row.enabled = not active_layer.lock_layer
-            opacity_row.prop(active_layer.pre_mix_node.inputs['Opacity'], "default_value",
-                    text="Opacity", slider=True)
-        else:
-            # Wide layout: original split layout
-            offset_pixels = 60 * ui_scale
-            split_factor = (panel_width - offset_pixels) / panel_width
-            split = layout.split(factor = split_factor)
-            split.scale_y = 1.3
-            split.scale_x = 1.3
-            main_row = split.row(align=True)
-            clip_row = main_row.row(align=True)
-            clip_row.enabled = not active_layer.lock_layer
-            clip_row.prop(active_layer, "is_clip", text="",
-                    icon="SELECT_INTERSECT")
-            if active_layer.type == 'IMAGE':
-                clip_row.prop(active_layer, "lock_alpha",
-                        text="", icon='TEXTURE')
-            lock_row = main_row.row(align=True)
-            lock_row.prop(active_layer, "lock_layer",
-                    text="", icon=icon_parser('VIEW_LOCKED', 'LOCKED'))
-            blend_type_row = main_row.row(align=True)
-            blend_type_row.enabled = not active_layer.lock_layer
-            blend_type_row.prop(color_mix_node, "blend_type", text="")
-            opacity_row = split.row(align=True)
-            opacity_row.enabled = not active_layer.lock_layer
-            opacity_row.prop(active_layer.pre_mix_node.inputs['Opacity'], "default_value",
-                    text="", slider=True)
+        clip_row = main_row.row(align=True)
+        clip_row.enabled = not active_layer.lock_layer
+        clip_row.prop(active_layer, "is_clip", text="", icon="SELECT_INTERSECT")
+        if active_layer.type == 'IMAGE':
+            clip_row.prop(active_layer, "lock_alpha", text="", icon='TEXTURE')
+        
+        lock_row = main_row.row(align=True)
+        lock_row.prop(active_layer, "lock_layer", text="",
+                      icon='LOCKED' if active_layer.lock_layer else 'UNLOCKED')
+        
+        blend_type_row = main_row.row(align=True)
+        blend_type_row.enabled = not active_layer.lock_layer
+        blend_type_row.prop(color_mix_node, "blend_type", text="")
+        
+        # Opacity slider directly below (RMB style)
+        opacity_row = header_col.row(align=True)
+        opacity_row.scale_y = 1.3
+        opacity_row.enabled = not active_layer.lock_layer
+        
+        # Be robust: find an appropriate opacity/factor socket to control
+        target_sock = None
+        try:
+            pre_mix = getattr(active_layer, 'pre_mix_node', None)
+            if pre_mix and hasattr(pre_mix, 'inputs'):
+                target_sock = pre_mix.inputs.get('Opacity')
+        except Exception:
+            target_sock = None
+        
+        if not target_sock:
+            try:
+                mix = getattr(active_layer, 'mix_node', None)
+                if mix and hasattr(mix, 'inputs'):
+                    # Try common input names across Blender variants
+                    target_sock = (
+                        mix.inputs.get('Opacity') or
+                        mix.inputs.get('Fac') or
+                        mix.inputs.get('Factor')
+                    )
+            except Exception:
+                target_sock = None
+        
+        if target_sock is not None:
+            opacity_row.prop(
+                target_sock,
+                "default_value",
+                text="Opacity",
+                slider=True,
+            )
