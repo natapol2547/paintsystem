@@ -79,7 +79,7 @@ class PAINTSYSTEM_OT_UpdatePaintSystemData(PSContextMixin, Operator):
                     print(f"Skipping layer {legacy_layer.name} of type {legacy_layer.type} because it is not supported anymore")
                     warning_messages.append(f"Skipping layer {legacy_layer.name} of type {legacy_layer.type} because it is not supported anymore")
                     continue
-                new_layer = ps_ctx.active_channel.create_layer(legacy_layer.name, legacy_layer.type)
+                new_layer = ps_ctx.active_channel.create_layer(context, legacy_layer.name, legacy_layer.type)
                 
                 # Apply legacy layer properties
                 for prop in legacy_layer.bl_rna.properties:

@@ -2,10 +2,10 @@ import bpy
 from bpy.types import Image
 try:
     from PIL import Image as PILImage
-    _PIL_AVAILABLE = True
-except Exception:
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
     PILImage = None
-    _PIL_AVAILABLE = False
 import numpy as np
 import struct
 import time
@@ -78,15 +78,15 @@ def numpy_to_blender_image(array, image_name="BrushPainted", create_new=True) ->
     return new_image
 
 def numpy_to_pil(numpy_array):
-    if not _PIL_AVAILABLE:
-        raise RuntimeError("Pillow (PIL) is not installed. This operation requires Pillow.")
+    if not PIL_AVAILABLE:
+        raise ImportError("PIL (Pillow) is not available. Please install Pillow to use this feature.")
     img_uint8 = (np.clip(numpy_array, 0, 1) * 255).astype(np.uint8)
     img_pil = PILImage.fromarray(img_uint8, mode='RGBA')
     return img_pil
 
 def pil_to_numpy(pil_image):
-    if not _PIL_AVAILABLE:
-        raise RuntimeError("Pillow (PIL) is not installed. This operation requires Pillow.")
+    if not PIL_AVAILABLE:
+        raise ImportError("PIL (Pillow) is not available. Please install Pillow to use this feature.")
     img_uint8 = np.array(pil_image, dtype=np.uint8)
     img_float = img_uint8.astype(np.float64) / 255.0
     return img_float

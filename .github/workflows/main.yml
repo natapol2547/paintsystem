@@ -1,3 +1,4 @@
+# .github/workflows/main.yaml
 name: Release
 
 on:
@@ -7,7 +8,7 @@ on:
         inputs:
             version:
                 description: 'version'
-                required: false # Make this optional
+                required: false
                 default: ''
             release_stage:
                 type: choice
@@ -24,8 +25,77 @@ permissions:
     contents: write
 
 jobs:
+    make-tests-matrix:
+        runs-on: ubuntu-latest
+        outputs:
+            matrix: ${{ steps.set-matrix.outputs.matrix }}
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                python-version: '3.10'
+            - name: Generate test matrix
+              id: set-matrix
+              run: python .github/make-tests-matrix.py >> $GITHUB_OUTPUT
+
+    Test:
+        needs: make-tests-matrix
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix: ${{ fromJSON(needs.make-tests-matrix.outputs.matrix) }}
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Cache Blender download
+              id: blender-cache
+              uses: actions/cache@v4
+              with:
+                  path: blender-${{ matrix.version }}
+                  key: blender-${{ runner.os }}-${{ matrix.version }}
+
+            - name: Download and extract Blender
+              if: steps.blender-cache.outputs.cache-hit != 'true'
+              run: |
+                echo "Downloading Blender from ${{ matrix.download_url }}"
+                curl -SL --fail -o blender.tar.xz "${{ matrix.download_url }}"
+                echo "Download complete. Checking file..."
+                ls -lh blender.tar.xz
+                file blender.tar.xz
+                echo "Extracting Blender..."
+                mkdir -p blender-${{ matrix.version }}
+                tar -xf blender.tar.xz -C blender-${{ matrix.version }} --strip-components=1
+                echo "Extraction complete."
+
+            - name: Run Addon Tests in Blender ${{ matrix.version }}
+              run: |
+                  BLENDER_EXECUTABLE=./blender-${{ matrix.version }}/blender
+                  ADDON_FOLDER_NAME=paint_system
+
+                  echo "Finding user script path for Blender ${{ matrix.version }}"
+                  BLENDER_USER_SCRIPTS=$(./blender-${{ matrix.version }}/blender --background --python-expr "import bpy; print(bpy.utils.script_path_user())" | grep '^/')
+                  
+                  if [ -z "$BLENDER_USER_SCRIPTS" ]; then
+                      echo "Error: Could not determine Blender's user script path."
+                      exit 1
+                  fi
+
+                  ADDON_INSTALL_PATH="$BLENDER_USER_SCRIPTS/addons"
+                  echo "Addon will be linked to: $ADDON_INSTALL_PATH"
+
+                  mkdir -p "$ADDON_INSTALL_PATH"
+                  ln -s "$GITHUB_WORKSPACE" "$ADDON_INSTALL_PATH/$ADDON_FOLDER_NAME"
+
+                  echo "Running tests with Blender from: $BLENDER_EXECUTABLE"
+                  $BLENDER_EXECUTABLE --background --python run_tests.py
+
+    # Your existing Build job, now dependent on the Test job
     Build:
         runs-on: ubuntu-latest
+        needs: Test # This job will only run if all tests in the matrix pass
         outputs:
             version: ${{ steps.extract_version.outputs.version }}
         steps:
@@ -37,14 +107,11 @@ jobs:
               run: |
                   VERSION=$(python <<EOF
                   import re
-
                   with open("__init__.py", "r", encoding="utf-8") as f:
                       content = f.read()
-
                   # Try matching either `"version": (x, y, z)` or `version = (x, y, z)`
                   pattern = re.compile(r'version"\s*:\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)|version\s*=\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)')
                   match = pattern.search(content)
-
                   if not match:
                       # If no match, print nothing; shell script will handle error
                       print("No version found")
@@ -60,9 +127,7 @@ jobs:
                       echo "Error: Version could not be extracted from __init__.py"
                       exit 1
                   fi
-
                   echo "version=$VERSION" >> $GITHUB_OUTPUT
-
             - name: Validate version
               id: validate_version
               run: |
@@ -72,12 +137,11 @@ jobs:
                   else
                     echo "Extracted version: ${{ steps.extract_version.outputs.version }}"
                   fi
-
             - name: Build addon
               uses: natapol2547/blender-addon-build@main
               with:
                   name: paint-system
-                  exclude-files: '.git;.github;README.md;*.blend1'
+                  exclude-files: '.git;.github;README.md;*.blend1;run_tests.py'
 
             # - name: Build addon (No Updater)
             #   uses: natapol2547/blender-addon-build@main
@@ -99,14 +163,3 @@ jobs:
                   version: ${{ needs.Build.outputs.version }}
                   release_stage: ${{ github.event.inputs.release_stage }}
                   addon_folder_name: paint_system
-
-            # - name: Checkout repository
-            #   uses: actions/checkout@v4
-
-            # - name: Release addon (No Updater)
-            #   uses: natapol2547/blender-addon-release@main
-            #   with:
-            #       artifact_name: paint-system-no-updater
-            #       version: ${{ needs.Build.outputs.version }}
-            #       release_stage: ${{ github.event.inputs.release_stage }}
-            #       addon_folder_name: paint_system

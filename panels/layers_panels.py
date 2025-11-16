@@ -28,10 +28,11 @@ from ..paintsystem.data import (
     sort_actions
 )
 
-# Helper: detect when the Layers popover is requested to show only the layer UI
-def _is_layers_popover_only(context) -> bool:
-    wm = getattr(context, 'window_manager', None)
-    return bool(getattr(wm, 'ps_layers_popover_only', False))
+# Check if PIL is available for conditional UI display
+try:
+    from ..operators.image_filters.common import PIL_AVAILABLE
+except ImportError:
+    PIL_AVAILABLE = False
 
 if is_newer_than(4,3):
     from bl_ui.properties_data_grease_pencil import (
@@ -103,16 +104,17 @@ def draw_layer_icon(layer: Layer, layout: bpy.types.UILayout):
             layout.label(icon='BLANK1')
 class MAT_PT_UL_LayerList(PSContextMixin, UIList):
     def draw_item(self, context: Context, layout, data, item, icon, active_data, active_property, index):
-        original_item = item
-        item = item.get_layer_data()
-        if not item:
+        linked_item = item.get_layer_data()
+        if not linked_item:
             return
         # The UIList passes channel as 'data'
         active_channel = data
         flattened = active_channel.flattened_layers
         if index < len(flattened):
-            level = active_channel.get_item_level_from_id(original_item.id)
+            level = active_channel.get_item_level_from_id(item.id)
             main_row = layout.row()
+            warnings = item.get_layer_warnings(context)
+                # main_row.label(text="\n".join(warnings), icon='ERROR')
             # Check if parent of the current item is enabled
             parent_item = active_channel.get_item_by_id(
                 item.parent_id)
@@ -120,23 +122,29 @@ class MAT_PT_UL_LayerList(PSContextMixin, UIList):
                 main_row.enabled = False
 
             row = main_row.row(align=True)
-            for _ in range(level):
-                row.label(icon='BLANK1')
-            draw_layer_icon(item, row)
+            for i in range(level):
+                if i == level - 1:
+                    row.label(icon_value=get_icon('folder_indent'))
+                else:
+                    row.label(icon='BLANK1')
+            draw_layer_icon(linked_item, row)
 
             row = main_row.row(align=True)
-            row.prop(item, "layer_name", text="", emboss=False)
-            if item.is_clip:
+            row.prop(linked_item, "layer_name", text="", emboss=False)
+            if linked_item.is_clip:
                 row.label(icon="SELECT_INTERSECT")
-            if item.lock_layer:
+            if linked_item.lock_layer:
                 row.label(icon=icon_parser('VIEW_LOCKED', 'LOCKED'))
-            if len(item.actions) > 0:
+            if len(linked_item.actions) > 0:
                 row.label(icon="KEYTYPE_KEYFRAME_VEC")
-            if is_layer_linked(item):
+            if is_layer_linked(linked_item):
                 row.label(icon="LINKED")
-            row.prop(item, "enabled", text="",
-                     icon="HIDE_OFF" if item.enabled else "HIDE_ON", emboss=False)
-            self.draw_custom_properties(row, item)
+            if warnings:
+                op = row.operator("paint_system.show_layer_warnings", text="", icon='ERROR', emboss=False)
+                op.layer_id = item.id
+            row.prop(linked_item, "enabled", text="",
+                     icon="HIDE_OFF" if linked_item.enabled else "HIDE_ON", emboss=False)
+            self.draw_custom_properties(row, linked_item)
 
     def filter_items(self, context, data, propname):
         # This function gets the collection property (as the usual tuple (data, propname)), and must return two lists:
@@ -150,7 +158,7 @@ class MAT_PT_UL_LayerList(PSContextMixin, UIList):
         # If you do not make filtering and/or ordering, return empty list(s) (this will be more efficient than
         # returning full lists doing nothing!).
         layers = getattr(data, propname).values()
-        flattened_layers = data.flattened_layers
+        flattened_layers = data.flattened_unlinked_layers
 
         # Default return values.
         flt_flags = []
@@ -159,7 +167,7 @@ class MAT_PT_UL_LayerList(PSContextMixin, UIList):
         # Filtering by name
         flt_flags = [self.bitflag_filter_item] * len(layers)
         for idx, layer in enumerate(layers):
-            flt_neworder.append(flattened_layers.index(layer.get_layer_data()))
+            flt_neworder.append(flattened_layers.index(layer))
             while layer.parent_id != -1:
                 layer = data.get_item_by_id(layer.parent_id)
                 if layer and not layer.is_expanded:
@@ -207,7 +215,6 @@ class MAT_PT_Layers(PSContextMixin, Panel):
 
     @classmethod
     def poll(cls, context):
-        # Always allow base Layers panel; child panels may be hidden separately
         ps_ctx = cls.parse_context(context)
         if ps_ctx.active_group and check_group_multiuser(ps_ctx.active_group.node_tree):
             return False
@@ -226,13 +233,15 @@ class MAT_PT_Layers(PSContextMixin, Panel):
                 text=ps_ctx.active_channel.name if ps_ctx.active_channel else "No Channel",
                 icon_value=get_icon_from_channel(ps_ctx.active_channel)
             )
+        else:
+            if ps_ctx.ps_object.type == 'MESH' and ps_ctx.active_channel.bake_image:
+                layout.prop(ps_ctx.active_channel, "use_bake_image",
+                        text="Use Baked", icon="TEXTURE_DATA")
 
     def draw(self, context):
         ps_ctx = self.parse_context(context)
 
         layout = self.layout
-        wm = getattr(context, 'window_manager', None)
-        show_layers_only = bool(getattr(wm, 'ps_layers_popover_only', False))
         if ps_ctx.ps_settings.use_legacy_ui:
             box = layout.box()
             toggle_paint_mode_ui(box, context)
@@ -268,31 +277,30 @@ class MAT_PT_Layers(PSContextMixin, Panel):
             sub.operator("grease_pencil.layer_move", icon='TRIA_UP', text="").direction = 'UP'
             sub.operator("grease_pencil.layer_move", icon='TRIA_DOWN', text="").direction = 'DOWN'
         elif ps_ctx.ps_object.type == 'MESH':
-            if not ps_ctx.ps_settings.use_legacy_ui:
-                # col = layout.column()
-                # row = col.row()
-                # row.scale_y = 1.2
-                # row.scale_x = 1.2
-                # new_row = row.row(align=True)
-                # new_row.operator("wm.call_menu", text="New", icon_value=get_icon('layer_add')).name = "MAT_MT_AddLayerMenu"
-                # new_row.operator("paint_system.new_folder_layer",
-                #      icon_value=get_icon('folder'), text="")
-                # new_row.menu("MAT_MT_LayerMenu",
-                #     text="", icon='COLLAPSEMENU')
-                # move_row = row.row(align=True)
-                # move_row.operator("paint_system.move_up", icon="TRIA_UP", text="")
-                # move_row.operator("paint_system.move_down", icon="TRIA_DOWN", text="")
-                # row.operator("paint_system.delete_item",
-                #             text="", icon="TRASH")
-                main_row = layout.row()
-                box = main_row.box()
-                # When opened as a popover via RMB, suppress the inline Layer Settings block
-                if not show_layers_only:
+            if not ps_ctx.active_channel.use_bake_image:
+                if not ps_ctx.ps_settings.use_legacy_ui:
+                    # col = layout.column()
+                    # row = col.row()
+                    # row.scale_y = 1.2
+                    # row.scale_x = 1.2
+                    # new_row = row.row(align=True)
+                    # new_row.operator("wm.call_menu", text="New", icon_value=get_icon('layer_add')).name = "MAT_MT_AddLayerMenu"
+                    # new_row.operator("paint_system.new_folder_layer",
+                    #      icon_value=get_icon('folder'), text="")
+                    # new_row.menu("MAT_MT_LayerMenu",
+                    #     text="", icon='COLLAPSEMENU')
+                    # move_row = row.row(align=True)
+                    # move_row.operator("paint_system.move_up", icon="TRIA_UP", text="")
+                    # move_row.operator("paint_system.move_down", icon="TRIA_DOWN", text="")
+                    # row.operator("paint_system.delete_item",
+                    #             text="", icon="TRASH")
+                    main_row = layout.row()
+                    box = main_row.box()
                     if ps_ctx.active_layer and ps_ctx.active_layer.node_tree:
                         settings_box = box.box()
                         layer_settings_ui(settings_box, context)
-            else:
-                box = layout.box()
+                else:
+                    box = layout.box()
         
             active_group = ps_ctx.active_group
             active_channel = ps_ctx.active_channel
@@ -377,10 +385,11 @@ class MAT_MT_ImageFilterMenu(PSContextMixin, Menu):
         layout.operator_context = 'INVOKE_REGION_WIN'
         
         ps_ctx = self.parse_context(context)
-        layout.operator("paint_system.brush_painter",
-                        icon="BRUSH_DATA")
-        layout.operator("paint_system.gaussian_blur",
-                        icon="FILTER")
+        if PIL_AVAILABLE:
+            layout.operator("paint_system.brush_painter",
+                            icon="BRUSH_DATA")
+            layout.operator("paint_system.gaussian_blur",
+                            icon="FILTER")
         layout.operator("paint_system.invert_colors",
                         icon="MOD_MASK")
         layout.operator("paint_system.fill_image", 
@@ -396,9 +405,6 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
 
     @classmethod
     def poll(cls, context):
-        # Hide this panel when showing Layers popover-only mode
-        if _is_layers_popover_only(context):
-            return False
         ps_ctx = cls.parse_context(context)
         if ps_ctx.ps_object.type == 'MESH':
             if ps_ctx.active_channel.use_bake_image:
@@ -461,11 +467,23 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
             if not active_layer:
                 return
                 # Settings
+            warnings = active_layer.get_layer_warnings(context)
+            if warnings:
+                warnings_box = layout.box()
+                warnings_col = warnings_box.column(align=True)
+                for warning in warnings:
+                    # Split warning into chunks of 6 words
+                    words = warning.split()
+                    chunks = [' '.join(words[j:j+6]) for j in range(0, len(words), 6)]
+                    for i, chunk in enumerate(chunks):
+                        warnings_col.label(text=chunk, icon='ERROR' if not i else 'BLANK1')
+            if ps_ctx.ps_settings.use_legacy_ui:
+                box = layout.box()
+                layer_settings_ui(box, context)
             if active_layer.type not in ('ADJUSTMENT', 'NODE_GROUP', 'ATTRIBUTE', 'GRADIENT', 'SOLID_COLOR', 'RANDOM', 'TEXTURE', 'GEOMETRY'):
                 return
-            box = layout.box()
-            if ps_ctx.ps_settings.use_legacy_ui:
-                layer_settings_ui(box, context)
+            elif not ps_ctx.ps_settings.use_legacy_ui:
+                box = layout.box()
             match active_layer.type:
                 case 'ADJUSTMENT':
                     col = box.column()
@@ -504,7 +522,9 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                         col.use_property_decorate = False
                         if active_layer.gradient_type in ('LINEAR', 'RADIAL'):
                             if active_layer.empty_object and active_layer.empty_object.name in context.view_layer.objects:
-                                col.operator("paint_system.select_gradient_empty", text="Select Gradient Empty", icon='OBJECT_ORIGIN')
+                                empty_col = col.column(align=True)
+                                empty_col.operator("paint_system.select_empty", text="Select Gradient Empty", icon='OBJECT_ORIGIN')
+                                empty_col.prop(active_layer, "empty_object", text="")
                             else:
                                 err_box = col.box()
                                 err_box.alert = True
@@ -602,8 +622,6 @@ class MAT_PT_GreasePencilMaskSettings(PSContextMixin, Panel):
     
     @classmethod
     def poll(cls, context):
-        if _is_layers_popover_only(context):
-            return False
         ps_ctx = cls.parse_context(context)
         return ps_ctx.ps_object.type == 'GREASEPENCIL' and is_newer_than(4,3)
 
@@ -626,8 +644,6 @@ class MAT_PT_GreasePencilOnionSkinningSettings(PSContextMixin, Panel):
     
     @classmethod
     def poll(cls, context):
-        if _is_layers_popover_only(context):
-            return False
         ps_ctx = cls.parse_context(context)
         return ps_ctx.ps_object.type == 'GREASEPENCIL' and is_newer_than(4,3)
     
@@ -655,8 +671,6 @@ class MAT_PT_LayerTransformSettings(PSContextMixin, Panel):
 
     @classmethod
     def poll(cls, context):
-        if _is_layers_popover_only(context):
-            return False
         ps_ctx = cls.parse_context(context)
         active_layer = ps_ctx.active_layer
         if ps_ctx.ps_object.type != 'MESH' or active_layer.type not in ('IMAGE', 'TEXTURE'):
@@ -677,10 +691,19 @@ class MAT_PT_LayerTransformSettings(PSContextMixin, Panel):
         col = layout.column()
         row = col.row(align=True)
         row.prop(active_layer, "coord_type", text="Coord Type")
-        row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
+        if active_layer.coord_type in ['AUTO', 'UV'] and active_layer.type == 'IMAGE':
+            row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
         if active_layer.coord_type == 'UV':
             col.prop_search(active_layer, "uv_map_name", text="UV Map",
-                                search_data=context.object.data, search_property="uv_layers", icon='GROUP_UVS')
+                                search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
+        elif active_layer.coord_type == 'DECAL':
+            decal_clip = active_layer.find_node("decal_depth_clip")
+            if decal_clip:
+                decal_clip_col = col.column(align=True)
+                decal_clip_col.prop(decal_clip.inputs[2], "default_value", text="Depth Clip")
+            empty_col = col.column(align=True)
+            empty_col.operator("paint_system.select_empty", text="Select Empty", icon='OBJECT_ORIGIN')
+            empty_col.prop(active_layer, "empty_object", text="")
         if active_layer.coord_type not in ['UV', 'AUTO'] and active_layer.type == 'IMAGE':
             info_box = col.box()
             info_box.alert = True
@@ -726,8 +749,6 @@ class MAT_PT_ImageLayerSettings(PSContextMixin, Panel):
 
     @classmethod
     def poll(cls, context):
-        if _is_layers_popover_only(context):
-            return False
         ps_ctx = cls.parse_context(context)
         active_layer = ps_ctx.active_layer
         if ps_ctx.ps_object.type != 'MESH' or ps_ctx.active_channel.use_bake_image:
@@ -752,6 +773,9 @@ class MAT_PT_ImageLayerSettings(PSContextMixin, Panel):
         layout = self.layout
         layout.use_property_split = True
         layout.use_property_decorate = False
+        row = layout.row()
+        row.use_property_split = False
+        row.prop(active_layer, "correct_image_aspect", text="Correct Aspect")
         if not active_layer.external_image:
             layout.operator("paint_system.quick_edit", text="Edit Externally (View Capture)")
         else:
@@ -770,12 +794,24 @@ class MAT_MT_LayerMenu(PSContextMixin, Menu):
         ps_ctx = self.parse_context(context)
         layout = self.layout
 
-        if ps_ctx.active_layer and ps_ctx.active_layer.type != 'IMAGE':
+        special_actions = False
+        if ps_ctx.active_layer and ps_ctx.active_layer.type not in ('IMAGE', 'ADJUSTMENT'):
+            special_actions = True
             layout.operator(
                 "paint_system.convert_to_image_layer",
                 text="Convert to Image Layer",
                 icon_value=get_icon('image')
             )
+        
+        if ps_ctx.unlinked_layer and is_layer_linked(ps_ctx.unlinked_layer):
+            special_actions = True
+            layout.operator(
+                "paint_system.unlink_layer",
+                text="Unlink Layer",
+                icon="UNLINKED"
+            )
+        
+        if special_actions:
             layout.separator()
 
         layout.operator(
@@ -798,11 +834,6 @@ class MAT_MT_LayerMenu(PSContextMixin, Menu):
             text="Paste Linked Layer(s)",
             icon="LINKED"
         ).linked = True
-        layout.operator(
-            "paint_system.duplicate_as_linked",
-            text="Duplicate as Linked",
-            icon="LINKED"
-        )
 
         # Divider before merge actions
         layout.separator()
@@ -949,8 +980,6 @@ class MAT_PT_Actions(PSContextMixin, Panel):
 
     @classmethod
     def poll(cls, context):
-        if _is_layers_popover_only(context):
-            return False
         ps_ctx = cls.parse_context(context)
         active_layer = ps_ctx.active_layer
         return active_layer is not None

@@ -147,7 +147,7 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
         if self.disable_show_backface:
             mat.show_transparent_back = False
             mat.use_backface_culling = True
-        if self.set_view_transform:
+        if self.template == 'BASIC' and self.set_view_transform:
             context.scene.view_settings.view_transform = 'Standard'
         
         node_tree = bpy.data.node_groups.new(name=f"Temp Group Name", type='ShaderNodeTree')
@@ -168,10 +168,10 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
         # Create Channels and layers and setup the group
         match self.template:
             case 'BASIC':
-                bpy.ops.paint_system.add_channel('EXEC_DEFAULT', channel_name='Color', channel_type='COLOR', use_alpha=True)
+                channel = new_group.create_channel(context, channel_name='Color', channel_type='COLOR', use_alpha=True)
                 if self.add_layers:
-                    bpy.ops.paint_system.new_solid_color_layer('INVOKE_DEFAULT')
-                    bpy.ops.paint_system.new_image_layer('EXEC_DEFAULT', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+                    channel.create_layer(context, layer_name='Solid Color', layer_type='SOLID_COLOR')
+                    channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
                 
                 right_most_node = get_right_most_node(mat_node_tree)
                 node_group, mix_shader = create_basic_setup(mat_node_tree, node_tree, right_most_node.location if right_most_node else Vector((0, 0)))
@@ -194,32 +194,32 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
                 connect_sockets(principled_node.outputs[0], material_output.inputs[0])
 
                 if self.pbr_add_color:
-                    bpy.ops.paint_system.add_channel('EXEC_DEFAULT', channel_name='Color', channel_type='COLOR', use_alpha=True)
+                    channel = new_group.create_channel(context, channel_name='Color', channel_type='COLOR', use_alpha=True)
                     color_connected = transfer_connection(mat_node_tree, principled_node.inputs['Base Color'], node_group.inputs['Color'])
                     transfer_connection(mat_node_tree, principled_node.inputs['Alpha'], node_group.inputs['Color Alpha'])
                     if self.add_layers:
                         if not color_connected:
-                            bpy.ops.paint_system.new_solid_color_layer('INVOKE_DEFAULT')
-                        bpy.ops.paint_system.new_image_layer('EXEC_DEFAULT', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+                            channel.create_layer(context, layer_name='Solid Color', layer_type='SOLID_COLOR')
+                        channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
                     connect_sockets(node_group.outputs['Color'], principled_node.inputs['Base Color'])
                     connect_sockets(node_group.outputs['Color Alpha'], principled_node.inputs['Alpha'])
 
                 if self.pbr_add_metallic:
-                    bpy.ops.paint_system.add_channel('EXEC_DEFAULT', channel_name='Metallic', channel_type='FLOAT', use_alpha=False, use_max_min=True)
+                    channel = new_group.create_channel(context, channel_name='Metallic', channel_type='FLOAT', use_alpha=False, use_max_min=True)
                     transfer_connection(mat_node_tree, principled_node.inputs['Metallic'], node_group.inputs['Metallic'])
                     connect_sockets(node_group.outputs['Metallic'], principled_node.inputs['Metallic'])
                 if self.pbr_add_roughness:
-                    bpy.ops.paint_system.add_channel('EXEC_DEFAULT', channel_name='Roughness', channel_type='FLOAT', use_alpha=False, use_max_min=True)
+                    channel = new_group.create_channel(context, channel_name='Roughness', channel_type='FLOAT', use_alpha=False, use_max_min=True)
                     transfer_connection(mat_node_tree, principled_node.inputs['Roughness'], node_group.inputs['Roughness'])
                     connect_sockets(node_group.outputs['Roughness'], principled_node.inputs['Roughness'])
                 if self.pbr_add_normal:
-                    bpy.ops.paint_system.add_channel('EXEC_DEFAULT', channel_name='Normal', channel_type='VECTOR', use_alpha=False, use_normalize=True, world_to_object_normal=True)
+                    channel = new_group.create_channel(context, channel_name='Normal', channel_type='VECTOR', use_alpha=False, use_normalize=True, world_to_object_normal=True)
                     normal_connected =transfer_connection(mat_node_tree, principled_node.inputs['Normal'], node_group.inputs['Normal'])
                     connect_sockets(node_group.outputs['Normal'], principled_node.inputs['Normal'])
                     if self.add_layers:
                         if not normal_connected:
-                            bpy.ops.paint_system.new_geometry_layer('EXEC_DEFAULT', geometry_type='OBJECT_NORMAL', normalize_normal=True)
-                        bpy.ops.paint_system.new_image_layer('EXEC_DEFAULT', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+                            channel.create_layer(context, layer_name='Object Normal', layer_type='GEOMETRY', geometry_type='OBJECT_NORMAL', normalize_normal=True)
+                        channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
                     norm_map_node = mat_node_tree.nodes.new(type='ShaderNodeNormalMap')
                     norm_map_node.location = node_group.location + Vector((0, -300))
                     norm_map_node.space = 'OBJECT'
@@ -234,9 +234,9 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
                     self.report({'ERROR'}, "Paint Over is only supported in EEVEE")
                     return {'CANCELLED'}
                 
-                bpy.ops.paint_system.add_channel('EXEC_DEFAULT', channel_name='Color', channel_type='COLOR', use_alpha=True)
+                channel = new_group.create_channel(context, channel_name='Color', channel_type='COLOR', use_alpha=True)
                 if self.add_layers:
-                    bpy.ops.paint_system.new_image_layer('EXEC_DEFAULT', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+                    channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
                 
                 mat_output = get_material_output(mat_node_tree)
                 
@@ -260,10 +260,10 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
                     connect_sockets(mix_shader.outputs[0], mat_output.inputs[0])
                         
             case 'NORMAL':
-                bpy.ops.paint_system.add_channel('EXEC_DEFAULT', channel_name='Normal', channel_type='VECTOR', use_alpha=False, use_normalize=True)
+                channel = new_group.create_channel(context, channel_name='Normal', channel_type='VECTOR', use_alpha=False, use_normalize=True)
                 if self.add_layers:
-                    bpy.ops.paint_system.new_geometry_layer('EXEC_DEFAULT', geometry_type='OBJECT_NORMAL', normalize_normal=True)
-                    bpy.ops.paint_system.new_image_layer('EXEC_DEFAULT', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+                    channel.create_layer(context, layer_name='Object Normal', layer_type='GEOMETRY', geometry_type='OBJECT_NORMAL', normalize_normal=True)
+                    channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
                 right_most_node = get_right_most_node(mat_node_tree)
                 node_group = mat_node_tree.nodes.new(type='ShaderNodeGroup')
                 node_group.node_tree = node_tree
@@ -280,9 +280,9 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
                 connect_sockets(norm_map_node.outputs[0], diffuse_node.inputs['Normal'])
                 connect_sockets(diffuse_node.outputs[0], mat_output.inputs[0])
             case _:
-                bpy.ops.paint_system.add_channel('EXEC_DEFAULT', channel_name='Color', channel_type='COLOR', use_alpha=True)
+                channel = new_group.create_channel(context, channel_name='Color', channel_type='COLOR', use_alpha=True)
                 if self.add_layers:
-                    bpy.ops.paint_system.new_image_layer('EXEC_DEFAULT', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+                    channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
                 right_most_node = get_right_most_node(mat_node_tree)
                 node_group = mat_node_tree.nodes.new(type='ShaderNodeGroup')
                 node_group.node_tree = node_tree
@@ -344,7 +344,7 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
                 col.label(text="may cause sorting artifacts.")
             box.prop(self, "disable_show_backface",
                      text="Use Backface Culling")
-        if context.scene.view_settings.view_transform != 'Standard':
+        if self.template == 'BASIC' and context.scene.view_settings.view_transform != 'Standard':
             box.prop(self, "set_view_transform",
                      text="Use Standard View Transform")
 

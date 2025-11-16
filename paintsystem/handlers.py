@@ -38,6 +38,7 @@ def frame_change_pre(scene):
 
 @bpy.app.handlers.persistent
 def load_post(scene):
+    print(f"Loading Paint System data...")
     start_time = time.time()
     ps_ctx = parse_context(bpy.context)
     if not ps_ctx.ps_scene_data:
@@ -48,7 +49,10 @@ def load_post(scene):
         target_version = get_layer_version_for_type(global_layer.type)
         if get_nodetree_version(global_layer.node_tree) != target_version:
             print(f"Updating layer {global_layer.name} to version {target_version}")
-            global_layer.update_node_tree(bpy.context)
+            try:
+                global_layer.update_node_tree(bpy.context)
+            except Exception as e:
+                print(f"Error updating layer {global_layer.name}: {e}")
     
     seen_global_layers_map = {}
     # Layer Versioning
@@ -64,6 +68,7 @@ def load_post(scene):
                         if layer.name and not layer.layer_name: # data from global layer is not copied to layer
                             global_layer = get_global_layer(layer)
                             if global_layer:
+                                layer.auto_update_node_tree = False
                                 print(f"Migrating global layer data ({global_layer.name}) to layer data ({layer.name}) ({layer.layer_name})")
                                 has_migrated_global_layer = True
                                 layer.layer_name = layer.name
@@ -85,6 +90,17 @@ def load_post(scene):
                                     mat, global_layer = seen_global_layers_map[global_layer.name]
                                     layer.linked_layer_uid = global_layer.name
                                     layer.linked_material = mat
+                                layer.auto_update_node_tree = True
+                                layer.update_node_tree(bpy.context)
+                        
+                        # Current version of the layer
+                        mix_node = layer.mix_node
+                        blend_mode = "MIX"
+                        if mix_node:
+                            blend_mode = str(mix_node.blend_type)
+                        if blend_mode != layer.blend_mode and layer.blend_mode != "PASSTHROUGH":
+                            print(f"Layer {layer.name} has blend mode {blend_mode} but {layer.blend_mode} is set")
+                            layer.blend_mode = blend_mode
                     if has_migrated_global_layer:
                         channel.update_node_tree(bpy.context)
     # ps_scene_data Versioning

@@ -1,5 +1,5 @@
 import math
-
+import uuid
 import addon_utils
 import bpy
 import gpu
@@ -162,29 +162,7 @@ class PAINTSYSTEM_OT_IsolateChannel(PSContextMixin, Operator):
     
     def execute(self, context):
         ps_ctx = self.parse_context(context)
-        active_group = ps_ctx.active_group
-        active_channel = ps_ctx.active_channel
-        ps_mat_data = ps_ctx.ps_mat_data
-        mat = ps_ctx.active_material
-        mat_output = get_material_output(mat.node_tree)
-        if not ps_mat_data.preview_channel:
-            ps_mat_data.preview_channel = True
-            # Store the node connected to material output
-            connected_link = mat_output.inputs[0].links[0]
-            ps_ctx.ps_mat_data.original_node_name = connected_link.from_node.name
-            ps_ctx.ps_mat_data.original_socket_name = connected_link.from_socket.name
-            
-            # Find channel node tree
-            node = find_node(mat.node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree})
-            if node:
-                # Connect node tree to material output
-                connect_sockets(mat_output.inputs[0], node.outputs[active_channel.name])
-        else:
-            ps_mat_data.preview_channel = False
-            # Find node by name
-            node = mat.node_tree.nodes.get(ps_mat_data.original_node_name)
-            if node:
-                connect_sockets(node.outputs[ps_mat_data.original_socket_name], mat_output.inputs[0])
+        ps_ctx.active_channel.isolate_channel(context)
                 
         # Change render mode
         if bpy.context.space_data.shading.type not in {'RENDERED', 'MATERIAL'}:
@@ -437,6 +415,11 @@ class PAINTSYSTEM_OT_DuplicatePaintSystemData(PSContextMixin, MultiMaterialOpera
             for channel in group.channels:
                 node_tree = bpy.data.node_groups.new(name=f"PS_Channel ({channel.name})", type='ShaderNodeTree')
                 channel.node_tree = node_tree
+                for layer in channel.layers:
+                    if layer.is_linked:
+                        continue
+                    layer.duplicate_layer_data(layer)
+                    layer.update_node_tree(context)
                 channel.update_node_tree(context)
             group.update_node_tree(context)
             

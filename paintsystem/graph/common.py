@@ -85,14 +85,14 @@ def get_library_object(object_name: str, library_filename: str = LIBRARY_FILENAM
         data_to.objects = [object_name]
     return bpy.data.objects.get(object_name)
 
-def create_mixing_graph(builder: NodeTreeBuilder, color_node_name: str = None, color_socket: str = None, alpha_node_name: str = None, alpha_socket: str = None) -> NodeTreeBuilder:
+def create_mixing_graph(builder: NodeTreeBuilder, color_node_name: str = None, color_socket: str = None, alpha_node_name: str = None, alpha_socket: str = None, blend_mode: str = "MIX") -> NodeTreeBuilder:
     pre_mix = get_library_nodetree(".PS Pre Mix")
     post_mix = get_library_nodetree(".PS Post Mix")
     builder.add_node("group_input", "NodeGroupInput")
     builder.add_node("group_output", "NodeGroupOutput")
     builder.add_node("pre_mix", "ShaderNodeGroup", {"node_tree": pre_mix}, {"Over Alpha": 1.0})
     builder.add_node("post_mix", "ShaderNodeGroup", {"node_tree": post_mix})
-    builder.add_node("mix_rgb", "ShaderNodeMix", {"blend_type": "MIX", "data_type": "RGBA"})
+    builder.add_node("mix_rgb", "ShaderNodeMix", {"blend_type": blend_mode, "data_type": "RGBA"}, force_properties=True)
     if alpha_node_name is not None and alpha_socket is not None:
         builder.link(alpha_node_name, "pre_mix", alpha_socket, "Over Alpha")
     builder.link("group_input", "pre_mix", "Color", "Color")
@@ -110,7 +110,7 @@ def create_mixing_graph(builder: NodeTreeBuilder, color_node_name: str = None, c
     return builder
 
 
-def create_coord_graph(builder: NodeTreeBuilder, coord_type: str, uv_map_name: str, node_name: str, socket_name: str) -> NodeTreeBuilder:
+def create_coord_graph(builder: NodeTreeBuilder, coord_type: str, uv_map_name: str, node_name: str, socket_name: str, empty_object: bpy.types.Object = None) -> NodeTreeBuilder:
     builder.add_node("mapping", "ShaderNodeMapping")
     if coord_type == "AUTO":
         builder.add_node("uvmap", "ShaderNodeUVMap", {"uv_map": DEFAULT_PS_UV_MAP_NAME}, force_properties=True)
@@ -120,12 +120,16 @@ def create_coord_graph(builder: NodeTreeBuilder, coord_type: str, uv_map_name: s
         builder.add_node("uvmap", "ShaderNodeUVMap", {"uv_map": uv_map_name}, force_properties=True)
         builder.link("uvmap", "mapping", "UV", "Vector")
         builder.link("mapping", node_name, "Vector", socket_name)
-    elif coord_type in ["OBJECT", "CAMERA", "WINDOW", "REFLECTION"]:
-        builder.add_node("tex_coord", "ShaderNodeTexCoord")
+    elif coord_type in ["OBJECT", "CAMERA", "WINDOW", "REFLECTION", "GENERATED"]:
+        builder.add_node("tex_coord", "ShaderNodeTexCoord", {"object": empty_object})
         builder.link("tex_coord", "mapping", coord_type.title(), "Vector")
         builder.link("mapping", node_name, "Vector", socket_name)
     elif coord_type == "POSITION":
         builder.add_node("geometry", "ShaderNodeGeometry")
         builder.link("geometry", "mapping", "Position", "Vector")
+        builder.link("mapping", node_name, "Vector", socket_name)
+    elif coord_type == "DECAL":
+        builder.add_node("tex_coord", "ShaderNodeTexCoord", {"object": empty_object}, force_properties=True)
+        builder.link("tex_coord", "mapping", "Object", "Vector")
         builder.link("mapping", node_name, "Vector", socket_name)
     return builder

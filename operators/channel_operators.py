@@ -75,24 +75,18 @@ class PAINTSYSTEM_OT_AddChannel(PSContextMixin, MultiMaterialOperator):
     
     def process_material(self, context):
         ps_ctx = self.parse_context(context)
-        channels = ps_ctx.active_group.channels
-        node_tree = bpy.data.node_groups.new(name=f"Temp Channel Name", type='ShaderNodeTree')
-        new_channel = channels.add()
-        ps_ctx.active_group.active_index = len(channels) - 1
-        unique_name = self.get_unique_channel_name(context)
-        new_channel.name = unique_name
-        new_channel.type = self.channel_type
-        new_channel.use_alpha = self.use_alpha
-        new_channel.use_normalize = self.use_normalize
-        new_channel.color_space = self.color_space
-        new_channel.use_max_min = self.use_max_min
-        new_channel.world_to_object_normal = self.world_to_object_normal
-        if self.channel_type == "FLOAT" and new_channel.use_max_min:
-            new_channel.factor_min = self.factor_min
-            new_channel.factor_max = self.factor_max
-        new_channel.node_tree = node_tree
-        new_channel.update_node_tree(context)
-        ps_ctx.active_group.update_node_tree(context)
+        ps_ctx.active_group.create_channel(
+            context, 
+            channel_name=self.channel_name, 
+            channel_type=self.channel_type, 
+            color_space=self.color_space, 
+            use_alpha=self.use_alpha, 
+            use_normalize=self.use_normalize, 
+            world_to_object_normal=self.world_to_object_normal, 
+            use_max_min=self.use_max_min,
+            factor_min=self.factor_min,
+            factor_max=self.factor_max
+            )
         redraw_panel(context)
         return {'FINISHED'}
     
@@ -138,14 +132,7 @@ class PAINTSYSTEM_OT_DeleteChannel(PSContextMixin, MultiMaterialOperator):
 
     def process_material(self, context):
         ps_ctx = self.parse_context(context)
-        active_index = ps_ctx.active_group.active_index
-        if active_index < 0 or active_index >= len(ps_ctx.active_group.channels):
-            self.report({'ERROR'}, "No valid channel selected")
-            return {'CANCELLED'}
-        
-        ps_ctx.active_group.channels.remove(active_index)
-        ps_ctx.active_group.active_index = max(0, active_index - 1)
-        ps_ctx.active_group.update_node_tree(context)
+        ps_ctx.active_group.delete_channel(context, ps_ctx.active_channel)
         redraw_panel(context)
         return {'FINISHED'}
 

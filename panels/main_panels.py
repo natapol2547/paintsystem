@@ -101,17 +101,25 @@ class MAT_PT_PaintSystemMaterialSettings(PSContextMixin, Panel):
     def draw(self, context):
         ps_ctx = self.parse_context(context)
         mat = ps_ctx.active_material
+        ob = ps_ctx.ps_object
         layout = self.layout
         layout.use_property_split = True
         layout.use_property_decorate = False
+        if not ps_ctx.ps_settings.use_legacy_ui:
+            row = layout.row(align=True)
+            scale_content(context, row, 1.5, 1.2)
+            row.menu("MAT_MT_PaintSystemMaterialSelectMenu", text="" if ob.active_material else "Empty Material", icon="MATERIAL" if ob.active_material else "MESH_CIRCLE")
+            if mat:
+                row.prop(mat, "name", text="")
         layout.prop(mat, "surface_render_method", text="Render Method")
         layout.prop(mat, "use_backface_culling", text="Backface Culling")
         if ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.groups:
             box = layout.box()
-            box.label(text=f"Paint System Groups:", icon_value=get_icon("sunflower"))
+            box.label(text=f"Paint System Node Groups:", icon_value=get_icon("sunflower"))
             row = box.row(align=True)
-            scale_content(context, row, 1.2, 1.2)
-            row.popover("MAT_PT_PaintSystemGroups", text=ps_ctx.active_group.name, icon="NODETREE")
+            scale_content(context, row, 1.3, 1.2)
+            row.popover("MAT_PT_PaintSystemGroups", text="", icon="NODETREE")
+            row.prop(ps_ctx.active_group, "name", text="")
             row.operator("paint_system.new_group", icon='ADD', text="")
             row.operator("paint_system.delete_group", icon='REMOVE', text="")
 
@@ -124,7 +132,14 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
     
     def draw_header_preset(self, context):
         layout = self.layout
-        layout.popover("MAT_PT_Support", icon="FUND", text="Wah!")
+        ps_ctx = self.parse_context(context)
+        mat = ps_ctx.active_material
+        row = layout.row(align=True)
+        if mat:
+            scale_content(context, row, 1.1, 1)
+            row.popover("MAT_PT_PaintSystemMaterialSettings", text="", icon="MATERIAL")
+        else:
+            row.popover("MAT_PT_Support", icon="FUND", text="Wah!")
     
     @classmethod
     def poll(cls, context):

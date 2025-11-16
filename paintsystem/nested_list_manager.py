@@ -50,7 +50,7 @@ class BaseNestedListManager(PropertyGroup):
             if item.parent_id == parent_id and item.order >= insert_order:
                 item.order += 1
 
-    def get_insertion_data(self, active_item=None, handle_folder=True, insert_at: Literal["TOP", "BOTTOM", "CURSOR"] = "CURSOR"):
+    def get_insertion_data(self, active_item=None, handle_folder=True, insert_at: Literal["TOP", "BOTTOM", "CURSOR", "BEFORE", "AFTER"] = "CURSOR"):
         """Get parent_id and insert_order for new item based on active item"""
         if active_item is None:
             active_item = self.get_active_item()
@@ -63,6 +63,14 @@ class BaseNestedListManager(PropertyGroup):
                 insert_order = 1
             case "BOTTOM":
                 insert_order = len(getattr(self, self.collection_name)) + 1
+            case "BEFORE":
+                if active_item:
+                    parent_id = active_item.parent_id
+                    insert_order = active_item.order
+            case "AFTER":
+                if active_item:
+                    parent_id = active_item.parent_id
+                    insert_order = active_item.order + 1
             case "CURSOR":
                 # CURSOR
                 if active_item:

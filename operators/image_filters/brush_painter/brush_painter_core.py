@@ -2,11 +2,11 @@ import bpy
 import numpy as np
 try:
     from PIL import Image, ImageFilter
-    _PIL_AVAILABLE = True
-except Exception:
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
     Image = None
     ImageFilter = None
-    _PIL_AVAILABLE = False
 import os
 import glob
 from ..common import blender_image_to_numpy, numpy_to_blender_image
@@ -28,6 +28,8 @@ class BrushPainterCore:
         self.saturation_shift = 0.0 # 0.0 to 1.0
         self.value_shift = 0.0 # 0.0 to 1.0
         self.brush_rotation_offset = 0.0 # 0 to 360 degrees
+        self.use_random_seed = False
+        self.random_seed = 42
         
         # Brush texture paths
         self.brush_texture_path = None
@@ -44,10 +46,9 @@ class BrushPainterCore:
     
     def load_brush_texture(self, path):
         """Loads a brush texture and converts it to a grayscale mask."""
+        if not PIL_AVAILABLE:
+            raise ImportError("PIL (Pillow) is not available. Please install Pillow to use this feature.")
         try:
-            if not _PIL_AVAILABLE:
-                # Without Pillow, fall back to circular brush
-                return self.create_circular_brush(50)
             if not os.path.exists(path):
                 return self.create_circular_brush(50)
                 
@@ -111,28 +112,24 @@ class BrushPainterCore:
     
     def resize_brushes(self, brush_list, size):
         """Resizes a list of brush masks to the specified size."""
+        if not PIL_AVAILABLE:
+            raise ImportError("PIL (Pillow) is not available. Please install Pillow to use this feature.")
         resized_brush_list = []
         for brush in brush_list:
-            if _PIL_AVAILABLE:
-                brush_uint8 = (brush * 255).astype(np.uint8)
-                brush_pil = Image.fromarray(brush_uint8, mode='L')
-                resized_pil = brush_pil.resize((size, size), Image.Resampling.LANCZOS)
-                resized_array = np.array(resized_pil, dtype=np.float64) / 255.0
-                resized_brush_list.append(resized_array)
-            else:
-                # Nearest resize fallback without PIL
-                h, w = brush.shape
-                y_idx = (np.linspace(0, h - 1, size)).astype(int)
-                x_idx = (np.linspace(0, w - 1, size)).astype(int)
-                resized = brush[np.ix_(y_idx, x_idx)]
-                resized_brush_list.append(resized)
+            brush_uint8 = (brush * 255).astype(np.uint8)
+            brush_pil = Image.fromarray(brush_uint8, mode='L')
+            resized_pil = brush_pil.resize((size, size), Image.Resampling.LANCZOS)
+            resized_array = np.array(resized_pil, dtype=np.float64) / 255.0
+            resized_brush_list.append(resized_array)
         return resized_brush_list
     
     def calculate_gaussian_blur(self, img_float):
         """Calculates Gaussian blur for the image using Pillow."""
-        if not _PIL_AVAILABLE:
-            # Minimal no-op fallback when Pillow is unavailable
+        if not PIL_AVAILABLE:
+            raise ImportError("PIL (Pillow) is not available. Please install Pillow to use this feature.")
+        if self.gaussian_sigma <= 0:
             return img_float
+        
         img_uint8 = (np.clip(img_float, 0, 1) * 255).astype(np.uint8)
         
         if len(img_float.shape) == 3:
@@ -151,22 +148,8 @@ class BrushPainterCore:
     
     def calculate_sobel_filter(self, img_float):
         """Calculates Sobel filter for the image using PIL.ImageFilter.Kernel."""
-        if not _PIL_AVAILABLE:
-            # Fallback: crude numeric gradients without PIL
-            if len(img_float.shape) == 3:
-                if img_float.shape[2] == 4:
-                    img_gray = img_float[..., :3]
-                else:
-                    img_gray = img_float
-                img_gray = 0.299 * img_gray[..., 0] + 0.587 * img_gray[..., 1] + 0.114 * img_gray[..., 2]
-            else:
-                img_gray = img_float
-            # Simple finite differences
-            Gx = np.zeros_like(img_gray)
-            Gy = np.zeros_like(img_gray)
-            Gx[:, 1:-1] = (img_gray[:, 2:] - img_gray[:, :-2]) * 0.5
-            Gy[1:-1, :] = (img_gray[2:, :] - img_gray[:-2, :]) * 0.5
-            return Gx, Gy
+        if not PIL_AVAILABLE:
+            raise ImportError("PIL (Pillow) is not available. Please install Pillow to use this feature.")
         if len(img_float.shape) == 3:
             if img_float.shape[2] == 4:
                 img_gray = img_float[..., :3]
@@ -207,22 +190,12 @@ class BrushPainterCore:
             img_gray = 0.299 * img_rgb_for_gray[..., 0] + 0.587 * img_rgb_for_gray[..., 1] + 0.114 * img_rgb_for_gray[..., 2]
         else:
             img_gray = img_rgb_for_gray
-        if _PIL_AVAILABLE:
-            img_gray_uint8 = (img_gray * 255).astype(np.uint8)
-            img_pil = Image.fromarray(img_gray_uint8, mode='L')
-            radius = int(self.gaussian_sigma * 2)
-            blurred_pil = img_pil.filter(ImageFilter.GaussianBlur(radius=radius))
-            img_smoothed = np.array(blurred_pil, dtype=np.float64) / 255.0
-        else:
-            # Basic box blur fallback
-            k = max(1, int(self.gaussian_sigma))
-            kernel = np.ones((k, k)) / (k * k)
-            from numpy.lib.stride_tricks import sliding_window_view
-            if img_gray.ndim == 2:
-                patches = sliding_window_view(np.pad(img_gray, k//2, mode='edge'), (k, k))
-                img_smoothed = (patches * kernel).sum(axis=(-1, -2))
-            else:
-                img_smoothed = img_gray
+        
+        img_gray_uint8 = (img_gray * 255).astype(np.uint8)
+        img_pil = Image.fromarray(img_gray_uint8, mode='L')
+        radius = int(self.gaussian_sigma * 2)
+        blurred_pil = img_pil.filter(ImageFilter.GaussianBlur(radius=radius))
+        img_smoothed = np.array(blurred_pil, dtype=np.float64) / 255.0
         
         Gx, Gy = self.calculate_sobel_filter(img_smoothed)
         G = np.hypot(Gx, Gy)
@@ -403,8 +376,10 @@ class BrushPainterCore:
         
         return True
     
-    def apply_brush_painting(self, image, brush_folder_path=None, brush_texture_path=None, hue_shift=0.0, saturation_shift=0.0, value_shift=0.0):
+    def apply_brush_painting(self, image, brush_folder_path=None, brush_texture_path=None, custom_image_gradient=None):
         """Main function to apply brush painting to a Blender image."""
+        if not PIL_AVAILABLE:
+            raise ImportError("PIL (Pillow) is not available. Please install Pillow to use this feature.")
         if image is None:
             return None
         
@@ -426,7 +401,15 @@ class BrushPainterCore:
         
         # Calculate blurred image and gradients
         img_blurred = self.calculate_gaussian_blur(img_float)
-        G_normalized, theta = self.calculate_gradients(img_float)
+        
+        if custom_image_gradient:
+            custom_img_float = blender_image_to_numpy(image)
+            if custom_img_float is None:
+                return None
+            custom_blurred = self.calculate_gaussian_blur(custom_img_float)
+            G_normalized, theta = self.calculate_gradients(custom_blurred)
+        else:
+            G_normalized, theta = self.calculate_gradients(img_float)
         
         # Create extended canvas
         canvas, extended_H, extended_W, offset_y, offset_x = self.create_extended_canvas(
@@ -449,7 +432,8 @@ class BrushPainterCore:
             num_samples = self.calculate_brush_area_density(scaled_brush_list, H, W, actual_brush_size)
             
             # Generate random coordinates
-            np.random.seed(42 + step)
+            if self.use_random_seed:
+                np.random.seed(self.random_seed + step)
             random_y = np.random.randint(0, H, num_samples)
             random_x = np.random.randint(0, W, num_samples)
             

@@ -1,4 +1,3 @@
-
 import bpy
 from bpy.types import Panel, Menu
 from bpy.utils import register_classes_factory
@@ -49,50 +48,13 @@ class MAT_PT_BrushTooltips(Panel):
         # layout.operator("paint_system.disable_tool_tips",
         #                 text="Disable Tooltips", icon='CANCEL')
 
-class MAT_PT_PaintTools(PSContextMixin, Panel):
-    bl_idname = 'MAT_PT_PaintTools'
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_label = "Paint Tools"
-    bl_category = 'Paint System'
-    bl_options = {'DEFAULT_CLOSED'}
-
-    @classmethod
-    def poll(cls, context):
-        ps_ctx = cls.parse_context(context)
-        return ps_ctx.ps_object is not None
-
-    def draw(self, context):
-        # Container panel; actual tools are in child panels
-        pass
-
-
-class MAT_PT_PaintTools2(PSContextMixin, Panel):
-    """Duplicate of Paint Tools panel - placed below the original."""
-    bl_idname = 'MAT_PT_PaintTools2'
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_label = "Paint Tools 2"
-    bl_category = 'Paint System'
-    bl_options = {'DEFAULT_CLOSED'}
-    bl_order = 10  # Place below other panels
-
-    @classmethod
-    def poll(cls, context):
-        ps_ctx = cls.parse_context(context)
-        return ps_ctx.ps_object is not None
-
-    def draw(self, context):
-        # Container panel; actual tools are in child panels
-        pass
-
 class MAT_PT_Brush(PSContextMixin, Panel, UnifiedPaintPanel):
     bl_idname = 'MAT_PT_Brush'
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_label = "Brush"
     bl_category = 'Paint System'
-    bl_parent_id = 'MAT_PT_PaintTools'
+    bl_parent_id = 'MAT_PT_PaintSystemMainPanel'
     bl_options = {'DEFAULT_CLOSED'}
 
     @classmethod
@@ -178,8 +140,6 @@ class MAT_PT_BrushAdvanced(PSContextMixin, Panel):
         col.use_property_split = True
         col.use_property_decorate = False
         col.prop(image_paint, "normal_angle", text="Angle")
-    # Removed deprecated preference (allow_image_overwrite) to avoid errors on newer builds
-    # It used to control auto image selection; feature is either automatic now or handled elsewhere
 
 
 class MAT_PT_BrushColorSettings(PSContextMixin, Panel):
@@ -204,7 +164,7 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
     bl_region_type = "UI"
     bl_label = "Color"
     bl_category = 'Paint System'
-    bl_parent_id = 'MAT_PT_PaintTools'
+    bl_parent_id = 'MAT_PT_PaintSystemMainPanel'
     bl_options = {'DEFAULT_CLOSED'}
 
     @classmethod
@@ -281,22 +241,17 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
                 # Bforartists/Blender variants may not expose color_jitter_panel; fail gracefully
                 try:
                     from bl_ui.properties_paint_common import color_jitter_panel
-                except Exception:
-                    color_jitter_panel = None
-                if color_jitter_panel:
                     color_jitter_panel(col, context, brush)
-            # Eyedropper: use Blender's global eyedropper and target the active color property
-            eyedrop_row = col.row(align=True)
-            try:
-                use_unified = getattr(context.tool_settings.unified_paint_settings, 'use_unified_color', False)
-                path = (
-                    "tool_settings.unified_paint_settings.color" if use_unified else
-                    "tool_settings.image_paint.brush.color"
-                )
-                props = eyedrop_row.operator("ui.eyedropper_color", text="", icon='EYEDROPPER')
-                props.prop_data_path = path
-            except Exception:
-                pass
+                except Exception:
+                    pass
+                try:
+                    header, panel = col.panel("paintsystem_color_palette", default_closed=True)
+                    header.label(text="Color Palette")
+                    panel.template_ID(settings, "palette", new="palette.new")
+                    if settings.palette:
+                        panel.template_palette(settings, "palette", color=True)
+                except Exception:
+                    pass
             # draw_color_settings(context, col, brush)
         if ps_ctx.ps_object.type == 'GREASEPENCIL':
             row = col.row()
@@ -340,302 +295,9 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
                 sub_row.prop(brush, "secondary_color", text="")
 
             sub_row.operator("paint.brush_colors_flip", icon='FILE_REFRESH', text="")
-            # Eyedropper inline with GP colors (local only)
-            try:
-                sub_row.operator("paint_system.color_sampler", text="", icon='EYEDROPPER')
-            except Exception:
-                pass
-
-
-# ============================================================================
-# Duplicate child panels for Paint Tools 2
-# ============================================================================
-
-class MAT_PT_Brush2(PSContextMixin, Panel, UnifiedPaintPanel):
-    """Duplicate of Brush panel for Paint Tools 2."""
-    bl_idname = 'MAT_PT_Brush2'
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_label = "Brush"
-    bl_category = 'Paint System'
-    bl_parent_id = 'MAT_PT_PaintTools2'
-    bl_options = {'DEFAULT_CLOSED'}
-    bl_order = 10  # Ensure this appears after Quick Layers
-
-    @classmethod
-    def poll(cls, context):
-        mode = cls.get_brush_mode(context)
-        return mode in ['PAINT_TEXTURE', 'PAINT_GREASE_PENCIL', 'VERTEX_GREASE_PENCIL', 'WEIGHT_GREASE_PENCIL', 'SCULPT_GREASE_PENCIL']
-
-    def draw_header(self, context):
-        layout = self.layout
-        layout.label(icon_value=get_icon('brush'))
-            
-    def draw(self, context):
-        layout = self.layout
-        ps_ctx = self.parse_context(context)
-        settings = self.paint_settings(context)
-        brush = settings.brush
-        mode = self.get_brush_mode(context)
-        # Check blender version
-        if not is_newer_than(4, 3):
-            layout.template_ID_preview(settings, "brush",
-                                       new="brush.add", rows=3, cols=8, hide_buttons=False)
-        box = layout.box()
-        row = box.row()
-        row.label(text="Settings:", icon="SETTINGS")
-        if ps_ctx.ps_settings.show_tooltips:
-            row.popover(
-                panel="MAT_PT_BrushTooltips",
-                text='Shortcuts!',
-                icon='INFO_LARGE' if is_newer_than(4,3) else 'INFO'
-            )
-        col = box.column(align=True)
-        scale_content(context, col, scale_x=1, scale_y=1.2)
-        brush_settings(col, context, brush, popover=self.is_popover)
-        
-        brush_imported = False
-        for brush in bpy.data.brushes:
-            if brush.name.startswith("PS_"):
-                brush_imported = True
-                break
-        if not brush_imported:
-            layout.operator("paint_system.add_preset_brushes",
-                            text="Add Preset Brushes", icon="IMPORT")
-
-
-class MAT_PT_BrushAdvanced2(PSContextMixin, Panel):
-    """Duplicate of Advanced Settings for Paint Tools 2."""
-    bl_idname = 'MAT_PT_BrushAdvanced2'
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_label = "Advanced Settings"
-    bl_category = 'Paint System'
-    bl_parent_id = 'MAT_PT_Brush2'
-    bl_options = {'DEFAULT_CLOSED'}
-    
-    @classmethod
-    def poll(cls, context):
-        ps_ctx = cls.parse_context(context)
-        return ps_ctx.ps_object.type == 'MESH'
-
-    def draw(self, context):
-        layout = self.layout
-        ps_ctx = self.parse_context(context)
-        image_paint = context.tool_settings.image_paint
-        layout.prop(image_paint, "use_occlude", text="Occlude Faces")
-        layout.prop(image_paint, "use_backface_culling", text="Backface Culling")
-        
-        layout.prop(image_paint, "use_normal_falloff", text="Normal Falloff")
-        col = layout.column(align=True)
-        col.use_property_split = True
-        col.use_property_decorate = False
-        col.prop(image_paint, "normal_angle", text="Angle")
-    # Removed deprecated preference (allow_image_overwrite) to avoid errors on newer builds
-    # It used to control auto image selection; feature is either automatic now or handled elsewhere
-
-
-class MAT_PT_BrushColor2(PSContextMixin, Panel, UnifiedPaintPanel):
-    """Duplicate of Color panel for Paint Tools 2."""
-    bl_idname = 'MAT_PT_BrushColor2'
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_label = "Color"
-    bl_category = 'Paint System'
-    bl_parent_id = 'MAT_PT_PaintTools2'
-    bl_options = {'DEFAULT_CLOSED'}
-    bl_order = 20  # Ensure this appears after Brush2
-
-    @classmethod
-    def poll(cls, context):
-        ps_ctx = cls.parse_context(context)
-        settings = cls.paint_settings(context)
-        if not settings:
-            return False
-        brush = settings.brush
-        if ps_ctx.ps_object is None or brush is None:
-            return False
-
-        if ps_ctx.ps_object.type == 'MESH':
-            if context.image_paint_object:
-                capabilities = brush.image_paint_capabilities
-                return capabilities.has_color
-        elif ps_ctx.ps_object.type == 'GREASEPENCIL':
-            from bl_ui.space_toolsystem_common import ToolSelectPanelHelper
-            tool = ToolSelectPanelHelper.tool_active_from_context(context)
-            if is_newer_than(5,0):
-                gpencil_brush_type = brush.gpencil_brush_type
-            else:
-                gpencil_brush_type = brush.gpencil_tool
-            if tool and tool.idname in {"builtin.cutter", "builtin.eyedropper", "builtin.interpolate"}:
-                return False
-            if gpencil_brush_type == 'TINT':
-                return True
-            if gpencil_brush_type not in {'DRAW', 'FILL'}:
-                return False
-            return True
-        return False
-
-    def draw_header(self, context):
-        layout = self.layout
-        layout.label(icon_value=get_icon('color'))
-
-    def draw_header_preset(self, context):
-        ps_ctx = self.parse_context(context)
-        layout = self.layout
-        settings = self.paint_settings(context)
-        brush = settings.brush
-        if ps_ctx.ps_object.type == 'MESH':
-            self.prop_unified_color(layout, context, brush, "color", text="")
-        elif ps_ctx.ps_object.type == 'GREASEPENCIL':
-            layout.prop(brush, "color", text="")
-            
-
-    def draw(self, context):
-        layout = self.layout
-        ps_ctx = self.parse_context(context)
-        col = layout.column()
-        settings = self.paint_settings(context)
-        brush = settings.brush
-        if ps_ctx.ps_object.type == 'MESH':
-            # Add palette section at the top for Paint Tools 2
-            tool_settings = context.tool_settings
-            image_paint = getattr(tool_settings, 'image_paint', None)
-            if image_paint:
-                palette = getattr(image_paint, 'palette', None)
-                used_template = False
-                # Compact palette selector (no Fake User button) + controls on the right
-                palette_row = col.row(align=True)
-                wm = context.window_manager
-                # Keep enum in sync with current selection for display
-                try:
-                    if palette is None and getattr(wm, 'ps_palette_picker', 'NONE') != 'NONE':
-                        wm.ps_palette_picker = 'NONE'
-                    elif palette is not None and getattr(wm, 'ps_palette_picker', '') != getattr(palette, 'name', ''):
-                        wm.ps_palette_picker = palette.name
-                except Exception:
-                    pass
-                if hasattr(wm, 'ps_palette_picker'):
-                    palette_row.prop(wm, 'ps_palette_picker', text="")
-                else:
-                    # Fallback to template_ID only if custom picker isn't registered
-                    try:
-                        palette_row.template_ID(image_paint, "palette", text="")
-                    except Exception:
-                        pass
-                # Controls to the right of the dropdown
-                if getattr(image_paint, 'palette', None):
-                    palette_row.operator("palette.color_add", icon='ADD', text="")
-                    palette_row.operator("palette.color_delete", icon='REMOVE', text="")
-                    palette_row.operator("palette.color_move", icon='TRIA_UP', text="").type = 'UP'
-                    palette_row.operator("palette.color_move", icon='TRIA_DOWN', text="").type = 'DOWN'
-                    palette_row.operator_menu_enum("palette.sort", "type", icon='FILTER', text="")
-                # Swatches using template_palette - only way to get click-to-pick with color display
-                # The template unfortunately includes controls below, but they're minimal
-                if palette:
-                    swatch_box = col.box()
-                    swatch_box.scale_x = 0.8
-                    swatch_box.scale_y = 0.8
-                    swatch_box.template_palette(image_paint, "palette", color=True)
-                col.separator()
-            
-            row = col.row(align=True)
-            row.scale_y = 1.2
-            row.popover(
-                panel="MAT_PT_BrushColorSettings",
-                icon="SETTINGS"
-            )
-            prop_owner = get_unified_settings(context, "use_unified_color")
-            row = col.row()
-            row.scale_y = ps_ctx.ps_settings.color_picker_scale
-            self.prop_unified_color_picker(row, context, brush, "color", value_slider=True)
-            if ps_ctx.ps_settings.show_more_color_picker_settings:
-                if not context.preferences.view.color_picker_type == "SQUARE_SV":
-                    col.prop(ps_ctx.ps_scene_data, "hue", text="Hue")
-                col.prop(ps_ctx.ps_scene_data, "saturation", text="Saturation")
-                col.prop(ps_ctx.ps_scene_data, "value", text="Value")
-            if ps_ctx.ps_settings.show_hex_color:
-                row = col.row()
-                row.prop(ps_ctx.ps_scene_data, "hex_color", text="Hex")
-            if is_newer_than(4,5):
-                # Bforartists/Blender variants may not expose color_jitter_panel; fail gracefully
-                try:
-                    from bl_ui.properties_paint_common import color_jitter_panel
-                except Exception:
-                    color_jitter_panel = None
-                if color_jitter_panel:
-                    color_jitter_panel(col, context, brush)
-            # Eyedropper: use Blender's global eyedropper and target the active color property
-            eyedrop_row = col.row(align=True)
-            try:
-                use_unified = getattr(context.tool_settings.unified_paint_settings, 'use_unified_color', False)
-                path = (
-                    "tool_settings.unified_paint_settings.color" if use_unified else
-                    "tool_settings.image_paint.brush.color"
-                )
-                props = eyedrop_row.operator("ui.eyedropper_color", text="", icon='EYEDROPPER')
-                props.prop_data_path = path
-            except Exception:
-                pass
-        if ps_ctx.ps_object.type == 'GREASEPENCIL':
-            row = col.row()
-            row.prop(settings, "color_mode", expand=True)
-            use_unified_paint = (context.object.mode != 'PAINT_GREASE_PENCIL')
-            ups = context.tool_settings.unified_paint_settings
-            prop_owner = ups if use_unified_paint and ups.use_unified_color else brush
-            enable_color_picker = settings.color_mode == 'VERTEXCOLOR'
-            if not enable_color_picker:
-                ma = ps_ctx.ps_object.active_material
-                icon_id = 0
-                txt_ma = ""
-                if ma:
-                    ma.id_data.preview_ensure()
-                    if ma.id_data.preview:
-                        icon_id = ma.id_data.preview.icon_id
-                        txt_ma = ma.name
-                        maxw = 25
-                        if len(txt_ma) > maxw:
-                            txt_ma = txt_ma[:maxw - 5] + '..' + txt_ma[-3:]
-                col.popover(
-                    panel="TOPBAR_PT_grease_pencil_materials",
-                    text=txt_ma,
-                    icon_value=icon_id,
-                )
-                return
-            row = col.row(align=True)
-            row.scale_y = 1.2
-            row.prop(context.preferences.view, "color_picker_type", text="")
-            row = col.row()
-            row.scale_y = ps_ctx.ps_settings.color_picker_scale
-            row.template_color_picker(prop_owner, "color", value_slider=True)
-
-            sub_row = col.row(align=True)
-            if use_unified_paint:
-                self.prop_unified_color(sub_row, context, brush, "color", text="")
-                self.prop_unified_color(sub_row, context, brush, "secondary_color", text="")
-            else:
-                sub_row.prop(brush, "color", text="")
-                sub_row.prop(brush, "secondary_color", text="")
-
-            sub_row.operator("paint.brush_colors_flip", icon='FILE_REFRESH', text="")
-            # Eyedropper inline with GP colors: global eyedropper targeting the correct property
-            try:
-                use_unified_paint = (context.object.mode != 'PAINT_GREASE_PENCIL')
-                ups = context.tool_settings.unified_paint_settings
-                use_unified = (use_unified_paint and getattr(ups, 'use_unified_color', False))
-                path = (
-                    "tool_settings.unified_paint_settings.color" if use_unified else
-                    "tool_settings.gpencil_paint.brush.color"
-                )
-                props = sub_row.operator("ui.eyedropper_color", text="", icon='EYEDROPPER')
-                props.prop_data_path = path
-            except Exception:
-                pass
-
 
 classes = (
     MAT_PT_BrushTooltips,
-    MAT_PT_PaintTools,
     MAT_PT_Brush,
     MAT_PT_BrushAdvanced,
     MAT_PT_BrushColorSettings,

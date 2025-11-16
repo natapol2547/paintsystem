@@ -53,9 +53,19 @@ from .graph import (
     get_alpha_over_nodetree,
     create_texture_graph,
     create_geometry_graph,
+    get_layer_blend_type,
+    set_layer_blend_type,
 )
 from .graph.common import get_library_object, DEFAULT_PS_UV_MAP_NAME
 from .nested_list_manager import BaseNestedListManager, BaseNestedListItem
+
+BLEND_MODES = []
+for blend_mode in bpy.types.ShaderNodeMixRGB.bl_rna.properties['blend_type'].enum_items:
+    BLEND_MODES.append((blend_mode.identifier, blend_mode.name, blend_mode.description))
+    if blend_mode.identifier in ["MIX", "COLOR_BURN", "ADD", "LINEAR_LIGHT", "DIVIDE"]:
+        if blend_mode.identifier == "MIX":
+            BLEND_MODES.append(("PASSTHROUGH", "Pass Through", "Pass Through"))
+        BLEND_MODES.append((None))
 
 TEMPLATE_ENUM = [
     ('BASIC', "Basic", "Basic painting setup", "IMAGE", 0),
@@ -120,12 +130,13 @@ TEXTURE_TYPE_ENUM = [
 COORDINATE_TYPE_ENUM = [
     ('AUTO', "Auto UV", "Automatically create a new UV Map"),
     ('UV', "UV", "Open an existing UV Map"),
-    # ('GENERATED', "Generated", "Use a generated output of Texture Coordinate node"),
     ('OBJECT', "Object", "Use a object output of Texture Coordinate node"),
     ('CAMERA', "Camera", "Use a camera output of Texture Coordinate node"),
     ('WINDOW', "Window", "Use a window output of Texture Coordinate node"),
     ('REFLECTION', "Reflection", "Use a reflection output of Texture Coordinate node"),
     ('POSITION', "Position", "Use a position output of Geometry node"),
+    ('GENERATED', "Generated", "Use a generated output of Texture Coordinate node"),
+    ('DECAL', "Decal", "Use a decal output of Geometry node"),
 ]
 
 ATTRIBUTE_TYPE_ENUM = [
@@ -166,6 +177,17 @@ FILTER_TYPE_ENUM = [
     ('SHARPEN', "Sharpen", "Sharpen"),
 ]
 
+STRING_CACHE = {}
+def intern_enum_items(items):
+    def intern_string(s):
+        if not isinstance(s, str):
+            return s
+        global STRING_CACHE
+        if s not in STRING_CACHE:
+            STRING_CACHE[s] = s
+        return STRING_CACHE[s]
+    return [tuple(intern_string(s) for s in item) for item in items]
+
 def is_valid_uuidv4(uuid_string):
     """
     Checks if a given string is a valid UUIDv4.
@@ -204,9 +226,6 @@ def update_active_image(self=None, context: bpy.types.Context = None):
     obj = ps_ctx.ps_object
     mat = ps_ctx.active_material
     active_channel = ps_ctx.active_channel
-    if not obj.name == "PS Camera Plane":
-        # print("Setting last selected PS object: ", obj.name)
-        ps_ctx.ps_scene_data.last_selected_ps_object = obj
     if not mat or not active_channel:
         return
     active_layer = ps_ctx.active_layer
@@ -244,6 +263,18 @@ def update_active_group(self, context):
     active_group = ps_ctx.active_group
     if active_group:
         active_group.update_node_tree(context)
+
+def find_channels_containing_layer(check_layer: "Layer") -> list["Channel"]:
+    channels = []
+    for material in bpy.data.materials:
+        if hasattr(material, 'ps_mat_data'):
+            for group in material.ps_mat_data.groups:
+                for channel in group.channels:
+                    for layer in channel.layers:
+                        if layer == check_layer or layer.linked_layer_uid == check_layer.uid:
+                            channels.append(channel)
+    print(f"Found {len(channels)} channels containing layer {check_layer.layer_name}")
+    return channels
 
 def get_node_from_nodetree(node_tree: NodeTree, identifier: str) -> Node | None:
     for node in node_tree.nodes:
@@ -534,7 +565,7 @@ class GlobalLayer(PropertyGroup):
                         elif self.gradient_type == 'RADIAL':
                             self.empty_object.empty_display_type = 'SPHERE'
                     elif self.empty_object.name not in context.view_layer.objects:
-                        add_empty_to_collection(self.empty_object)
+                        add_empty_to_collection(context, self.empty_object)
                 layer_graph = create_gradient_graph(self)
             case "RANDOM":
                 layer_graph = create_random_graph(self)
@@ -729,6 +760,13 @@ class GlobalLayer(PropertyGroup):
         update=update_brush_settings
     )
 
+
+
+def add_empty_to_collection(context: bpy.types.Context, empty_object: bpy.types.Object):
+    collection = get_paint_system_collection(context)
+    if empty_object.name not in collection.objects:
+        collection.objects.link(empty_object)
+
 class Layer(BaseNestedListItem):
     """Base class for material layers in the Paint System"""
     
@@ -743,11 +781,17 @@ class Layer(BaseNestedListItem):
     )
     
     def update_node_tree(self, context):
-        self = self.get_layer_data()
+        if not self.auto_update_node_tree:
+            return
+        if self.is_linked:
+            return
         if not is_valid_uuidv4(self.uid):
             self.uid = str(uuid.uuid4())
         if self.type == "BLANK":
             return
+        
+        if self.blend_mode == "PASSTHROUGH" and self.type != "FOLDER":
+            self.blend_mode = "MIX"
         
         if not self.node_tree and not self.is_linked:
             node_tree = bpy.data.node_groups.new(name=f"PS_Layer ({self.layer_name})", type='ShaderNodeTree')
@@ -767,10 +811,20 @@ class Layer(BaseNestedListItem):
             ensure_sockets(node_tree, expected_input, "INPUT")
             ensure_sockets(node_tree, expected_output, "OUTPUT")
         if self.layer_name:
-            self.node_tree.name = f".PS_Layer ({self.layer_name})"
+            self.node_tree.name = f"PS {self.layer_name} ({self.uid[:8]})"
         
         if self.coord_type == 'AUTO':
             ensure_paint_system_uv_map(context)
+        
+        if self.coord_type == "DECAL":
+            if not self.empty_object:
+                image_tex_node = self.find_node("image")
+                if image_tex_node and image_tex_node.extension != "CLIP":
+                    image_tex_node.extension = "CLIP"
+                self.ensure_empty_object()
+                self.empty_object.empty_display_type = 'SINGLE_ARROW'
+            elif self.empty_object.name not in context.view_layer.objects:
+                add_empty_to_collection(context, self.empty_object)
         
         match self.type:
             case "IMAGE":
@@ -786,24 +840,15 @@ class Layer(BaseNestedListItem):
             case "ADJUSTMENT":
                 layer_graph = create_adjustment_graph(self)
             case "GRADIENT":
-                def add_empty_to_collection(empty_object):
-                    collection = get_paint_system_collection(context)
-                    collection.objects.link(empty_object)
-                    
                 if self.gradient_type in ('LINEAR', 'RADIAL'):
                     if not self.empty_object:
-                        ps_ctx = parse_context(context)
-                        with bpy.context.temp_override():
-                            empty_object = bpy.data.objects.new(f"{self.name}", None)
-                            empty_object.parent = ps_ctx.ps_object
-                            add_empty_to_collection(empty_object)
-                        self.empty_object = empty_object
+                        self.ensure_empty_object()
                         if self.gradient_type == 'LINEAR':
                             self.empty_object.empty_display_type = 'SINGLE_ARROW'
                         elif self.gradient_type == 'RADIAL':
                             self.empty_object.empty_display_type = 'SPHERE'
                     elif self.empty_object.name not in context.view_layer.objects:
-                        add_empty_to_collection(self.empty_object)
+                        add_empty_to_collection(context, self.empty_object)
                 layer_graph = create_gradient_graph(self)
             case "RANDOM":
                 layer_graph = create_random_graph(self)
@@ -817,11 +862,15 @@ class Layer(BaseNestedListItem):
                 raise ValueError(f"Invalid layer type: {self.type}")
         
         # Clean up
-        if self.empty_object and self.type != "GRADIENT":
+        if self.empty_object and self.type not in ("GRADIENT", "IMAGE", "TEXTURE"):
             collection = get_paint_system_collection(context)
             if self.empty_object.name in collection.objects:
                 collection.objects.unlink(self.empty_object)
-        
+        elif self.type == "IMAGE" and self.empty_object and self.coord_type != "DECAL":
+            collection = get_paint_system_collection(context)
+            if self.empty_object.name in collection.objects:
+                collection.objects.unlink(self.empty_object)
+
         if not self.enabled:
             layer_graph.link("group_input", "group_output", "Color", "Color")
             layer_graph.link("group_input", "group_output", "Alpha", "Alpha")
@@ -862,13 +911,19 @@ class Layer(BaseNestedListItem):
         description="Layer name",
         update=update_node_tree
     )
-    updating_name_flag: bpy.props.BoolProperty(
+    updating_name_flag: BoolProperty(
         default=False, 
         options={'SKIP_SAVE'} # Don't save this flag in the .blend file
     )
     image: PointerProperty(
         name="Image",
         type=Image,
+        update=update_node_tree
+    )
+    correct_image_aspect: BoolProperty(
+        name="Correct Image Aspect",
+        description="Correct the image aspect",
+        default=True,
         update=update_node_tree
     )
     actions: CollectionProperty(
@@ -915,7 +970,7 @@ class Layer(BaseNestedListItem):
         name="Coordinate Type",
         description="Coordinate type",
         default='UV',
-        update=update_node_tree
+        update=update_node_tree,
     )
     uv_map_name: StringProperty(
         name="UV Map",
@@ -937,7 +992,7 @@ class Layer(BaseNestedListItem):
         items=GRADIENT_TYPE_ENUM,
         name="Gradient Type",
         description="Gradient type",
-        default='LINEAR',
+        default='GRADIENT_MAP',
         update=update_node_tree
     )
     texture_type: EnumProperty(
@@ -1001,6 +1056,26 @@ class Layer(BaseNestedListItem):
         default=False,
         update=update_brush_settings
     )
+    def update_blend_mode(self, context: Context):
+        layer_data = self.get_layer_data()
+        layer_data.update_node_tree(context)
+        for channel in find_channels_containing_layer(layer_data):
+            channel.update_node_tree(context)
+    def get_blend_mode_items(self, context: Context) -> list[tuple[str, str, str]]:
+        return BLEND_MODES if self.type == "FOLDER" else [blend_mode for blend_mode in BLEND_MODES if blend_mode == None or blend_mode[0] != "PASSTHROUGH"]
+    blend_mode: EnumProperty(
+        items=get_blend_mode_items,
+        name="Blend Mode",
+        description="Blend mode",
+        update=update_blend_mode
+    )
+    
+    auto_update_node_tree: BoolProperty(
+        name="Update Node Tree",
+        description="Update the node tree",
+        default=True,
+        options={'SKIP_SAVE'}
+    )
     
     # Linked layer data
     @property
@@ -1020,12 +1095,105 @@ class Layer(BaseNestedListItem):
         update=update_node_tree
     )
     
-    def copy_layer_data(self, layer: "Layer"):
+    update_node_tree_flag: BoolProperty(
+        name="Update Node Tree Flag",
+        description="Update the node tree flag",
+        default=True,
+        options={'SKIP_SAVE'}
+    )
+    
+    @property
+    def uses_coord_type(self) -> bool:
+        return self.type in ['IMAGE', 'TEXTURE']
+    
+    def get_layer_warnings(self, context: Context) -> List[str]:
+        ps_ctx = parse_context(context)
+        layer_data = self.get_layer_data()
+        active_channel = ps_ctx.active_channel
+        flattened = active_channel.flatten_hierarchy()
+        current_flat_index = next(
+            (i for i, (it, _) in enumerate(flattened) if it.id == self.id), -1)
+        below_layer, next_index = active_channel.get_next_sibling_item(flattened, current_flat_index)
+        warnings = []
+        blend_mode = get_layer_blend_type(layer_data)
+        # If no layer below
+        if not below_layer or active_channel.get_parent_layer_id(below_layer) != active_channel.get_parent_layer_id(self):
+            if blend_mode != 'MIX':
+                warnings.append("Blend mode is not MIX and there is no layer below")
+            if layer_data.type == "ADJUSTMENT":
+                warnings.append("Adjustment do not work without a layer below")
+            
+        return warnings
+    
+    def link_layer_data(self, layer: "Layer"):
         for prop in layer.bl_rna.properties:
             pid = getattr(prop, 'identifier', '')
             if not pid or getattr(prop, 'is_readonly', False):
                 continue
-            setattr(self, pid, getattr(layer, pid))
+            if pid in {"name", "uid", "id", "order", "parent_id", "layer_name"}:
+                continue
+            value = getattr(layer, pid)
+            if getattr(self, pid) == value:
+                continue
+            setattr(self, pid, value)
+    
+    def ensure_empty_object(self):
+        context = bpy.context
+        ps_ctx = parse_context(context)
+        empty_name = f"{self.layer_name} ({self.uid[:8]}) Empty"
+        if empty_name in bpy.data.objects:
+            empty_object = bpy.data.objects[empty_name]
+            empty_object.parent = ps_ctx.ps_object
+            add_empty_to_collection(context, empty_object)
+        else:
+            with bpy.context.temp_override():
+                empty_object = bpy.data.objects.new(empty_name, None)
+                empty_object.parent = ps_ctx.ps_object
+                add_empty_to_collection(context, empty_object)
+        self.empty_object = empty_object
+        return empty_object
+    
+    def duplicate_layer_data(self, layer: "Layer"):
+        self.uid = str(uuid.uuid4())
+        if layer.node_tree:
+            self.node_tree = layer.node_tree.copy()
+        if layer.image:
+            # if image is not saved, save it
+            image: Image = layer.image
+            if image.is_dirty:
+                if image.filepath != '':
+                    image.save()
+                else:
+                    image.pack()
+            self.image = image.copy()
+        if layer.empty_object:
+            self.empty_object = layer.empty_object.copy()
+            self.empty_object.name = f"{self.layer_name} ({self.uid[:8]}) Empty"
+            self.ensure_empty_object()
+    
+    def unlink_layer_data(self):
+        layer = self.get_layer_data()
+        if is_layer_linked(self) and not self.is_linked:
+            # self owns the data
+            self.transfer_linked_data()
+            self.duplicate_layer_data(self)
+        else:
+            self.linked_layer_uid = ""
+            self.linked_material = None
+            self.copy_layer_data(layer)
+    
+    def copy_layer_data(self, layer: "Layer"):
+        self.duplicate_layer_data(layer)
+        for prop in layer.bl_rna.properties:
+            pid = getattr(prop, 'identifier', '')
+            if not pid or getattr(prop, 'is_readonly', False):
+                continue
+            if pid in {"name", "uid", "node_tree", "image", "empty_object", "type", "id", "order", "parent_id", "layer_name"}:
+                continue
+            value = getattr(layer, pid)
+            if getattr(self, pid) == value:
+                continue
+            setattr(self, pid, value)
     
     def get_layer_data(self) -> "Layer":
         if self.is_linked:
@@ -1035,24 +1203,66 @@ class Layer(BaseNestedListItem):
             
             # Use cached UID lookup dictionary for O(1) access instead of nested loops
             uid_to_layer = _get_material_layer_uid_map(self.linked_material)
+            layer = uid_to_layer.get(self.linked_layer_uid)
+            if not layer:
+                layer = _get_material_layer_uid_map(self.linked_material, force_refresh=True).get(self.linked_layer_uid)
             return uid_to_layer.get(self.linked_layer_uid)
         return self
+    
+    def transfer_linked_data(self):
+        linked_layer_uid_map = {}
+        for material in bpy.data.materials:
+            if hasattr(material, 'ps_mat_data'):
+                for group in material.ps_mat_data.groups:
+                    for channel in group.channels:
+                        for layer in channel.layers:
+                            if layer.is_linked and layer.linked_layer_uid == self.uid:
+                                linked_layer_uid_map[layer.uid] = [layer, material]
+        # Migrate layer data to one of the linked layers
+        linked_layers = [layer for layer, _ in linked_layer_uid_map.values() if layer.is_linked and layer.linked_layer_uid == self.uid]
+        new_main_layer, new_material = list(linked_layer_uid_map.values())[0]
+        new_main_layer.link_layer_data(self)
+        
+        for linked_layer in linked_layers[1:]:
+            linked_layer.linked_layer_uid = new_main_layer.uid
+            linked_layer.linked_material = new_material
+        
+        return new_main_layer, new_material
+    
+    def delete_layer_data(self):
+        """
+        Delete the layer data. Transfer to a linked layer if it is linked.
+        """
+        layer = self.get_layer_data()
+        if is_layer_linked(layer) and not self.is_linked:
+            print(f"Transferring layer data for {layer.name} to linked layers")
+            self.transfer_linked_data()
+        else:
+            print(f"Deleting layer data for {self.name}")
+            if self.empty_object:
+                bpy.data.objects.remove(self.empty_object, do_unlink=True)
+            # TODO: The following causes some issue when undoing
+            if self.node_tree:
+                bpy.data.node_groups.remove(self.node_tree)
 
 def get_layer_by_uid(material: Material, uid: str) -> Layer | None:
     uid_to_layer = _get_material_layer_uid_map(material)
-    return uid_to_layer.get(uid)
+    layer = uid_to_layer.get(uid)
+    if not layer:
+        layer = _get_material_layer_uid_map(material, force_refresh=True).get(uid)
+    return layer
 
 # Module-level cache for material layer UID maps
 _material_uid_cache: Dict[Material, Dict[str, 'Layer']] = {}
 
-def _get_material_layer_uid_map(material: Material) -> Dict[str, 'Layer']:
+def _get_material_layer_uid_map(material: Material, force_refresh: bool = False) -> Dict[str, 'Layer']:
     """Get a UID to Layer mapping for a material. Uses caching for performance."""
     if not material or not material.ps_mat_data:
         return {}
     
     # Check if cache is valid (simple version check using material name as key)
     cache_key = material
-    if cache_key in _material_uid_cache:
+    if cache_key in _material_uid_cache and not force_refresh:
         return _material_uid_cache[cache_key]
     
     # Build the UID map
@@ -1065,7 +1275,6 @@ def _get_material_layer_uid_map(material: Material) -> Dict[str, 'Layer']:
     
     # Cache it
     _material_uid_cache[cache_key] = uid_map
-    # print(f"Material {material.name} UID map: {uid_map}")
     return uid_map
 
 def _invalidate_material_layer_cache(material: Material = None):
@@ -1127,6 +1336,7 @@ def ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu=True):
             bpy.ops.object.bake(**bake_params, uv_layer=uv_layer, use_clear=True)
         except Exception as e:
             # Try baking with CPU if GPU fails
+            print(f"GPU baking failed, trying CPU")
             cycles.device = 'CPU'
             bpy.ops.object.bake(**bake_params, uv_layer=uv_layer, use_clear=True)
 
@@ -1139,6 +1349,15 @@ def ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu=True):
 
 class Channel(BaseNestedListManager):
     """Custom data for material layers in the Paint System"""
+    
+    def get_parent_layer_id(self, layer: "Layer") -> int:
+        if layer.parent_id == -1:
+            return -1
+        parent_layer = self.get_item_by_id(layer.parent_id)
+        parent_layer_linked = parent_layer.get_layer_data()
+        if parent_layer_linked.blend_mode == "PASSTHROUGH":
+            return self.get_parent_layer_id(parent_layer)
+        return parent_layer.id
     
     def get_item_name(self, item):
         return item.layer_name if item else "root"
@@ -1160,7 +1379,7 @@ class Channel(BaseNestedListManager):
         node_builder.add_node("group_output", "NodeGroupOutput")
         
         if self.bake_image:
-            node_builder.add_node("uv_map", "ShaderNodeUVMap", {"uv_map": self.bake_uv_map})
+            node_builder.add_node("uv_map", "ShaderNodeUVMap", {"uv_map": self.bake_uv_map}, force_properties=True)
             node_builder.add_node("bake_image", "ShaderNodeTexImage", {"image": self.bake_image})
             node_builder.link("uv_map", "bake_image", "UV", "Vector")
             if self.use_bake_image:
@@ -1169,7 +1388,7 @@ class Channel(BaseNestedListManager):
                 node_builder.compile()
                 return
         
-        flattened_layers = self.flattened_layers
+        flattened_unlinked_layers = self.flattened_unlinked_layers
         @dataclass
         class PreviousLayer:
             color_name: str
@@ -1193,18 +1412,24 @@ class Channel(BaseNestedListManager):
         node_builder.link("alpha_clamp_end", "group_output", "Result", "Alpha")
         previous_dict[-1] = PreviousLayer(color_name="group_output", color_socket="Color", alpha_name="alpha_clamp_end", alpha_socket="Value")
             
-        if len(flattened_layers) > 0:
-            for layer in flattened_layers:
-                if not layer.node_tree:
+        if len(flattened_unlinked_layers) > 0:
+            for unlinked_layer in flattened_unlinked_layers:
+                layer = unlinked_layer.get_layer_data()
+                if layer is None or not layer.node_tree:
                     continue
-                previous_data = previous_dict.get(layer.parent_id, None)
+                if layer.blend_mode == "PASSTHROUGH":
+                    continue
+                sample_id = unlinked_layer.parent_id
+                if unlinked_layer.parent_id != -1:
+                    sample_id = self.get_parent_layer_id(unlinked_layer)
+                previous_data = previous_dict.get(sample_id, None)
                 if previous_data and previous_data.add_command and previous_data.add_command.properties.get("mute", False):
                     previous_data.add_command.properties["mute"] = False
-                layer_identifier = layer.uid
+                layer_identifier = unlinked_layer.uid
                 add_command = node_builder.add_node(
                     layer_identifier, "ShaderNodeGroup",
                     {"node_tree": layer.node_tree, "mute": layer.type == "ADJUSTMENT"},
-                    {"Clip": layer.is_clip},
+                    {"Clip": layer.is_clip or layer.type == "ADJUSTMENT"},
                     force_properties=True,
                     force_default_values=True
                 )
@@ -1247,7 +1472,7 @@ class Channel(BaseNestedListManager):
                     previous_data.alpha_name = layer_identifier
                     previous_data.alpha_socket = "Alpha"
                 if layer.type == "FOLDER":
-                    previous_dict[layer.id] = PreviousLayer(
+                    previous_dict[unlinked_layer.id] = PreviousLayer(
                         color_name=layer_identifier,
                         color_socket="Over Color",
                         alpha_name=layer_identifier,
@@ -1286,7 +1511,16 @@ class Channel(BaseNestedListManager):
         self.updating_name_flag = False
         update_active_group(self, context)
     
-    def create_layer(self, layer_name: str = "Layer Name", layer_type: str = "IMAGE", update_active_index: bool = True, insert_at: Literal["TOP", "BOTTOM", "CURSOR"] = "CURSOR", handle_folder: bool = True) -> 'Layer':
+    def create_layer(
+        self, 
+        context,
+        layer_name: str = "Layer Name",
+        layer_type: str = "BLANK", # "BLANK" is a special type that creates a blank layer with no node tree
+        update_active_index: bool = True, 
+        insert_at: Literal["TOP", "BOTTOM", "CURSOR", "BEFORE", "AFTER"] = "CURSOR", 
+        handle_folder: bool = True,
+        **kwargs
+    ) -> 'Layer':
         parent_id, insert_order = self.get_insertion_data(handle_folder=handle_folder, insert_at=insert_at)
         # Adjust existing items' order
         self.adjust_sibling_orders(parent_id, insert_order)
@@ -1296,8 +1530,20 @@ class Channel(BaseNestedListManager):
                 parent_id=parent_id,
                 order=insert_order
             )
+        layer.auto_update_node_tree = False
         layer.layer_name = layer_name
         layer.uid = str(uuid.uuid4())
+        for key, value in kwargs.items():
+            setattr(layer, key, value)
+        
+        # Layer type specific setup
+        match layer.type:
+            case "IMAGE":
+                if "image" not in kwargs:
+                    layer.image = bpy.data.images.new(name=layer.layer_name, width=2048, height=2048, alpha=True)
+                    layer.image.generated_color = (0, 0, 0, 0)
+                    layer.image.pack()
+        
         # Update active index
         if update_active_index:
             new_id = layer.id
@@ -1306,13 +1552,27 @@ class Channel(BaseNestedListManager):
                     if item.id == new_id:
                         self.active_index = i
                         break
+        layer.auto_update_node_tree = True
+        layer.update_node_tree(context)
+        self.update_node_tree(context)
         return layer
     
-    def create_linked_layer(self, layer_uid: str, material: Material) -> 'Layer':
-        new_layer = self.create_layer()
-        new_layer.linked_layer_uid = layer_uid
-        new_layer.linked_material = material
-        return new_layer
+    def delete_layer(self, context, layer: "Layer"):
+        item_id = layer.id
+        order = int(layer.order)
+        parent_id = int(layer.parent_id)
+        def on_delete(item: "Layer"):
+            item.delete_layer_data()
+        if item_id != -1 and self.remove_item_and_children(item_id, on_delete):
+            # Update active_index
+            self.normalize_orders()
+            for i, item in enumerate(self.layers):
+                if item.order == order and item.parent_id == parent_id:
+                    self.active_index = i
+                    break
+        self.active_index = min(
+            self.active_index, len(self.layers) - 1)
+        self.update_node_tree(context)
     
     def bake(self, context: Context, mat: Material, bake_image: Image, uv_layer: str, use_gpu: bool = True, use_group_tree: bool = True):
         """Bake the channel
@@ -1334,6 +1594,12 @@ class Channel(BaseNestedListManager):
             raise ValueError("Node tree not found")
         ps_context = parse_context(context)
         obj = ps_context.ps_object
+        
+        # Ensure ps_object is the only object selected
+        bpy.ops.object.mode_set(mode="OBJECT")
+        bpy.ops.object.select_all(action='DESELECT')
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
         
         material_output = get_material_output(node_tree)
         surface_socket = material_output.inputs['Surface']
@@ -1434,6 +1700,10 @@ class Channel(BaseNestedListManager):
     @property
     def flattened_layers(self):
         return [layer.get_layer_data() for layer, _ in self.flatten_hierarchy()]
+
+    @property
+    def flattened_unlinked_layers(self):
+        return [layer for layer, _ in self.flatten_hierarchy()]
     
     active_index: IntProperty(name="Active Material Layer Index", update=update_active_image)
     type: EnumProperty(
@@ -1523,6 +1793,37 @@ class Channel(BaseNestedListManager):
             ))
 
         return menu_items
+    
+    def isolate_channel(self, context):
+        ps_ctx = parse_context(context)
+        active_group = ps_ctx.active_group
+        active_channel = ps_ctx.active_channel
+        ps_mat_data = ps_ctx.ps_mat_data
+        mat = ps_ctx.active_material
+        mat_output = get_material_output(mat.node_tree)
+        if not ps_mat_data.preview_channel:
+            ps_mat_data.preview_channel = True
+            # Store the node connected to material output
+            connected_link = mat_output.inputs[0].links[0]
+            ps_ctx.ps_mat_data.original_node_name = connected_link.from_node.name
+            ps_ctx.ps_mat_data.original_socket_name = connected_link.from_socket.name
+            ps_ctx.ps_mat_data.original_view_transform = str(context.scene.view_settings.view_transform) # bpy.data.scenes["Scene"].view_settings.view_transform
+            
+            # Find channel node tree
+            node = find_node(mat.node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree})
+            if node:
+                # Connect node tree to material output
+                connect_sockets(mat_output.inputs[0], node.outputs[active_channel.name])
+            
+            context.scene.view_settings.view_transform = "Standard"
+        else:
+            ps_mat_data.preview_channel = False
+            # Find node by name
+            node = mat.node_tree.nodes.get(ps_mat_data.original_node_name)
+            if node:
+                connect_sockets(node.outputs[ps_mat_data.original_socket_name], mat_output.inputs[0])
+            
+            context.scene.view_settings.view_transform = ps_ctx.ps_mat_data.original_view_transform
 
 
 class Group(PropertyGroup):
@@ -1603,8 +1904,7 @@ class Group(PropertyGroup):
     )
     uv_map_name: StringProperty(
         name="UV Map",
-        description="UV map",
-        default="UVMap"
+        description="UV map"
     )
     
     def update_channel(self, context):
@@ -1612,8 +1912,8 @@ class Group(PropertyGroup):
         ps_mat_data = ps_ctx.ps_mat_data
         if ps_mat_data.preview_channel:
             # Call paint_system.isolate_active_channel twice to ensure it's updated
-            bpy.ops.paint_system.isolate_active_channel('EXEC_DEFAULT')
-            bpy.ops.paint_system.isolate_active_channel('EXEC_DEFAULT')
+            ps_ctx.active_channel.isolate_channel(context)
+            ps_ctx.active_channel.isolate_channel(context)
         if ps_ctx.active_channel.use_bake_image:
             # Force to object mode
             bpy.ops.object.mode_set(mode="OBJECT")
@@ -1624,6 +1924,49 @@ class Group(PropertyGroup):
         name="Node Tree",
         type=NodeTree
     )
+    
+    def create_channel(
+        self, 
+        context, 
+        channel_name: str = "New Channel",
+        channel_type: str = "COLOR",
+        color_space: str = "COLOR",
+        use_alpha: bool = False,
+        use_normalize: bool = False,
+        world_to_object_normal: bool = False,
+        use_max_min: bool = False,
+        factor_min: float = 0,
+        factor_max: float = 1
+    ):
+        channels = self.channels
+        node_tree = bpy.data.node_groups.new(name=f"Temp Channel Name", type='ShaderNodeTree')
+        new_channel = channels.add()
+        self.active_index = len(channels) - 1
+        unique_name = get_next_unique_name(channel_name, [channel.name for channel in channels])
+        new_channel.name = unique_name
+        new_channel.type = channel_type
+        new_channel.use_alpha = use_alpha
+        new_channel.use_normalize = use_normalize
+        new_channel.color_space = color_space
+        new_channel.use_max_min = use_max_min
+        new_channel.world_to_object_normal = world_to_object_normal
+        if channel_type == "FLOAT" and new_channel.use_max_min:
+            new_channel.factor_min = factor_min
+            new_channel.factor_max = factor_max
+        new_channel.node_tree = node_tree
+        new_channel.update_node_tree(context)
+        self.update_node_tree(context)
+        return new_channel
+    
+    def delete_channel(self, context, channel: "Channel"):
+        active_index = self.channels.find(channel.name)
+        if active_index < 0 or active_index >= len(self.channels):
+            self.report({'ERROR'}, "No valid channel selected")
+            return {'CANCELLED'}
+        
+        self.channels.remove(active_index)
+        self.active_index = max(0, active_index - 1)
+        self.update_node_tree(context)
 
 
 class ClipboardLayer(PropertyGroup):
@@ -1724,6 +2067,22 @@ class PaintSystemGlobalData(PropertyGroup):
         default="#000000",
         update=update_hex_color,
     )
+    
+    def add_layer_to_clipboard(self, layer: "Layer"):
+        ps_ctx = PSContextMixin.parse_context(bpy.context)
+        clipboard_layer = self.clipboard_layers.add()
+        if layer.is_linked:
+            clipboard_layer.uid = layer.linked_layer_uid
+            clipboard_layer.material = layer.linked_material
+            print(f"Linked layer: {layer.linked_layer_uid} {layer.linked_material}")
+        else:
+            clipboard_layer.uid = layer.uid
+            clipboard_layer.material = ps_ctx.active_material
+            print(f"Copy Unlinked layer: {layer.uid} {ps_ctx.active_material}")
+    
+    def clear_clipboard(self):
+        self.clipboard_layers.clear()
+        self.active_clipboard_index = 0
 
 class MaterialData(PropertyGroup):
     """Custom data for channels in the Paint System"""
@@ -1750,6 +2109,10 @@ class MaterialData(PropertyGroup):
     original_socket_name: StringProperty(
         name="Original Socket Name",
         description="Original socket name of the channel"
+    )
+    original_view_transform: StringProperty(
+        name="Original View Transform",
+        description="Original view transform of the channel"
     )
 
 
@@ -1804,33 +2167,11 @@ def get_global_layer(layer: Layer) -> GlobalLayer | None:
     #         return global_layer
     return bpy.context.scene.ps_scene_data.layers.get(layer.ref_layer_id, None)
 
-def get_layer_blend_type(layer: Layer) -> str:
-    """Get the blend mode of the global layer"""
-    node_tree = layer.node_tree
-    if not node_tree:
-        raise ValueError("Node tree is not found")
-    mix_node = find_node(node_tree, {'label': 'mix_rgb', 'bl_idname': 'ShaderNodeMix'})
-    if not mix_node:
-        raise ValueError("Mix node is not found")
-    return str(mix_node.blend_type)
-
-def set_layer_blend_type(layer: Layer, blend_type: str) -> None:
-    """Set the blend mode of the global layer"""
-    node_tree = layer.node_tree
-    if not node_tree:
-        raise ValueError("Node tree is not found")
-    mix_node = find_node(node_tree, {'label': 'mix_rgb', 'bl_idname': 'ShaderNodeMix'})
-    if not mix_node:
-        raise ValueError("Mix node is not found")
-    mix_node.blend_type = blend_type
-
 def is_layer_linked(check_layer: Layer) -> bool:
     """Check if the layer is linked"""
     # Check all material in the scene and count the number of times the global layer is used
     counter = Counter()
     for material in bpy.data.materials:
-        if material.name == "PS Camera Plane Material":
-            continue
         if hasattr(material, 'ps_mat_data'):
             for group in material.ps_mat_data.groups:
                 for channel in group.channels:
@@ -1864,6 +2205,7 @@ class PSContext:
     active_group: Group | None = None
     active_channel: Channel | None = None
     active_layer: Layer | None = None
+    unlinked_layer: Layer | None = None
     active_global_layer: GlobalLayer | None = None
 
 def parse_context(context: bpy.types.Context) -> PSContext:
@@ -1915,13 +2257,13 @@ def parse_context(context: bpy.types.Context) -> PSContext:
             active_channel = channels[min(active_group.active_index, len(channels) - 1)]
 
     layers = None
-    active_layer = None
+    unlinked_layer = None
     if active_channel:
         layers = active_channel.layers
         if layers and active_channel.active_index >= 0:
-            active_layer = layers[min(active_channel.active_index, len(layers) - 1)]
-            if active_layer:
-                active_layer = active_layer.get_layer_data()
+            unlinked_layer = layers[min(active_channel.active_index, len(layers) - 1)]
+            if unlinked_layer:
+                unlinked_layer = unlinked_layer
     
     return PSContext(
         ps_settings=ps_settings,
@@ -1932,8 +2274,9 @@ def parse_context(context: bpy.types.Context) -> PSContext:
         ps_mat_data=mat_data,
         active_group=active_group,
         active_channel=active_channel,
-        active_layer=active_layer,
-        active_global_layer=get_global_layer(active_layer) if active_layer else None
+        active_layer=unlinked_layer.get_layer_data() if unlinked_layer else None,
+        unlinked_layer=unlinked_layer,
+        active_global_layer=get_global_layer(unlinked_layer) if unlinked_layer else None
     )
 
 class PSContextMixin:
