@@ -29,9 +29,10 @@ from ..paintsystem.data import (
 )
 
 # Check if PIL is available for conditional UI display
+# Note: Import may fail if Pillow wheel isn't loaded yet or on unsupported platforms
 try:
     from ..operators.image_filters.common import PIL_AVAILABLE
-except ImportError:
+except (ImportError, ModuleNotFoundError, AttributeError):
     PIL_AVAILABLE = False
 
 if is_newer_than(4,3):
@@ -278,30 +279,29 @@ class MAT_PT_Layers(PSContextMixin, Panel):
             sub.operator("grease_pencil.layer_move", icon='TRIA_UP', text="").direction = 'UP'
             sub.operator("grease_pencil.layer_move", icon='TRIA_DOWN', text="").direction = 'DOWN'
         elif ps_ctx.ps_object.type == 'MESH':
-            if not ps_ctx.active_channel.use_bake_image:
-                if not ps_ctx.ps_settings.use_legacy_ui:
-                    # col = layout.column()
-                    # row = col.row()
-                    # row.scale_y = 1.2
-                    # row.scale_x = 1.2
-                    # new_row = row.row(align=True)
-                    # new_row.operator("wm.call_menu", text="New", icon_value=get_icon('layer_add')).name = "MAT_MT_AddLayerMenu"
-                    # new_row.operator("paint_system.new_folder_layer",
-                    #      icon_value=get_icon('folder'), text="")
-                    # new_row.menu("MAT_MT_LayerMenu",
-                    #     text="", icon='COLLAPSEMENU')
-                    # move_row = row.row(align=True)
-                    # move_row.operator("paint_system.move_up", icon="TRIA_UP", text="")
-                    # move_row.operator("paint_system.move_down", icon="TRIA_DOWN", text="")
-                    # row.operator("paint_system.delete_item",
-                    #             text="", icon="TRASH")
-                    main_row = layout.row()
-                    box = main_row.box()
-                    if ps_ctx.active_layer and ps_ctx.active_layer.node_tree:
-                        settings_box = box.box()
-                        layer_settings_ui(settings_box, context)
-                else:
-                    box = layout.box()
+            if not ps_ctx.ps_settings.use_legacy_ui:
+                # col = layout.column()
+                # row = col.row()
+                # row.scale_y = 1.2
+                # row.scale_x = 1.2
+                # new_row = row.row(align=True)
+                # new_row.operator("wm.call_menu", text="New", icon_value=get_icon('layer_add')).name = "MAT_MT_AddLayerMenu"
+                # new_row.operator("paint_system.new_folder_layer",
+                #      icon_value=get_icon('folder'), text="")
+                # new_row.menu("MAT_MT_LayerMenu",
+                #     text="", icon='COLLAPSEMENU')
+                # move_row = row.row(align=True)
+                # move_row.operator("paint_system.move_up", icon="TRIA_UP", text="")
+                # move_row.operator("paint_system.move_down", icon="TRIA_DOWN", text="")
+                # row.operator("paint_system.delete_item",
+                #             text="", icon="TRASH")
+                main_row = layout.row()
+                box = main_row.box()
+                if ps_ctx.active_layer and ps_ctx.active_layer.node_tree:
+                    settings_box = box.box()
+                    layer_settings_ui(settings_box, context)
+            else:
+                box = layout.box()
         
             active_group = ps_ctx.active_group
             active_channel = ps_ctx.active_channel

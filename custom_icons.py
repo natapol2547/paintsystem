@@ -34,9 +34,11 @@ def unload_icons():
 
 
 def get_icon(custom_icon_name):
-    """Get icon ID for custom icon name. Returns 0 if not loaded."""
+    """Return custom icon ID for use as `icon_value`.
+    Returns 0 when the icon set isn't loaded or the icon name is missing.
+    """
     if custom_icons is None:
-        return 0  # Return 0 (no icon) when icons not loaded yet
+        return 0
     if custom_icon_name not in custom_icons:
-        return 0  # Return 0 (no icon) for missing icons
+        return 0
     return custom_icons[custom_icon_name].icon_id
