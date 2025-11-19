@@ -4,7 +4,8 @@ from bpy.props import BoolProperty, EnumProperty
 
 from ..paintsystem.data import parse_context
 from ..preferences import get_preferences
-from .common import PSContextMixin
+from .common import PSContextMixin, scale_content, get_icon
+from ..utils.nodes import find_node
 
 
 _APPENDED_MENUS = []
@@ -101,119 +102,86 @@ class VIEW3D_PT_paintsystem_brush_color(Panel):
 
 
 class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, Panel):
-    """Quick Layer Actions - shows in N-panel and as RMB popover."""
+    """Quick paint controls + layer stack for RMB popover (as in PinkSystem01)."""
     bl_idname = 'VIEW3D_PT_paintsystem_quick_layers'
     bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_label = "Quick Layers"
-    bl_category = 'Paint System'
-    bl_parent_id = 'MAT_PT_PaintTools'
-    bl_options = {'INSTANCED', 'HIDE_HEADER'}
-    bl_order = 0  # Place at the top
-    bl_ui_units_x = 20  # 10% smaller width
-    bl_ui_units_y = 27  # 10% smaller height (was 30)
-    
+    bl_region_type = 'WINDOW'
+    bl_label = "Paint Tools"
+    bl_options = {'INSTANCED'}
+    bl_ui_units_x = 20
+    bl_ui_units_y = 27
+
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
         return ps_ctx.active_material is not None
-    
+
     def draw(self, context):
         layout = self.layout
         layout.use_property_split = False
         layout.use_property_decorate = False
-        
+
         ps_ctx = self.parse_context(context)
-        # Create two-column layout: left for color/brush, right for layers
-        main_split = layout.split(factor=0.5)
-        left_col = main_split.column()
-        right_col = main_split.column()
-        
-        # Import needed functions
-        from .common import scale_content, get_icon
-        from .layers_panels import layer_settings_ui
-        from ..utils.nodes import find_node
-        
-        # Add color picker at the very top (before material/channel checks)
         prefs = get_preferences(context)
         tool_settings = context.tool_settings
         image_paint = getattr(tool_settings, 'image_paint', None)
         brush = getattr(image_paint, 'brush', None) if image_paint else None
-        
+        wm = context.window_manager
+
+        split = layout.split(factor=0.48)
+        left_col = split.column()
+        right_col = split.column()
+
         if brush:
             color_box = left_col.box()
             color_col = color_box.column()
-            
-            # Determine if using unified color (safe attribute access for Blender 5.0+)
-            if hasattr(tool_settings, "unified_paint_settings"):
-                ups = tool_settings.unified_paint_settings
-            else:
-                ups = getattr(tool_settings, 'unified_paint_settings', None)
+
+            ups = getattr(tool_settings, "unified_paint_settings", None)
             use_unified = ups.use_unified_color if ups else False
             prop_owner = ups if use_unified else brush
-            
-            # Add a small separator before the color wheel
+
             color_col.separator(factor=0.3)
-            
-            # Color picker with value slider and size control
+
             picker_row = color_col.row()
-            picker_row.scale_y = 1.5  # Make color wheel bigger
+            picker_row.scale_y = 1.5
             picker_row.template_color_picker(prop_owner, "color", value_slider=True)
-            
-            # RGB color input with secondary color, swap, and eyedroppers (no separator above)
+
             row = color_col.row(align=True)
-            
-            # Primary and secondary color swatches
-            split = row.split(factor=0.5, align=True)
-            split.prop(prop_owner, "color", text="")
-            
-            # Secondary color - use unified settings for texture paint
+            swatches = row.split(factor=0.5, align=True)
+            swatches.prop(prop_owner, "color", text="")
             if ups and hasattr(ups, 'secondary_color'):
-                split.prop(ups, 'secondary_color', text="")
+                swatches.prop(ups, 'secondary_color', text="")
             elif hasattr(brush, 'secondary_color'):
-                split.prop(brush, 'secondary_color', text="")
+                swatches.prop(brush, 'secondary_color', text="")
             else:
-                # Fallback: show primary again
-                split.prop(prop_owner, "color", text="")
-            
-            # Swap colors button + local/global eyedropper
+                swatches.prop(prop_owner, "color", text="")
+
             if (ups and hasattr(ups, 'secondary_color')) or hasattr(brush, 'secondary_color'):
                 row.operator("paint.brush_colors_flip", text="", icon='FILE_REFRESH')
 
-            # Eyedropper: use Blender's global eyedropper behavior and target the active color property
             try:
-                path = (
-                    "tool_settings.unified_paint_settings.color" if use_unified else
-                    "tool_settings.image_paint.brush.color"
-                )
-                props = row.operator("ui.eyedropper_color", text="", icon='EYEDROPPER')
-                props.prop_data_path = path
+                data_path = "tool_settings.unified_paint_settings.color" if use_unified else "tool_settings.image_paint.brush.color"
+                eyedrop = row.operator("ui.eyedropper_color", text="", icon='EYEDROPPER')
+                eyedrop.prop_data_path = data_path
             except Exception:
                 pass
 
-            # Global eyedropper removed per request
-            
-            # HSV sliders (optional via preferences)
             if getattr(prefs, 'show_hsv_sliders_rmb', False):
                 hsv_col = color_col.column(align=True)
                 hsv_col.prop(prop_owner, "color", text="Hue", index=0, slider=True)
                 hsv_col.prop(prop_owner, "color", text="Saturation", index=1, slider=True)
                 hsv_col.prop(prop_owner, "color", text="Value", index=2, slider=True)
-            
-            # Brush settings (no separator above)
-            # Blend mode (full width)
+
             if hasattr(brush, 'blend'):
                 color_col.prop(brush, 'blend', text='Blend')
-            
-            # Radius with pressure toggle
+
             row = color_col.row(align=True)
             size_owner = ups if (ups and getattr(ups, 'use_unified_size', False)) else brush
             if size_owner and hasattr(size_owner, 'size'):
                 row.prop(size_owner, 'size', text='Radius')
                 if hasattr(brush, 'use_pressure_size'):
                     row.prop(brush, 'use_pressure_size', text="", icon='STYLUS_PRESSURE')
-            
-            # Strength with pressure toggle
+
             row = color_col.row(align=True)
             strength_owner = ups if (ups and getattr(ups, 'use_unified_strength', False)) else brush
             if strength_owner and hasattr(strength_owner, 'strength'):
@@ -221,41 +189,50 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, Panel):
                 if hasattr(brush, 'use_pressure_strength'):
                     row.prop(brush, 'use_pressure_strength', text="", icon='STYLUS_PRESSURE')
 
-            # Palette moved to the bottom under the color wheel
             if image_paint and getattr(prefs, 'show_active_palette_rmb', True):
+                palette_box = color_col.box()
+                palette_col = palette_box.column(align=True)
+
+                if wm and hasattr(wm, 'ps_palette_picker'):
+                    try:
+                        palette = getattr(image_paint, 'palette', None)
+                        target_value = palette.name if palette else 'NONE'
+                        if getattr(wm, 'ps_palette_picker', 'NONE') != target_value:
+                            setattr(wm, 'ps_palette_picker', target_value)
+                        palette_col.prop(wm, 'ps_palette_picker', text="")
+                    except Exception:
+                        pass
+
                 palette = getattr(image_paint, 'palette', None)
-                # Swatches using Blender's template (click-to-pick) - shows active palette
                 if palette:
-                    palette_container = color_col.box()
-                    palette_inner = palette_container.column()
-                    palette_inner.scale_x = 0.8
-                    palette_inner.scale_y = 0.8
-                    palette_inner.template_palette(image_paint, "palette", color=True)
-        
-        # Now check for Paint System material/channel after color picker is drawn
-        if not ps_ctx.active_material:
-            right_col.label(text="No Paint System Material", icon='INFO')
-            return
-        
-        if not ps_ctx.active_channel:
-            right_col.label(text="No Active Channel", icon='INFO')
-            return
-        
-        # Reduced separator between brush and layer settings
+                    swatch_col = palette_col.column()
+                    swatch_col.scale_x = 0.8
+                    swatch_col.scale_y = 0.8
+                    swatch_col.template_palette(image_paint, "palette", color=True)
+        else:
+            left_col.label(text="No active brush", icon='INFO')
+
         layers_layout = right_col
-        # Minimal spacing before layer settings so opacity feels connected
         layers_layout.separator(factor=0.1)
 
-        # Get active channel and layers
+        if not ps_ctx.active_material:
+            layers_layout.label(text="No Paint System Material", icon='INFO')
+            return
+        if not ps_ctx.active_channel:
+            layers_layout.label(text="No Active Channel", icon='INFO')
+            return
+
         active_channel = ps_ctx.active_channel
         active_layer = ps_ctx.active_layer
         active_group = ps_ctx.active_group
         mat = ps_ctx.active_material
         layers = active_channel.layers
 
-        # Check if Paint System is connected
-        group_node = find_node(mat.node_tree, {
-            'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree})
+        group_node = None
+        if mat and mat.node_tree and active_group:
+            group_node = find_node(mat.node_tree, {
+                'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree})
+
         if not group_node:
             warning_box = layers_layout.box()
             warning_box.alert = True
@@ -263,17 +240,12 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, Panel):
             warning_col.label(text="Paint System not connected", icon='ERROR')
             warning_col.label(text="to material output!", icon='BLANK1')
 
-        # Single unified box: header (controls + opacity) and the layer list
         layers_box = layers_layout.box()
 
-        # Add layer settings (icons and blend mode only) if there's an active layer
         if active_layer and active_layer.node_tree:
             color_mix_node = active_layer.mix_node
-
-            # Use an aligned column so header row and opacity have no vertical gap
             header_col = layers_box.column(align=True)
 
-            # Layer controls row (without opacity) - original chunky size
             main_row = header_col.row(align=True)
             main_row.scale_y = 1.3
             main_row.scale_x = 1.3
@@ -288,35 +260,26 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, Panel):
             lock_row.prop(active_layer, "lock_layer", text="",
                           icon='LOCKED' if active_layer.lock_layer else 'UNLOCKED')
 
-            blend_type_row = main_row.row(align=True)
-            blend_type_row.enabled = not active_layer.lock_layer
-            blend_type_row.prop(color_mix_node, "blend_type", text="")
+            blend_row = main_row.row(align=True)
+            blend_row.enabled = not active_layer.lock_layer
+            blend_row.prop(color_mix_node, "blend_type", text="")
 
-            # Opacity slider directly below (match main panel style)
             opacity_row = header_col.row(align=True)
             opacity_row.scale_y = 1.3
             opacity_row.enabled = not active_layer.lock_layer
-            # Be robust: find an appropriate opacity/factor socket to control
-            target_sock = None
-            try:
-                pre_mix = getattr(active_layer, 'pre_mix_node', None)
-                if pre_mix and hasattr(pre_mix, 'inputs'):
-                    target_sock = pre_mix.inputs.get('Opacity')
-            except Exception:
-                target_sock = None
 
-            if not target_sock:
-                try:
-                    mix = getattr(active_layer, 'mix_node', None)
-                    if mix and hasattr(mix, 'inputs'):
-                        # Try common input names across Blender variants
-                        target_sock = (
-                            mix.inputs.get('Opacity') or
-                            mix.inputs.get('Fac') or
-                            mix.inputs.get('Factor')
-                        )
-                except Exception:
-                    target_sock = None
+            target_sock = None
+            pre_mix = getattr(active_layer, 'pre_mix_node', None)
+            if pre_mix and hasattr(pre_mix, 'inputs'):
+                target_sock = pre_mix.inputs.get('Opacity')
+            if target_sock is None:
+                mix_node = getattr(active_layer, 'mix_node', None)
+                if mix_node and hasattr(mix_node, 'inputs'):
+                    target_sock = (
+                        mix_node.inputs.get('Opacity') or
+                        mix_node.inputs.get('Fac') or
+                        mix_node.inputs.get('Factor')
+                    )
 
             if target_sock is not None:
                 opacity_row.prop(
@@ -326,13 +289,9 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, Panel):
                     slider=True,
                 )
 
-        # Now the layer list inside the same box
         row = layers_box.row()
         layers_col = row.column()
-        # Removed fixed height to let content determine size naturally
         scale_content(context, row, scale_x=1, scale_y=1.5)
-
-        # The layer list template
         layers_col.template_list(
             "MAT_PT_UL_LayerList", "",
             active_channel, "layers",
@@ -340,7 +299,6 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, Panel):
             rows=min(max(6, len(layers)), 7)
         )
 
-        # Side buttons column
         col = row.column(align=True)
         col.scale_x = 1.2
         col.operator("wm.call_menu", text="", icon_value=get_icon('layer_add')).name = "MAT_MT_AddLayerMenu"
@@ -405,7 +363,8 @@ class VIEW3D_MT_paintsystem_texture_paint_context(Menu):
 
     def draw(self, context):
         layout = self.layout
-        # Minimal menu: only one entry that opens the Layers panel as a floating popover near the cursor
+        layout.operator("paint_system.open_texpaint_menu", text="Paint Tools Popover", icon='BRUSHES_ALL')
+        layout.separator()
         layout.operator("paint_system.open_layers_popover", text="Paint System Layers", icon='RENDERLAYERS')
 
 
@@ -600,8 +559,19 @@ def _remove_from_texture_paint_context_menu():
 
 
 def draw_entry(self, context):
-    # No-op: we rely on RMB override operator to open the popovers directly.
-    return
+    layout = getattr(self, 'layout', None)
+    if layout is None:
+        return
+
+    # Only add entries when paint tools are relevant
+    mode = getattr(context, "mode", "")
+    has_paint_settings = bool(getattr(getattr(context, "tool_settings", None), "image_paint", None))
+    if mode not in {"PAINT_TEXTURE", "TEXTURE_PAINT"} and not has_paint_settings:
+        return
+
+    layout.separator()
+    layout.operator("paint_system.open_texpaint_menu", text="Paint Tools Popover", icon='BRUSHES_ALL')
+    layout.operator("paint_system.open_layers_popover", text="Paint System Layers", icon='RENDERLAYERS')
 
 
 def register():

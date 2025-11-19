@@ -204,10 +204,15 @@ owner = object()
 
 def brush_color_callback(*args):
     context = bpy.context
-    if context.mode != 'PAINT_TEXTURE':
+    ps_scene_data = getattr(context.scene, 'ps_scene_data', None)
+    if ps_scene_data is None:
         return
-    settings = context.tool_settings.image_paint
-    brush = settings.brush
+    settings = getattr(context.tool_settings, 'image_paint', None)
+    if not settings:
+        return
+    brush = getattr(settings, 'brush', None)
+    if brush is None:
+        return
     if hasattr(context.tool_settings, "unified_paint_settings"):
         ups = context.tool_settings.unified_paint_settings
     else:
@@ -215,16 +220,16 @@ def brush_color_callback(*args):
     prop_owner = ups if ups.use_unified_color else brush
     # Store color to context.ps_scene_data.hsv_color
     hsv = prop_owner.color.hsv
-    if hsv != (context.scene.ps_scene_data.hue, context.scene.ps_scene_data.saturation, context.scene.ps_scene_data.value):
-        context.scene.ps_scene_data.hue = hsv[0]
-        context.scene.ps_scene_data.saturation = hsv[1]
-        context.scene.ps_scene_data.value = hsv[2]
+    if hsv != (ps_scene_data.hue, ps_scene_data.saturation, ps_scene_data.value):
+        ps_scene_data.hue = hsv[0]
+        ps_scene_data.saturation = hsv[1]
+        ps_scene_data.value = hsv[2]
         color = prop_owner.color
         r = int(color[0] * 255)
         g = int(color[1] * 255)
         b = int(color[2] * 255)
         hex_color = "#{:02x}{:02x}{:02x}".format(r, g, b).upper()
-        context.scene.ps_scene_data.hex_color = hex_color
+        ps_scene_data.hex_color = hex_color
 
 
 def register():

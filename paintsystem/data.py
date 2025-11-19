@@ -2229,8 +2229,8 @@ def parse_context(context: bpy.types.Context) -> PSContext:
             case 'MESH':
                 ps_object = obj
             case 'GREASEPENCIL':
-                if is_newer_than(4,3,0):
-                    ps_object = obj
+                # Grease Pencil v3 support (Blender 4.3+)
+                ps_object = obj
             case _:
                 obj = None
                 ps_object = None
@@ -2556,22 +2556,35 @@ _register, _unregister = register_classes_factory(classes)
 
 def register():
     """Register the Paint System data module."""
-    _register()
-    bpy.types.Scene.ps_scene_data = PointerProperty(
-        type=PaintSystemGlobalData,
-        name="Paint System Data",
-        description="Data for the Paint System"
-    )
-    bpy.types.Material.ps_mat_data = PointerProperty(
-        type=MaterialData,
-        name="Paint System Material Data",
-        description="Material Data for the Paint System"
-    )
-    bpy.types.Material.paint_system = PointerProperty(type=LegacyPaintSystemGroups)
+    try:
+        _register()
+    except ValueError as e:
+        # Handle "already registered" errors during development/reload
+        if "already registered" not in str(e):
+            raise
+    # Only set properties if not already present (prevents double registration errors)
+    if not hasattr(bpy.types.Scene, 'ps_scene_data'):
+        bpy.types.Scene.ps_scene_data = PointerProperty(
+            type=PaintSystemGlobalData,
+            name="Paint System Data",
+            description="Data for the Paint System"
+        )
+    if not hasattr(bpy.types.Material, 'ps_mat_data'):
+        bpy.types.Material.ps_mat_data = PointerProperty(
+            type=MaterialData,
+            name="Paint System Material Data",
+            description="Material Data for the Paint System"
+        )
+    if not hasattr(bpy.types.Material, 'paint_system'):
+        bpy.types.Material.paint_system = PointerProperty(type=LegacyPaintSystemGroups)
     
 def unregister():
     """Unregister the Paint System data module."""
-    del bpy.types.Material.paint_system
-    del bpy.types.Material.ps_mat_data
-    del bpy.types.Scene.ps_scene_data
+    # Safe deletion - check if properties exist before deleting
+    if hasattr(bpy.types.Material, 'paint_system'):
+        del bpy.types.Material.paint_system
+    if hasattr(bpy.types.Material, 'ps_mat_data'):
+        del bpy.types.Material.ps_mat_data
+    if hasattr(bpy.types.Scene, 'ps_scene_data'):
+        del bpy.types.Scene.ps_scene_data
     _unregister()

@@ -101,6 +101,78 @@ class PAINTSYSTEM_OT_TogglePaintMode(PSContextMixin, Operator):
         return {'FINISHED'}
 
 
+class PAINTSYSTEM_OT_SetMode(PSContextMixin, Operator):
+    bl_idname = "paint_system.set_mode"
+    bl_label = "Set Mode"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Switch to a specific object mode"
+    
+    mode: EnumProperty(
+        name="Mode",
+        items=[
+            ('OBJECT', "Object Mode", "Switch to Object Mode"),
+            ('TEXTURE_PAINT', "Texture Paint", "Switch to Texture Paint Mode"),
+            ('EDIT', "Edit Mode", "Switch to Edit Mode"),
+            ('SCULPT', "Sculpt Mode", "Switch to Sculpt Mode"),
+            # The following are still supported by the operator, but not exposed in the UI here
+            ('VERTEX_PAINT', "Vertex Paint", "Switch to Vertex Paint Mode"),
+            ('WEIGHT_PAINT', "Weight Paint", "Switch to Weight Paint Mode"),
+            ('PAINT_GREASE_PENCIL', "Draw", "Switch to Grease Pencil Draw Mode"),
+        ]
+    )
+    
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.ps_object.type in {'MESH', 'GREASEPENCIL'}
+
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        obj = ps_ctx.ps_object
+        
+        # Set selected and active object
+        context.view_layer.objects.active = obj
+        obj.select_set(True)
+        
+        # Toggle behavior: if already in the requested mode, switch to Object mode
+        current_mode = obj.mode
+        
+        # Check if we're already in the requested mode
+        target_blender_mode = 'EDIT' if self.mode == 'EDIT' else self.mode
+        is_already_in_mode = (current_mode == target_blender_mode)
+        
+        if is_already_in_mode:
+            # Toggle off: return to Object mode
+            if current_mode != 'OBJECT':
+                bpy.ops.object.mode_set(mode='OBJECT')
+        else:
+            # Switch to the requested mode
+            if self.mode == 'OBJECT':
+                if obj.mode != 'OBJECT':
+                    bpy.ops.object.mode_set(mode='OBJECT')
+            else:
+                # Check if mode is valid for object type
+                if obj.type == 'MESH':
+                    valid_modes = {'TEXTURE_PAINT', 'SCULPT', 'VERTEX_PAINT', 'WEIGHT_PAINT', 'EDIT'}
+                    if self.mode in valid_modes:
+                        bpy.ops.object.mode_set(mode=target_blender_mode)
+                        
+                        # Change shading mode for texture paint
+                        if self.mode == 'TEXTURE_PAINT':
+                            is_cycles = context.scene.render.engine == 'CYCLES'
+                            if context.space_data.shading.type != ('RENDERED' if not is_cycles else 'MATERIAL'):
+                                context.space_data.shading.type = ('RENDERED' if not is_cycles else 'MATERIAL')
+                            update_active_image(self, context)
+                            
+                elif obj.type == 'GREASEPENCIL' and self.mode == 'PAINT_GREASE_PENCIL':
+                    bpy.ops.object.mode_set(mode='PAINT_GREASE_PENCIL')
+                    is_cycles = context.scene.render.engine == 'CYCLES'
+                    if context.space_data.shading.type != ('RENDERED' if not is_cycles else 'MATERIAL'):
+                        context.space_data.shading.type = ('RENDERED' if not is_cycles else 'MATERIAL')
+
+        return {'FINISHED'}
+
+
 class PAINTSYSTEM_OT_AddPresetBrushes(Operator):
     bl_idname = "paint_system.add_preset_brushes"
     bl_label = "Import Paint System Brushes"
@@ -472,6 +544,7 @@ class PAINTSYSTEM_OT_ToggleTransformGizmos(Operator):
 classes = (
     PAINTSYSTEM_OT_PickPaletteColor,
     PAINTSYSTEM_OT_TogglePaintMode,
+    PAINTSYSTEM_OT_SetMode,
     PAINTSYSTEM_OT_AddPresetBrushes,
     PAINTSYSTEM_OT_SelectMaterialIndex,
     PAINTSYSTEM_OT_NewMaterial,

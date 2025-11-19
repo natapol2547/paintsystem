@@ -16,6 +16,8 @@ from bpy.utils import register_submodule_factory
 from .custom_icons import load_icons, unload_icons
 import importlib
 
+
+
 # from .paintsystem.data import parse_context
 
 bl_info = {
@@ -33,36 +35,31 @@ bl_info = {
 
 bl_info_copy = bl_info.copy()
 
-print("Paint System: Registering...")
+# Load icons early so EnumProperty item icons in submodules can resolve during import
+load_icons()
 
-# Don't load icons early - let register() handle it to avoid double registration
-# load_icons()
+# Import all modules explicitly to ensure they're available as attributes
+# This is required for bl_ext wrapper compatibility
+from . import paintsystem, panels, operators, keymaps
 
-submodules = [
-    "paintsystem",
+# Use register_submodule_factory only for modules without custom registration
+_submodules_auto = [
     "panels",
     "operators",
     "keymaps",
 ]
 
-# Pre-import inner packages to ensure attributes exist on this module namespace.
-# This avoids attribute resolution issues when the extension is loaded under bl_ext wrappers.
-for _mod in ("paintsystem", "panels", "operators", "keymaps"):
-    try:
-        globals()[_mod] = importlib.import_module(f"{__name__}.{_mod}")
-    except Exception:
-        # Leave missing ones unset to avoid masking real import errors later.
-        pass
-
-_register, _unregister = register_submodule_factory(__name__, submodules)
+_register_auto, _unregister_auto = register_submodule_factory(__name__, _submodules_auto)
 
 def register():
-    """Register Paint System add-on."""
     load_icons()
-    _register()
+    # Register paintsystem first (contains PropertyGroups needed by other modules)
+    paintsystem.register()
+    # Then register remaining modules
+    _register_auto()
     
 def unregister():
-    """Unregister Paint System add-on."""
-    _unregister()
+    # Unregister in reverse order
+    _unregister_auto()
+    paintsystem.unregister()
     unload_icons()
-    print("Paint System: Unregistered", __package__)

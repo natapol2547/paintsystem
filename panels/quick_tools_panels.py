@@ -22,33 +22,40 @@ class MAT_PT_PaintSystemQuickToolsDisplay(PSContextMixin, Panel):
         ps_ctx = self.parse_context(context)
         obj = ps_ctx.active_object
         layout = self.layout
+        
+        # Safety check for space
+        if not context.area or not context.area.spaces:
+            return
         space = context.area.spaces[0]
+        if space.type != 'VIEW_3D':
+            return
 
         box = layout.box()
-        if obj:
+        if obj and hasattr(obj, 'mode'):
             row = box.row()
             scale_content(context, row)
             # Different wireframe toggle based on mode
             if obj.mode == 'EDIT':
                 # In edit mode, toggle overlay wireframe
                 overlay = space.overlay
-                row.prop(overlay, "show_wireframes", text="Toggle Wireframe", icon='MOD_WIREFRAME')
+                if overlay:
+                    row.prop(overlay, "show_wireframes", text="Toggle Wireframe", icon='MOD_WIREFRAME')
             else:
                 # In object mode, toggle object wireframe display
                 row.prop(obj, "show_wire", text="Toggle Wireframe", icon='MOD_WIREFRAME')
+        
         row = box.row()
-        if not ps_ctx.ps_settings.use_compact_design:
+        if ps_ctx.ps_settings and not ps_ctx.ps_settings.use_compact_design:
             row.scale_y = 1
             row.scale_x = 1
         
         # Toggle gizmo button with state memory
-        space = context.area.spaces[0]
         gizmos_enabled = (space.show_gizmo_object_translate or 
                          space.show_gizmo_object_rotate or 
                          space.show_gizmo_object_scale)
         
         # Main toggle button with pressed state
-        op = row.operator("paint_system.toggle_transform_gizmos", text="Transform Gizmo", icon='GIZMO', depress=gizmos_enabled)
+        row.operator("paint_system.toggle_transform_gizmos", text="Transform Gizmo", icon='GIZMO', depress=gizmos_enabled)
         
         # Individual gizmo type toggles (grayed out when main toggle is off)
         row = row.row(align=True)
@@ -78,9 +85,17 @@ class MAT_PT_PaintSystemQuickToolsMesh(PSContextMixin, Panel):
         ps_ctx = self.parse_context(context)
         obj = ps_ctx.active_object
         layout = self.layout
+        
+        # Safety check for space
+        if not context.area or not context.area.spaces:
+            return
         space = context.area.spaces[0]
+        if space.type != 'VIEW_3D':
+            return
+        
         overlay = space.overlay
-        mode_string = context.mode
+        if not overlay:
+            return
 
         box = layout.box()
         row = box.row()
@@ -118,7 +133,7 @@ class MAT_PT_PaintSystemQuickToolsMesh(PSContextMixin, Panel):
         row = box.row()
         row.alignment = "CENTER"
         row.label(text="Transforms:", icon="EMPTY_ARROWS")
-        if obj and (obj.scale[0] != 1 or obj.scale[1] != 1 or obj.scale[0] != 1):
+        if obj and hasattr(obj, 'scale') and (obj.scale[0] != 1 or obj.scale[1] != 1 or obj.scale[2] != 1):
             box1 = box.box()
             box1.alert = True
             col = box1.column(align=True)
@@ -146,14 +161,90 @@ class MAT_PT_PaintSystemQuickToolsPaint(PSContextMixin, Panel):
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
         obj = ps_ctx.active_object
-        return hasattr(obj, "mode") and obj.mode == 'TEXTURE_PAINT'
+        return obj and hasattr(obj, "mode") and obj.mode == 'TEXTURE_PAINT'
     
     def draw_header(self, context):
         layout = self.layout
         layout.label(icon="BRUSHES_ALL")
     
     def draw(self, context):
+        from bl_ui.properties_paint_common import UnifiedPaintPanel
+        from ..utils.unified_brushes import get_unified_settings
+        
         layout = self.layout
+        layout.use_property_split = False
+        layout.use_property_decorate = False
+        
+        ps_ctx = self.parse_context(context)
+        
+        # Get paint settings and brush
+        settings = UnifiedPaintPanel.paint_settings(context)
+        if not settings:
+            return
+        brush = settings.brush
+        
+        # Get unified settings for color
+        prop_owner = get_unified_settings(context, "use_unified_color")
+        if not prop_owner or not hasattr(prop_owner, 'color'):
+            prop_owner = brush
+        
+        # Compact Color Wheel
+        if prop_owner and hasattr(prop_owner, 'color'):
+            # Color picker settings button (dropdown)
+            row = layout.row(align=True)
+            row.popover(
+                panel="MAT_PT_BrushColorSettings",
+                icon="SETTINGS",
+                text="Color Picker Settings"
+            )
+            
+            # Compact color picker with value slider
+            row = layout.row()
+            row.scale_y = 1.5
+            row.template_color_picker(prop_owner, "color", value_slider=True)
+            
+            # Show "No Active Channel" alert between wheel and swatches
+            if not brush:
+                box = layout.box()
+                box.alert = True
+                box.label(text="No Active Channel", icon='INFO')
+            
+            # Color swatches row
+            row = layout.row(align=True)
+            row.prop(prop_owner, "color", text="")
+            # Add eyedropper
+            try:
+                use_unified = getattr(context.tool_settings.unified_paint_settings, 'use_unified_color', False) if hasattr(context.tool_settings, 'unified_paint_settings') else False
+                path = (
+                    "tool_settings.unified_paint_settings.color" if use_unified else
+                    "tool_settings.image_paint.brush.color"
+                )
+                props = row.operator("ui.eyedropper_color", text="", icon='EYEDROPPER')
+                props.prop_data_path = path
+            except Exception:
+                pass
+        
+        # Blend Mode
+        if brush:
+            layout.label(text="Blend:")
+            layout.prop(brush, "blend", text="")
+        
+        # Radius & Strength
+        size_owner = get_unified_settings(context, "use_unified_size")
+        if size_owner:
+            if hasattr(size_owner, 'size'):
+                layout.prop(size_owner, "size", text="Radius", slider=True)
+            if hasattr(size_owner, 'strength'):
+                layout.prop(size_owner, "strength", text="Strength", slider=True)
+        
+        # Palette (if available)
+        if hasattr(settings, 'palette') and settings.palette:
+            layout.separator()
+            layout.template_palette(settings, "palette", color=True)
+            layout.template_ID(settings, "palette", new="palette.new")
+        
+        # Quick Edit button
+        layout.separator()
         row = layout.row()
         scale_content(context, row, 1.5, 1.5)
         row.operator("paint_system.quick_edit", text="Edit Externally", icon='IMAGE')
