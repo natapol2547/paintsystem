@@ -28,12 +28,6 @@ from ..paintsystem.data import (
     sort_actions
 )
 
-# Check if PIL is available for conditional UI display
-try:
-    from ..operators.image_filters.common import PIL_AVAILABLE
-except ImportError:
-    PIL_AVAILABLE = False
-
 if is_newer_than(4,3):
     from bl_ui.properties_data_grease_pencil import (
         GreasePencil_LayerMaskPanel,
@@ -385,11 +379,11 @@ class MAT_MT_ImageFilterMenu(PSContextMixin, Menu):
         layout.operator_context = 'INVOKE_REGION_WIN'
         
         ps_ctx = self.parse_context(context)
-        if PIL_AVAILABLE:
-            layout.operator("paint_system.brush_painter",
-                            icon="BRUSH_DATA")
-            layout.operator("paint_system.gaussian_blur",
-                            icon="FILTER")
+        
+        layout.operator("paint_system.brush_painter",
+                        icon="BRUSH_DATA")
+        layout.operator("paint_system.box_blur",
+                        icon="FILTER")
         layout.operator("paint_system.invert_colors",
                         icon="MOD_MASK")
         layout.operator("paint_system.fill_image", 

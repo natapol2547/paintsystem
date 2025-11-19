@@ -1,38 +1,19 @@
 import bpy
 import numpy as np
-try:
-    from PIL import Image, ImageFilter
-    PIL_AVAILABLE = True
-except ImportError:
-    PIL_AVAILABLE = False
-    Image = None
-    ImageFilter = None
-from .common import blender_image_to_numpy, numpy_to_blender_image, numpy_to_pil, pil_to_numpy, PIL_AVAILABLE as COMMON_PIL_AVAILABLE
+from .common import blender_image_to_numpy, numpy_to_blender_image, box_blur_numpy
 
-def gaussian_blur(numpy_array, gaussian_sigma):
-    if not PIL_AVAILABLE or not COMMON_PIL_AVAILABLE:
-        raise ImportError("PIL (Pillow) is not available. Please install Pillow to use this feature.")
-    img_pil = numpy_to_pil(numpy_array)
-    radius = int(gaussian_sigma * 2)
-    blurred_pil = img_pil.filter(ImageFilter.GaussianBlur(radius=radius))
-    img_smoothed = pil_to_numpy(blurred_pil)
-    return img_smoothed
-
+def box_blur(numpy_array, radius):
+    return box_blur_numpy(numpy_array, radius)
 
 def sharpen_image(numpy_array, sharpen_amount):
-    if not PIL_AVAILABLE or not COMMON_PIL_AVAILABLE:
-        raise ImportError("PIL (Pillow) is not available. Please install Pillow to use this feature.")
-    img_uint8 = (np.clip(numpy_array, 0, 1) * 255).astype(np.uint8)
-    img_pil = Image.fromarray(img_uint8, mode='RGBA')
-    sharpened_pil = img_pil.filter(ImageFilter.UnsharpMask(amount=sharpen_amount, radius=1, threshold=0))
-    img_smoothed = pil_to_numpy(sharpened_pil)
-    return img_smoothed
-
+    # Unsharp mask implementation: Original + (Original - Blurred) * Amount
+    # Radius 1.0 corresponds to standard unsharp mask radius
+    blurred = box_blur_numpy(numpy_array, 1.0)
+    mask = numpy_array - blurred
+    sharpened = numpy_array + mask * sharpen_amount
+    return np.clip(sharpened, 0, 1)
 
 def smooth_image(numpy_array, smooth_amount):
-    if not PIL_AVAILABLE or not COMMON_PIL_AVAILABLE:
-        raise ImportError("PIL (Pillow) is not available. Please install Pillow to use this feature.")
-    img_pil = numpy_to_pil(numpy_array)
-    smoothed_pil = img_pil.filter(ImageFilter.SMOOTH)
-    img_smoothed = pil_to_numpy(smoothed_pil)
-    return img_smoothed
+    # Simple smoothing using Gaussian blur
+    # We use sigma=1.0 as a replacement for PIL's fixed SMOOTH kernel
+    return box_blur_numpy(numpy_array, 1.0)

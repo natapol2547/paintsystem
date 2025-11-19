@@ -1,15 +1,16 @@
 import bpy
 import numpy as np
-try:
-    from PIL import Image, ImageFilter
-    PIL_AVAILABLE = True
-except ImportError:
-    PIL_AVAILABLE = False
-    Image = None
-    ImageFilter = None
 import os
 import glob
-from ..common import blender_image_to_numpy, numpy_to_blender_image
+from ..common import (
+    blender_image_to_numpy, 
+    numpy_to_blender_image, 
+    load_image_as_numpy,
+    resize_image_numpy,
+    rotate_image_numpy,
+    box_blur_numpy,
+    sobel_filter_numpy
+)
 
 class BrushPainterCore:
     """Core functionality for applying brush strokes to Blender images."""
@@ -23,7 +24,7 @@ class BrushPainterCore:
         self.end_opacity = 1.0
         self.steps = 7
         self.gradient_threshold = 0.0
-        self.gaussian_sigma = 3
+        self.box_radius = 3
         self.hue_shift = 0.0 # 0.0 to 1.0
         self.saturation_shift = 0.0 # 0.0 to 1.0
         self.value_shift = 0.0 # 0.0 to 1.0
@@ -46,23 +47,24 @@ class BrushPainterCore:
     
     def load_brush_texture(self, path):
         """Loads a brush texture and converts it to a grayscale mask."""
-        if not PIL_AVAILABLE:
-            raise ImportError("PIL (Pillow) is not available. Please install Pillow to use this feature.")
         try:
             if not os.path.exists(path):
                 return self.create_circular_brush(50)
                 
-            brush_pil = Image.open(path)
-            if brush_pil.mode != 'RGBA':
-                brush_pil = brush_pil.convert('RGBA')
+            brush_array = load_image_as_numpy(path)
+            if brush_array is None:
+                return self.create_circular_brush(50)
             
-            brush_array = np.array(brush_pil, dtype=np.float64) / 255.0
-            
-            if brush_pil.mode == 'RGBA':
+            # Convert to mask
+            if brush_array.ndim == 3 and brush_array.shape[2] == 4:
+                # Use alpha channel
                 brush_mask = brush_array[..., 3]
-            else:
+            elif brush_array.ndim == 3:
+                # RGB to Grayscale
                 rgb = brush_array[..., :3]
                 brush_mask = 0.299 * rgb[..., 0] + 0.587 * rgb[..., 1] + 0.114 * rgb[..., 2]
+            else:
+                brush_mask = brush_array
             
             # Handle non-square brush textures
             original_h, original_w = brush_mask.shape
@@ -112,95 +114,47 @@ class BrushPainterCore:
     
     def resize_brushes(self, brush_list, size):
         """Resizes a list of brush masks to the specified size."""
-        if not PIL_AVAILABLE:
-            raise ImportError("PIL (Pillow) is not available. Please install Pillow to use this feature.")
         resized_brush_list = []
         for brush in brush_list:
-            brush_uint8 = (brush * 255).astype(np.uint8)
-            brush_pil = Image.fromarray(brush_uint8, mode='L')
-            resized_pil = brush_pil.resize((size, size), Image.Resampling.LANCZOS)
-            resized_array = np.array(resized_pil, dtype=np.float64) / 255.0
+            # brush is float mask 0..1
+            resized_array = resize_image_numpy(brush, (size, size))
             resized_brush_list.append(resized_array)
         return resized_brush_list
     
-    def calculate_gaussian_blur(self, img_float):
-        """Calculates Gaussian blur for the image using Pillow."""
-        if not PIL_AVAILABLE:
-            raise ImportError("PIL (Pillow) is not available. Please install Pillow to use this feature.")
-        if self.gaussian_sigma <= 0:
+    def calculate_box_blur(self, img_float):
+        """Calculates Box blur for the image using Numpy."""
+        if self.box_radius <= 0:
             return img_float
         
-        img_uint8 = (np.clip(img_float, 0, 1) * 255).astype(np.uint8)
-        
-        if len(img_float.shape) == 3:
-            if img_float.shape[2] == 4:
-                img_pil = Image.fromarray(img_uint8, mode='RGBA')
-            else:
-                img_pil = Image.fromarray(img_uint8, mode='RGB')
-        else:
-            img_pil = Image.fromarray(img_uint8, mode='L')
-        
-        radius = int(self.gaussian_sigma * 2)
-        blurred_pil = img_pil.filter(ImageFilter.GaussianBlur(radius=radius))
-        img_smoothed = np.array(blurred_pil, dtype=np.float64) / 255.0
-        
-        return img_smoothed
+        return box_blur_numpy(img_float, self.box_radius)
     
     def calculate_sobel_filter(self, img_float):
-        """Calculates Sobel filter for the image using PIL.ImageFilter.Kernel."""
-        if not PIL_AVAILABLE:
-            raise ImportError("PIL (Pillow) is not available. Please install Pillow to use this feature.")
-        if len(img_float.shape) == 3:
-            if img_float.shape[2] == 4:
-                img_gray = img_float[..., :3]
-            else:
-                img_gray = img_float
-            img_gray = 0.299 * img_gray[..., 0] + 0.587 * img_gray[..., 1] + 0.114 * img_gray[..., 2]
-        else:
-            img_gray = img_float
-        
-        img_uint8 = (img_gray * 255).astype(np.uint32)
-        img_pil = Image.fromarray(img_uint8, mode='I')
-        
-        # Sobel kernels
-        sobel_x_pos = [0, 0, 1, 0, 0, 2, 0, 0, 1]
-        sobel_x_neg = [1, 0, 0, 2, 0, 0, 1, 0, 0]
-        sobel_y_pos = [0, 0, 0, 0, 0, 0, 1, 2, 1]
-        sobel_y_neg = [1, 2, 1, 0, 0, 0, 0, 0, 0]
-        
-        sobel_x_pos_filter = ImageFilter.Kernel((3, 3), sobel_x_pos)
-        sobel_x_neg_filter = ImageFilter.Kernel((3, 3), sobel_x_neg)
-        sobel_y_pos_filter = ImageFilter.Kernel((3, 3), sobel_y_pos)
-        sobel_y_neg_filter = ImageFilter.Kernel((3, 3), sobel_y_neg)
-        
-        Gx_pos = np.array(img_pil.filter(sobel_x_pos_filter), dtype=np.float64)
-        Gx_neg = np.array(img_pil.filter(sobel_x_neg_filter), dtype=np.float64)
-        Gy_pos = np.array(img_pil.filter(sobel_y_pos_filter), dtype=np.float64)
-        Gy_neg = np.array(img_pil.filter(sobel_y_neg_filter), dtype=np.float64)
-        
-        Gx = Gx_pos - Gx_neg
-        Gy = Gy_pos - Gy_neg
-        
-        return Gx, Gy
+        """Calculates Sobel filter for the image using Numpy."""
+        # Expects grayscale input conceptually for magnitude, but handled inside sobel_filter_numpy
+        # But sobel_filter_numpy does grayscale conversion if needed.
+        return sobel_filter_numpy(img_float)
     
     def calculate_gradients(self, img_float):
         """Calculates gradient magnitude and orientation for brush stroke direction."""
+        # Convert to grayscale for blurring
         img_rgb_for_gray = img_float[..., :3] if img_float.shape[-1] == 4 else img_float
         if len(img_rgb_for_gray.shape) == 3:
             img_gray = 0.299 * img_rgb_for_gray[..., 0] + 0.587 * img_rgb_for_gray[..., 1] + 0.114 * img_rgb_for_gray[..., 2]
         else:
             img_gray = img_rgb_for_gray
         
-        img_gray_uint8 = (img_gray * 255).astype(np.uint8)
-        img_pil = Image.fromarray(img_gray_uint8, mode='L')
-        radius = int(self.gaussian_sigma * 2)
-        blurred_pil = img_pil.filter(ImageFilter.GaussianBlur(radius=radius))
-        img_smoothed = np.array(blurred_pil, dtype=np.float64) / 255.0
+        # Blur the grayscale image to reduce noise
+        img_smoothed = box_blur_numpy(img_gray, self.box_radius)
         
         Gx, Gy = self.calculate_sobel_filter(img_smoothed)
         G = np.hypot(Gx, Gy)
         theta = np.arctan2(Gy, Gx)
-        G_normalized = G / G.max()
+        
+        max_G = G.max()
+        if max_G > 0:
+            G_normalized = G / max_G
+        else:
+            G_normalized = G
         
         return G_normalized, theta
     
@@ -212,6 +166,8 @@ class BrushPainterCore:
             total_brush_area += brush_area
         
         avg_brush_area = total_brush_area / len(brush_list)
+        if avg_brush_area == 0: avg_brush_area = 1
+        
         image_area = H * W
         target_coverage_area = image_area * self.brush_coverage_density
         overlap_factor = 0.7
@@ -320,11 +276,16 @@ class BrushPainterCore:
     def apply_brush_stroke(self, canvas, y, x, img_float, img_blurred, has_alpha, G_normalized, theta, opacity,
                           brush_list, canvas_y, canvas_x, extended_H, extended_W):
         """Applies a single brush stroke at the specified location."""
+        # Check bounds for sampling
+        H, W = img_blurred.shape[:2]
+        if y < 0 or y >= H or x < 0 or x >= W:
+             return False
+             
         sampled_pixel = img_blurred[y, x]
         sampled_pixel = self.apply_color_shift(sampled_pixel)
         sampled_alpha = sampled_pixel[3] if has_alpha else 1.0
         
-        if sampled_alpha < 1:
+        if sampled_alpha < 0.01:
             return False
         
         magnitude = G_normalized[y, x]
@@ -336,13 +297,9 @@ class BrushPainterCore:
         brush_angle = angle_deg + self.brush_rotation_offset
         
         selected_brush = brush_list[np.random.randint(0, len(brush_list))]
-        brush_H, brush_W = selected_brush.shape
-        brush_center = brush_H // 2
         
-        brush_uint8 = (selected_brush * 255).astype(np.uint8)
-        brush_pil = Image.fromarray(brush_uint8, mode='L')
-        rotated_pil = brush_pil.rotate(angle=brush_angle, expand=True, center=(brush_center, brush_center))
-        rotated_brush = np.array(rotated_pil, dtype=np.float64) / 255.0
+        # Rotate brush
+        rotated_brush = rotate_image_numpy(selected_brush, brush_angle, expand=True)
         
         r_H, r_W = rotated_brush.shape
         rotated_center_y = r_H // 2
@@ -353,33 +310,63 @@ class BrushPainterCore:
         start_x = canvas_x - rotated_center_x
         end_x = start_x + r_W
         
-        if not (start_y >= 0 and end_y <= extended_H and 
-                start_x >= 0 and end_x <= extended_W):
-            return False
+        # Clipping to canvas
+        # We need to intersect the brush rect with the canvas rect
         
-        canvas_region = canvas[start_y:end_y, start_x:end_x]
-        brush_color_layer = np.tile(sampled_pixel[:3], (r_H, r_W, 1))
-        final_alpha = rotated_brush * sampled_alpha * opacity
+        # Canvas bounds: 0, 0, extended_H, extended_W
+        # Stroke bounds: start_y, start_x, end_y, end_x
+        
+        c_start_y = max(0, start_y)
+        c_end_y = min(extended_H, end_y)
+        c_start_x = max(0, start_x)
+        c_end_x = min(extended_W, end_x)
+        
+        if c_start_y >= c_end_y or c_start_x >= c_end_x:
+            return False
+            
+        # Compute offsets into the brush image
+        b_start_y = c_start_y - start_y
+        b_end_y = b_start_y + (c_end_y - c_start_y)
+        b_start_x = c_start_x - start_x
+        b_end_x = b_start_x + (c_end_x - c_start_x)
+        
+        # Slices
+        canvas_slice = canvas[c_start_y:c_end_y, c_start_x:c_end_x]
+        brush_slice = rotated_brush[b_start_y:b_end_y, b_start_x:b_end_x]
+        
+        # Prepare brush color and alpha
+        brush_color_layer = np.tile(sampled_pixel[:3], (brush_slice.shape[0], brush_slice.shape[1], 1))
+        
+        final_alpha = brush_slice * sampled_alpha * opacity
         final_alpha_3d = final_alpha[..., np.newaxis]
         
         stroke_rgb = brush_color_layer
         stroke_alpha = final_alpha_3d
         
-        canvas_rgb = canvas_region[:, :, :3]
-        canvas_alpha = canvas_region[:, :, 3:4]
+        canvas_rgb = canvas_slice[:, :, :3]
+        canvas_alpha = canvas_slice[:, :, 3:4]
+        
+        # Alpha blending (Source Over)
+        # out_a = src_a + dst_a * (1 - src_a)
+        # out_rgb = (src_rgb * src_a + dst_rgb * dst_a * (1 - src_a)) / out_a
+        
+        # Simplified assuming premultiplied alpha or similar, but here we follow the original logic:
+        # new_rgb = (1 - stroke_alpha) * canvas_rgb + stroke_alpha * stroke_rgb
+        # This is linear interpolation based on stroke alpha. It's not quite "Over" operator but it's what was there.
+        # Wait, original:
+        # new_rgb = (1 - stroke_alpha) * canvas_rgb + stroke_alpha * stroke_rgb
+        # new_alpha = (1 - stroke_alpha) * canvas_alpha + stroke_alpha
         
         new_rgb = (1 - stroke_alpha) * canvas_rgb + stroke_alpha * stroke_rgb
         new_alpha = (1 - stroke_alpha) * canvas_alpha + stroke_alpha
         
-        canvas_region[:, :, :3] = new_rgb
-        canvas_region[:, :, 3:4] = new_alpha
+        canvas_slice[:, :, :3] = new_rgb
+        canvas_slice[:, :, 3:4] = new_alpha
         
         return True
     
     def apply_brush_painting(self, image, brush_folder_path=None, brush_texture_path=None, custom_image_gradient=None):
         """Main function to apply brush painting to a Blender image."""
-        if not PIL_AVAILABLE:
-            raise ImportError("PIL (Pillow) is not available. Please install Pillow to use this feature.")
         if image is None:
             return None
         
@@ -400,13 +387,13 @@ class BrushPainterCore:
             brush_list = [self.create_circular_brush(50)]
         
         # Calculate blurred image and gradients
-        img_blurred = self.calculate_gaussian_blur(img_float)
+        img_blurred = self.calculate_box_blur(img_float)
         
         if custom_image_gradient:
             custom_img_float = blender_image_to_numpy(image)
             if custom_img_float is None:
                 return None
-            custom_blurred = self.calculate_gaussian_blur(custom_img_float)
+            custom_blurred = self.calculate_box_blur(custom_img_float)
             G_normalized, theta = self.calculate_gradients(custom_blurred)
         else:
             G_normalized, theta = self.calculate_gradients(img_float)
@@ -428,6 +415,8 @@ class BrushPainterCore:
                 opacity = self.start_opacity + (self.end_opacity - self.start_opacity) * step / (self.steps - 1)
             
             actual_brush_size = int(scale * min(H, W))
+            if actual_brush_size < 1: actual_brush_size = 1
+            
             scaled_brush_list = self.resize_brushes(brush_list, actual_brush_size)
             num_samples = self.calculate_brush_area_density(scaled_brush_list, H, W, actual_brush_size)
             
