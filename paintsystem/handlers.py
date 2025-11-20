@@ -6,6 +6,11 @@ from .graph.nodetree_builder import get_nodetree_version
 import uuid
 from .donations import get_donation_info
 
+# Gizmo state tracking
+_gizmo_owner = object()
+_last_mode = None
+_gizmos_were_enabled = False
+
 @bpy.app.handlers.persistent
 def frame_change_pre(scene):
     if not hasattr(scene, 'ps_scene_data'):
@@ -209,6 +214,70 @@ def on_addon_enable():
     load_post(bpy.context.scene)
 
 
+def mode_change_handler(*args):
+    """Handle mode changes to auto-disable gizmos in paint/sculpt modes"""
+    global _last_mode, _gizmos_were_enabled
+    
+    try:
+        context = bpy.context
+        obj = context.object
+        if not obj:
+            return
+        
+        current_mode = obj.mode
+        
+        # Check if mode actually changed
+        if current_mode == _last_mode:
+            return
+        
+        # Modes where gizmos should be disabled
+        paint_modes = {'PAINT_TEXTURE', 'SCULPT', 'PAINT_VERTEX', 'PAINT_WEIGHT'}
+        
+        # Process all VIEW_3D spaces in all windows
+        for window in context.window_manager.windows:
+            for area in window.screen.areas:
+                if area.type == 'VIEW_3D':
+                    for space in area.spaces:
+                        if space.type == 'VIEW_3D':
+                            # Entering a paint/sculpt mode from another mode
+                            if current_mode in paint_modes and (_last_mode is None or _last_mode not in paint_modes):
+                                # Check if gizmos are currently enabled
+                                gizmos_enabled = (space.show_gizmo_object_translate or 
+                                                 space.show_gizmo_object_rotate or 
+                                                 space.show_gizmo_object_scale)
+                                
+                                if gizmos_enabled:
+                                    # Store that gizmos were enabled
+                                    _gizmos_were_enabled = True
+                                    wm = context.window_manager
+                                    wm["ps_gizmo_translate"] = space.show_gizmo_object_translate
+                                    wm["ps_gizmo_rotate"] = space.show_gizmo_object_rotate
+                                    wm["ps_gizmo_scale"] = space.show_gizmo_object_scale
+                                    
+                                    # Disable all gizmos
+                                    space.show_gizmo_object_translate = False
+                                    space.show_gizmo_object_rotate = False
+                                    space.show_gizmo_object_scale = False
+                            
+                            # Leaving a paint/sculpt mode to another mode
+                            elif _last_mode in paint_modes and current_mode not in paint_modes:
+                                # Restore gizmos if they were enabled before entering paint mode
+                                if _gizmos_were_enabled:
+                                    wm = context.window_manager
+                                    space.show_gizmo_object_translate = wm.get("ps_gizmo_translate", True)
+                                    space.show_gizmo_object_rotate = wm.get("ps_gizmo_rotate", True)
+                                    space.show_gizmo_object_scale = wm.get("ps_gizmo_scale", False)
+        
+        if _last_mode in paint_modes and current_mode not in paint_modes:
+            _gizmos_were_enabled = False
+        
+        _last_mode = current_mode
+        
+    except Exception as e:
+        # Silently handle errors to avoid breaking other handlers
+        pass
+
+
 owner = object()
 _color_sync_timer_running = False
 _last_color_update_time = 0.0
@@ -342,6 +411,13 @@ def register():
         args=(None,),
         notify=brush_color_callback,
     )
+    # Subscribe to mode changes for gizmo management
+    bpy.msgbus.subscribe_rna(
+        key=(bpy.types.Object, "mode"),
+        owner=_gizmo_owner,
+        args=(),
+        notify=mode_change_handler,
+    )
     global _color_sync_timer_running
     if not _color_sync_timer_running:
         _color_sync_timer_running = True
@@ -349,6 +425,7 @@ def register():
 
 def unregister():
     bpy.msgbus.clear_by_owner(owner)
+    bpy.msgbus.clear_by_owner(_gizmo_owner)
     bpy.app.handlers.frame_change_pre.remove(frame_change_pre)
     bpy.app.handlers.load_post.remove(load_post)
     bpy.app.handlers.save_pre.remove(save_handler)
