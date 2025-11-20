@@ -201,8 +201,11 @@ def on_addon_enable():
 
 
 owner = object()
+_color_sync_timer_running = False
+_last_color_update_time = 0.0
+import time
 
-def brush_color_callback(*args):
+def brush_color_callback(source: str | None = None):
     context = bpy.context
     ps_scene_data = getattr(context.scene, 'ps_scene_data', None)
     if ps_scene_data is None:
@@ -217,19 +220,89 @@ def brush_color_callback(*args):
         ups = context.tool_settings.unified_paint_settings
     else:
         ups = settings.unified_paint_settings
-    prop_owner = ups if ups.use_unified_color else brush
-    # Store color to context.ps_scene_data.hsv_color
+    # If unified color is enabled but a change came via Brush (e.g. sampling tools writing to brush),
+    # mirror Brush color into Unified so the active paint color stays consistent across UIs/builds.
+    try:
+        if source == 'brush' and getattr(ups, 'use_unified_color', False):
+            if tuple(ups.color) != tuple(brush.color):
+                ups.color = brush.color
+    except Exception:
+        pass
+
+    prop_owner = ups if getattr(ups, 'use_unified_color', False) else brush
+    # Store color to context.ps_scene_data.hsv_color and sync with actual brush color
     hsv = prop_owner.color.hsv
-    if hsv != (ps_scene_data.hue, ps_scene_data.saturation, ps_scene_data.value):
-        ps_scene_data.hue = hsv[0]
-        ps_scene_data.saturation = hsv[1]
-        ps_scene_data.value = hsv[2]
-        color = prop_owner.color
-        r = int(color[0] * 255)
-        g = int(color[1] * 255)
-        b = int(color[2] * 255)
-        hex_color = "#{:02x}{:02x}{:02x}".format(r, g, b).upper()
-        ps_scene_data.hex_color = hex_color
+    color = prop_owner.color
+    
+    # Check if update is needed (use tolerance for floating point comparison)
+    hue_changed = abs(hsv[0] - ps_scene_data.hue) > 0.0001
+    sat_changed = abs(hsv[1] - ps_scene_data.saturation) > 0.0001
+    val_changed = abs(hsv[2] - ps_scene_data.value) > 0.0001
+    
+    if hue_changed or sat_changed or val_changed:
+        # Set a sentinel flag to prevent the update callback from writing back to brush
+        ps_scene_data['_updating_from_brush'] = True
+        # Also set timestamp to block HSV updates for a short window
+        global _last_color_update_time
+        _last_color_update_time = time.time()
+        
+        try:
+            # Directly set values bypassing the normal property system to avoid any update callback issues
+            # Use property_unset first to ensure Blender sees the change
+            if hue_changed:
+                ps_scene_data.property_unset("hue")
+                ps_scene_data.hue = hsv[0]
+            if sat_changed:
+                ps_scene_data.property_unset("saturation")
+                ps_scene_data.saturation = hsv[1]
+            if val_changed:
+                ps_scene_data.property_unset("value")
+                ps_scene_data.value = hsv[2]
+            
+            # Update hex color
+            r = int(color[0] * 255)
+            g = int(color[1] * 255)
+            b = int(color[2] * 255)
+            hex_color = "#{:02x}{:02x}{:02x}".format(r, g, b).upper()
+            if ps_scene_data.hex_color != hex_color:
+                ps_scene_data.property_unset("hex_color")
+                ps_scene_data.hex_color = hex_color
+            
+        finally:
+            # Clear sentinel flag
+            if '_updating_from_brush' in ps_scene_data:
+                del ps_scene_data['_updating_from_brush']
+        
+        # Force property update notifications - this is critical for UI refresh
+        try:
+            # Tag the scene for update to ensure property changes propagate
+            context.scene.update_tag()
+        except Exception:
+            pass
+        
+        # Force redraw of all 3D views to update sliders
+        try:
+            for window in context.window_manager.windows:
+                for area in window.screen.areas:
+                    if area.type == 'VIEW_3D':
+                        area.tag_redraw()
+        except Exception:
+            pass
+
+
+def _color_sync_timer():
+    # Poll periodically so HSV stays synced even if host UI bypasses msgbus events
+    if not _color_sync_timer_running:
+        return None
+    # Skip sync if we just updated color (palette click, etc) to avoid fighting with user input
+    import time
+    if time.time() - _last_color_update_time < 0.3:
+        return 0.2  # Keep polling but don't sync yet
+    try:
+        brush_color_callback("timer")
+    except Exception:
+        pass
+    return 0.2
 
 
 def register():
@@ -245,13 +318,13 @@ def register():
     bpy.msgbus.subscribe_rna(
         key=(bpy.types.UnifiedPaintSettings, "color"),
         owner=owner,
-        args=(None,),
+        args=("ups",),
         notify=brush_color_callback,
     )
     bpy.msgbus.subscribe_rna(
         key=(bpy.types.Brush, "color"),
         owner=owner,
-        args=(None,),
+        args=("brush",),
         notify=brush_color_callback,
     )
     bpy.msgbus.subscribe_rna(
@@ -260,6 +333,10 @@ def register():
         args=(None,),
         notify=brush_color_callback,
     )
+    global _color_sync_timer_running
+    if not _color_sync_timer_running:
+        _color_sync_timer_running = True
+        bpy.app.timers.register(_color_sync_timer, first_interval=0.2, persistent=True)
 
 def unregister():
     bpy.msgbus.clear_by_owner(owner)
@@ -271,3 +348,10 @@ def unregister():
         bpy.app.handlers.scene_update_pre.remove(paint_system_object_update)
     else:
         bpy.app.handlers.depsgraph_update_post.remove(paint_system_object_update)
+    global _color_sync_timer_running
+    _color_sync_timer_running = False
+    if hasattr(bpy.app.timers, "unregister"):
+        try:
+            bpy.app.timers.unregister(_color_sync_timer)
+        except Exception:
+            pass

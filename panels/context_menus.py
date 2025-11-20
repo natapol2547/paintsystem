@@ -6,9 +6,12 @@ from ..paintsystem.data import parse_context
 from ..preferences import get_preferences
 from .common import PSContextMixin, scale_content, get_icon
 from ..utils.nodes import find_node
+from ..utils.unified_brushes import get_unified_settings
+from bl_ui.properties_paint_common import UnifiedPaintPanel
 
 
 _APPENDED_MENUS = []
+_BRIDGE_MENUS = []
 
 # Disable RMB override - we'll use menu appending instead
 # This ensures users get native brush controls + our Paint System menu
@@ -45,7 +48,7 @@ def _ps_palette_enum_update(self, context):
         pass
 
 
-class VIEW3D_PT_paintsystem_brush_color(Panel):
+class VIEW3D_PT_paintsystem_brush_color(UnifiedPaintPanel, Panel):
     """Quick brush color picker panel for RMB popover"""
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'WINDOW'
@@ -55,42 +58,43 @@ class VIEW3D_PT_paintsystem_brush_color(Panel):
     def draw(self, context):
         layout = self.layout
         
-        tool_settings = context.tool_settings
-        image_paint = getattr(tool_settings, 'image_paint', None)
-        brush = getattr(image_paint, 'brush', None) if image_paint else None
+        settings = self.paint_settings(context)
+        brush = getattr(settings, 'brush', None)
         
         if not brush:
             layout.label(text="No brush active", icon='INFO')
             return
         
-        # Determine if using unified color (safe attribute access for Blender 5.0+)
-        if hasattr(tool_settings, "unified_paint_settings"):
-            ups = tool_settings.unified_paint_settings
-        else:
-            ups = getattr(tool_settings, 'unified_paint_settings', None)
-        use_unified = ups.use_unified_color if ups else False
-        prop_owner = ups if use_unified else brush
-        
-        # Color picker with value slider
-        layout.template_color_picker(prop_owner, "color", value_slider=True)
-        
-        # Color property for direct input
+        # Color picker with unified binding (matches main Brush Color panel)
         row = layout.row()
-        row.prop(prop_owner, "color", text="")
+        row.scale_y = 1.3
+        self.prop_unified_color_picker(row, context, brush, "color", value_slider=True)
+
+        # Swatches (primary/secondary) with unified binding
+        row = layout.row(align=True)
+        self.prop_unified_color(row, context, brush, "color", text="")
+        # Secondary color may be from Unified or Brush depending on toggle
+        try:
+            self.prop_unified_color(row, context, brush, "secondary_color", text="")
+        except Exception:
+            pass
+        row.operator("paint.brush_colors_flip", icon='FILE_REFRESH', text="")
 
         # Common brush settings (respect unified toggles when available)
         layout.separator()
         settings_col = layout.column(align=True)
 
         # Size
-        size_owner = ups if (ups and getattr(ups, 'use_unified_size', False)) else brush
-        if size_owner and hasattr(size_owner, 'size'):
-            settings_col.prop(size_owner, 'size', text='Radius')
+        try:
+            self.prop_unified(settings_col, context, brush, "size", "use_unified_size", text='Radius')
+        except Exception:
+            pass
 
         # Strength
-        strength_owner = ups if (ups and getattr(ups, 'use_unified_strength', False)) else brush
-        if strength_owner and hasattr(strength_owner, 'strength'):
-            settings_col.prop(strength_owner, 'strength', text='Strength', slider=True)
+        try:
+            self.prop_unified(settings_col, context, brush, "strength", "use_unified_strength", text='Strength', slider=True)
+        except Exception:
+            pass
 
         # Blend mode
         if hasattr(brush, 'blend'):
@@ -101,7 +105,7 @@ class VIEW3D_PT_paintsystem_brush_color(Panel):
             settings_col.prop(brush, 'use_alpha', text='Use Alpha')
 
 
-class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, Panel):
+class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, UnifiedPaintPanel, Panel):
     """Quick paint controls + layer stack for RMB popover (as in PinkSystem01)."""
     bl_idname = 'VIEW3D_PT_paintsystem_quick_layers'
     bl_space_type = 'VIEW_3D'
@@ -123,9 +127,10 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, Panel):
 
         ps_ctx = self.parse_context(context)
         prefs = get_preferences(context)
+        settings = self.paint_settings(context)
+        brush = getattr(settings, 'brush', None)
         tool_settings = context.tool_settings
         image_paint = getattr(tool_settings, 'image_paint', None)
-        brush = getattr(image_paint, 'brush', None) if image_paint else None
         wm = context.window_manager
 
         split = layout.split(factor=0.48)
@@ -136,58 +141,71 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, Panel):
             color_box = left_col.box()
             color_col = color_box.column()
 
-            ups = getattr(tool_settings, "unified_paint_settings", None)
-            use_unified = ups.use_unified_color if ups else False
-            prop_owner = ups if use_unified else brush
-
             color_col.separator(factor=0.3)
 
             picker_row = color_col.row()
             picker_row.scale_y = 1.5
-            picker_row.template_color_picker(prop_owner, "color", value_slider=True)
+            self.prop_unified_color_picker(picker_row, context, brush, "color", value_slider=True)
 
             row = color_col.row(align=True)
             swatches = row.split(factor=0.5, align=True)
-            swatches.prop(prop_owner, "color", text="")
-            if ups and hasattr(ups, 'secondary_color'):
-                swatches.prop(ups, 'secondary_color', text="")
-            elif hasattr(brush, 'secondary_color'):
-                swatches.prop(brush, 'secondary_color', text="")
-            else:
-                swatches.prop(prop_owner, "color", text="")
+            # Primary/Secondary color swatches using unified binding
+            self.prop_unified_color(swatches, context, brush, "color", text="")
+            try:
+                self.prop_unified_color(swatches, context, brush, "secondary_color", text="")
+            except Exception:
+                # Some modes may not expose secondary_color
+                self.prop_unified_color(swatches, context, brush, "color", text="")
 
-            if (ups and hasattr(ups, 'secondary_color')) or hasattr(brush, 'secondary_color'):
-                row.operator("paint.brush_colors_flip", text="", icon='FILE_REFRESH')
+            row.operator("paint.brush_colors_flip", text="", icon='FILE_REFRESH')
 
             try:
+                # Use the same dynamic owner selection as Unified helpers
+                ups = getattr(context.tool_settings, 'unified_paint_settings', None)
+                use_unified = bool(ups and getattr(ups, 'use_unified_color', False))
                 data_path = "tool_settings.unified_paint_settings.color" if use_unified else "tool_settings.image_paint.brush.color"
                 eyedrop = row.operator("ui.eyedropper_color", text="", icon='EYEDROPPER')
                 eyedrop.prop_data_path = data_path
             except Exception:
                 pass
 
+            # Quick toggle for HSV sliders (mirrors preference)
+            toggle_row = color_col.row(align=True)
+            try:
+                toggle_row.prop(prefs, "show_hsv_sliders_rmb", text="HSV", toggle=True)
+            except Exception:
+                pass
+
             if getattr(prefs, 'show_hsv_sliders_rmb', False):
                 hsv_col = color_col.column(align=True)
-                hsv_col.prop(prop_owner, "color", text="Hue", index=0, slider=True)
-                hsv_col.prop(prop_owner, "color", text="Saturation", index=1, slider=True)
-                hsv_col.prop(prop_owner, "color", text="Value", index=2, slider=True)
+                # Mirror main Brush Color panel: use ps_scene_data HSV so updates sync both ways
+                try:
+                    ps_ctx = self.parse_context(context)
+                    if getattr(context.preferences.view, 'color_picker_type', '') != "SQUARE_SV":
+                        hsv_col.prop(ps_ctx.ps_scene_data, "hue", text="Hue")
+                    hsv_col.prop(ps_ctx.ps_scene_data, "saturation", text="Saturation")
+                    hsv_col.prop(ps_ctx.ps_scene_data, "value", text="Value")
+                except Exception:
+                    pass
 
             if hasattr(brush, 'blend'):
                 color_col.prop(brush, 'blend', text='Blend')
 
             row = color_col.row(align=True)
-            size_owner = ups if (ups and getattr(ups, 'use_unified_size', False)) else brush
-            if size_owner and hasattr(size_owner, 'size'):
-                row.prop(size_owner, 'size', text='Radius')
-                if hasattr(brush, 'use_pressure_size'):
-                    row.prop(brush, 'use_pressure_size', text="", icon='STYLUS_PRESSURE')
+            try:
+                self.prop_unified(row, context, brush, "size", "use_unified_size", text='Radius')
+            except Exception:
+                pass
+            if hasattr(brush, 'use_pressure_size'):
+                row.prop(brush, 'use_pressure_size', text="", icon='STYLUS_PRESSURE')
 
             row = color_col.row(align=True)
-            strength_owner = ups if (ups and getattr(ups, 'use_unified_strength', False)) else brush
-            if strength_owner and hasattr(strength_owner, 'strength'):
-                row.prop(strength_owner, 'strength', text='Strength', slider=True)
-                if hasattr(brush, 'use_pressure_strength'):
-                    row.prop(brush, 'use_pressure_strength', text="", icon='STYLUS_PRESSURE')
+            try:
+                self.prop_unified(row, context, brush, "strength", "use_unified_strength", text='Strength', slider=True)
+            except Exception:
+                pass
+            if hasattr(brush, 'use_pressure_strength'):
+                row.prop(brush, 'use_pressure_strength', text="", icon='STYLUS_PRESSURE')
 
             if image_paint and getattr(prefs, 'show_active_palette_rmb', True):
                 palette_box = color_col.box()
@@ -598,6 +616,37 @@ def register():
         options={'SKIP_SAVE'}
     )
     
+    # Optionally provide bridges to standard Texture Paint RMB menu IDs when missing.
+    # This makes our RMB menu "known as" the Texture Paint RMB menu for keymaps/scripts.
+    try:
+        if not hasattr(bpy.types, 'VIEW3D_MT_paint_texture_context_menu'):
+            class VIEW3D_MT_PaintSystem_TexturePaintMenuBridge(Menu):
+                bl_space_type = 'VIEW_3D'
+                bl_region_type = 'WINDOW'
+                bl_label = "Texture Paint"
+                bl_idname = "VIEW3D_MT_paint_texture_context_menu"
+
+                def draw(self, context):
+                    draw_entry(self, context)
+
+            bpy.utils.register_class(VIEW3D_MT_PaintSystem_TexturePaintMenuBridge)
+            _BRIDGE_MENUS.append(VIEW3D_MT_PaintSystem_TexturePaintMenuBridge)
+        # Legacy/variant ID sometimes used in builds
+        if not hasattr(bpy.types, 'VIEW3D_MT_paint_texture'):
+            class VIEW3D_MT_PaintSystem_TexturePaintMenuBridgeLegacy(Menu):
+                bl_space_type = 'VIEW_3D'
+                bl_region_type = 'WINDOW'
+                bl_label = "Texture Paint"
+                bl_idname = "VIEW3D_MT_paint_texture"
+
+                def draw(self, context):
+                    draw_entry(self, context)
+
+            bpy.utils.register_class(VIEW3D_MT_PaintSystem_TexturePaintMenuBridgeLegacy)
+            _BRIDGE_MENUS.append(VIEW3D_MT_PaintSystem_TexturePaintMenuBridgeLegacy)
+    except Exception:
+        pass
+
     # Always append to built-in menus - this gives users native brush controls
     # plus our Paint System menu in the same RMB menu
     _append_to_texture_paint_context_menu()
@@ -614,6 +663,13 @@ def register():
 
 def unregister():
     _remove_from_texture_paint_context_menu()
+    # Unregister bridges if we registered any
+    for cls in _BRIDGE_MENUS[::-1]:
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception:
+            pass
+    _BRIDGE_MENUS.clear()
     
     # Delete WindowManager properties safely
     try:

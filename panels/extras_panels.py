@@ -229,6 +229,24 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
             row = col.row()
             row.scale_y = ps_ctx.ps_settings.color_picker_scale
             self.prop_unified_color_picker(row, context, brush, "color", value_slider=True)
+            cards_row = col.row(align=True)
+            cards_row.scale_y = 1.1
+            swatches = cards_row.split(factor=0.5, align=True)
+            # Primary / Secondary color swatches mimic RMB picker "cards"
+            self.prop_unified_color(swatches, context, brush, "color", text="")
+            try:
+                self.prop_unified_color(swatches, context, brush, "secondary_color", text="")
+            except Exception:
+                swatches.prop(prop_owner or brush, "color", text="")
+            cards_row.operator("paint.brush_colors_flip", icon='FILE_REFRESH', text="")
+            try:
+                ups = getattr(context.tool_settings, 'unified_paint_settings', None)
+                use_unified = bool(ups and getattr(ups, 'use_unified_color', False))
+                data_path = "tool_settings.unified_paint_settings.color" if use_unified else "tool_settings.image_paint.brush.color"
+                eyedrop = cards_row.operator("ui.eyedropper_color", text="", icon='EYEDROPPER')
+                eyedrop.prop_data_path = data_path
+            except Exception:
+                pass
             if ps_ctx.ps_settings.show_more_color_picker_settings:
                 if not context.preferences.view.color_picker_type == "SQUARE_SV":
                     col.prop(ps_ctx.ps_scene_data, "hue", text="Hue")
@@ -244,14 +262,36 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
                     color_jitter_panel(col, context, brush)
                 except Exception:
                     pass
+
+            palette_layout = None
+            palette_header = None
+            if hasattr(col, "panel"):
                 try:
-                    header, panel = col.panel("paintsystem_color_palette", default_closed=True)
-                    header.label(text="Color Palette")
-                    panel.template_ID(settings, "palette", new="palette.new")
-                    if settings.palette:
-                        panel.template_palette(settings, "palette", color=True)
+                    palette_header, palette_panel = col.panel("paintsystem_color_palette", default_closed=True)
                 except Exception:
-                    pass
+                    palette_panel = None
+            else:
+                palette_panel = None
+
+            if palette_panel and palette_header:
+                palette_header.label(text="Color Palette")
+                palette_layout = palette_panel
+            else:
+                fallback_box = col.box()
+                fallback_box.label(text="Color Palette")
+                palette_layout = fallback_box.column()
+
+            try:
+                palette_layout.template_ID(settings, "palette", new="palette.new")
+                if settings.palette:
+                    swatch_col = palette_layout.column(align=True)
+                    swatch_col.scale_x = 0.9
+                    swatch_col.scale_y = 0.9
+                    # template_palette with color=True should auto-update active brush color
+                    # Ensure we're in the correct paint mode context for palette to work
+                    swatch_col.template_palette(settings, "palette", color=True)
+            except Exception:
+                pass
             # draw_color_settings(context, col, brush)
         if ps_ctx.ps_object.type == 'GREASEPENCIL':
             row = col.row()
