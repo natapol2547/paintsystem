@@ -593,6 +593,8 @@ class PAINTSYSTEM_OT_MergeUp(PSContextMixin, PSUVOptionsMixin, PSImageCreateMixi
     def get_above_layer(self, context, unprocessed: bool = False):
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
+        if not active_channel:
+            return None
         active_layer = ps_ctx.unlinked_layer if unprocessed else ps_ctx.active_layer
         flattened_layers = active_channel.flattened_unlinked_layers if unprocessed else active_channel.flattened_layers
         if active_layer and flattened_layers.index(active_layer) > 0:
@@ -602,6 +604,8 @@ class PAINTSYSTEM_OT_MergeUp(PSContextMixin, PSUVOptionsMixin, PSImageCreateMixi
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
+        if not ps_ctx.active_channel:
+            return False
         active_layer = ps_ctx.active_layer
         above_layer = cls.get_above_layer(cls, context)
         if not above_layer:

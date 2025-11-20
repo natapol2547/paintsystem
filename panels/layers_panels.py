@@ -212,14 +212,24 @@ class MAT_PT_Layers(PSContextMixin, Panel):
     bl_region_type = "UI"
     bl_label = "Layers"
     bl_category = 'Paint System'
-    bl_parent_id = 'MAT_PT_PaintSystemMainPanel'
 
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
+        # Hide panel entirely if not a Paint System setup (no channel or no layers)
         if ps_ctx.active_group and check_group_multiuser(ps_ctx.active_group.node_tree):
             return False
-        return (ps_ctx.active_channel is not None or ps_ctx.ps_object.type == 'GREASEPENCIL')
+        # Always allow for Grease Pencil (built-in layer system)
+        if not ps_ctx.ps_object:
+            return False
+        if ps_ctx.ps_object.type == 'GREASEPENCIL':
+            return True
+        # Require an active channel and at least one layer to show the layers UI
+        if not ps_ctx.active_channel:
+            return False
+        if len(ps_ctx.active_channel.layers) == 0:
+            return False
+        return True
     
     def draw_header(self, context):
         layout = self.layout

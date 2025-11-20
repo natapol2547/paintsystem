@@ -156,7 +156,7 @@ class MAT_PT_BrushColorSettings(PSContextMixin, Panel):
         layout.prop(context.preferences.view, "color_picker_type", text="")
         layout.prop(ps_ctx.ps_settings, "color_picker_scale", text="Color Picker Scale", slider=True)
         layout.prop(ps_ctx.ps_settings, "show_hex_color", text="Show Hex Color")
-        layout.prop(ps_ctx.ps_settings, "show_more_color_picker_settings", text="Show HSV Sliders")
+        # Removed HSV sliders toggle (now controlled only via Preferences panel)
 
 class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
     bl_idname = 'MAT_PT_BrushColor'
