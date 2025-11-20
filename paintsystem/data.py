@@ -2104,11 +2104,37 @@ class PaintSystemGlobalData(PropertyGroup):
         return prop_owner.color
     
     def update_unified_color(self, context):
-        brush_color = self.get_brush_color(context)
-        if brush_color.hsv != (self.hue, self.saturation, self.value):
-            brush_color.hsv = (self.hue, self.saturation, self.value)
+        # Skip if we're currently updating FROM the brush to avoid feedback loop
+        if '_updating_from_brush' in self:
+            return
+        # Also skip if a color update happened very recently (palette click, eyedropper, etc)
+        # This prevents HSV updates from overwriting external color changes during msgbus sync
+        import time
+        from . import handlers
+        if time.time() - getattr(handlers, '_last_color_update_time', 0.0) < 0.3:  # 300ms grace period for palette clicks
+            return
+        try:
+            brush_color = self.get_brush_color(context)
+            # Only update if HSV values actually changed to prevent overwriting palette picks
+            target_hsv = (self.hue, self.saturation, self.value)
+            current_hsv = brush_color.hsv
+            # Use tolerance for float comparison
+            if (abs(current_hsv[0] - target_hsv[0]) > 0.001 or 
+                abs(current_hsv[1] - target_hsv[1]) > 0.001 or 
+                abs(current_hsv[2] - target_hsv[2]) > 0.001):
+                brush_color.hsv = target_hsv
+        except Exception:
+            pass
     
     def update_hex_color(self, context):
+        # Skip if we're currently updating FROM the brush to avoid feedback loop
+        if '_updating_from_brush' in self:
+            return
+        # Also skip if a color update happened very recently
+        import time
+        from . import handlers
+        if time.time() - getattr(handlers, '_last_color_update_time', 0.0) < 0.3:  # 300ms grace period
+            return
         brush_color = self.get_brush_color(context)
         brush_color_hex = blender_color_to_srgb_hex(brush_color)
         if brush_color_hex != self.hex_color:
