@@ -1,4 +1,5 @@
 import bpy
+import logging
 from bpy.types import Menu, Panel, Operator
 from bpy.props import BoolProperty, EnumProperty
 
@@ -7,6 +8,8 @@ from ..preferences import get_preferences
 from .common import PSContextMixin, scale_content, get_icon
 from ..utils.nodes import find_node
 from bl_ui.properties_paint_common import UnifiedPaintPanel
+
+logger = logging.getLogger("PaintSystem")
 
 _APPENDED_MENUS = []
 _BRIDGE_MENUS = []
@@ -19,7 +22,8 @@ def _ps_palette_enum_items(self, context):
         for i, pal in enumerate(getattr(bpy.data, 'palettes', [])):
             items.append((pal.name, pal.name, '', 'COLOR', i + 1))
         return items
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Error loading palette enum: {e}")
         return [('NONE', 'No Active Palette', '', 'X', 0)]
 
 
@@ -35,17 +39,17 @@ def _ps_palette_enum_update(self, context):
         if val == 'NONE':
             try:
                 ip.palette = None
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to clear palette: {e}")
             return
         pal = bpy.data.palettes.get(val)
         if pal:
             try:
                 ip.palette = pal
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as e:
+                logger.warning(f"Failed to set palette {val}: {e}")
+    except Exception as e:
+        logger.error(f"Palette update error: {e}")
 
 
 # ---------------- Quick Layers Panel (Adaptive) -----------------

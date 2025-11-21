@@ -1,9 +1,12 @@
 import bpy
+import logging
 from .data import get_global_layer, sort_actions, parse_context, get_all_layers, is_valid_uuidv4
 from .graph.basic_layers import get_layer_version_for_type
 import time
 from .graph.nodetree_builder import get_nodetree_version
 import uuid
+
+logger = logging.getLogger("PaintSystem")
 
 # Gizmo state tracking
 _gizmo_owner = object()
@@ -16,6 +19,9 @@ def frame_change_pre(scene):
         return
     update_task = {}
     for layer in get_all_layers():
+        # Skip layers with no actions for performance
+        if not layer.actions or len(layer.actions) == 0:
+            continue
         sorted_actions = sort_actions(bpy.context, layer)
         for action in sorted_actions:
             match action.action_bind:
@@ -57,12 +63,12 @@ def load_post(scene):
             try:
                 global_layer.update_node_tree(bpy.context)
             except Exception as e:
-                print(f"Error updating layer {global_layer.name}: {e}")
+                logger.error(f"Error updating layer {global_layer.name}: {e}")
     
     seen_global_layers_map = {}
-    # Layer Versioning
-    for mat in bpy.data.materials:
-        if hasattr(mat, 'ps_mat_data'):
+    # Layer Versioning - index PS materials first for performance
+    ps_materials = [mat for mat in bpy.data.materials if hasattr(mat, 'ps_mat_data')]
+    for mat in ps_materials:
             for group in mat.ps_mat_data.groups:
                 for channel in group.channels:
                     has_migrated_global_layer = False
@@ -190,10 +196,10 @@ def paint_system_object_update(scene: bpy.types.Scene, depsgraph: bpy.types.Deps
                     from .data import update_active_image
                     try:
                         update_active_image(None, bpy.context) 
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as e:
+                        logger.error(f"Failed to update active image: {e}")
+            except Exception as e:
+                logger.error(f"Error in material tracking timer: {e}")
             return None  # Run once
         
         # Schedule with minimal delay
@@ -224,49 +230,50 @@ def mode_change_handler(*args):
         # Modes where gizmos should be disabled
         paint_modes = {'PAINT_TEXTURE', 'SCULPT', 'PAINT_VERTEX', 'PAINT_WEIGHT'}
         
-        # Process all VIEW_3D spaces in all windows
-        for window in context.window_manager.windows:
-            for area in window.screen.areas:
-                if area.type == 'VIEW_3D':
-                    for space in area.spaces:
-                        if space.type == 'VIEW_3D':
-                            # Entering a paint/sculpt mode from another mode
-                            if current_mode in paint_modes and (_last_mode is None or _last_mode not in paint_modes):
-                                # Check if gizmos are currently enabled
-                                gizmos_enabled = (space.show_gizmo_object_translate or 
-                                                 space.show_gizmo_object_rotate or 
-                                                 space.show_gizmo_object_scale)
-                                
-                                if gizmos_enabled:
-                                    # Store that gizmos were enabled
-                                    _gizmos_were_enabled = True
-                                    wm = context.window_manager
-                                    wm["ps_gizmo_translate"] = space.show_gizmo_object_translate
-                                    wm["ps_gizmo_rotate"] = space.show_gizmo_object_rotate
-                                    wm["ps_gizmo_scale"] = space.show_gizmo_object_scale
-                                    
-                                    # Disable all gizmos
-                                    space.show_gizmo_object_translate = False
-                                    space.show_gizmo_object_rotate = False
-                                    space.show_gizmo_object_scale = False
-                            
-                            # Leaving a paint/sculpt mode to another mode
-                            elif _last_mode in paint_modes and current_mode not in paint_modes:
-                                # Restore gizmos if they were enabled before entering paint mode
-                                if _gizmos_were_enabled:
-                                    wm = context.window_manager
-                                    space.show_gizmo_object_translate = wm.get("ps_gizmo_translate", True)
-                                    space.show_gizmo_object_rotate = wm.get("ps_gizmo_rotate", True)
-                                    space.show_gizmo_object_scale = wm.get("ps_gizmo_scale", False)
+        # Early exit if transitioning between paint modes or non-paint modes
+        entering_paint = current_mode in paint_modes and (_last_mode is None or _last_mode not in paint_modes)
+        leaving_paint = _last_mode in paint_modes and current_mode not in paint_modes
         
-        if _last_mode in paint_modes and current_mode not in paint_modes:
-            _gizmos_were_enabled = False
+        if not entering_paint and not leaving_paint:
+            _last_mode = current_mode
+            return
+        
+        # Only process the active space for performance
+        space = context.space_data
+        if space and space.type == 'VIEW_3D':
+            wm = context.window_manager
+            
+            if entering_paint:
+                # Check if gizmos are currently enabled
+                gizmos_enabled = (space.show_gizmo_object_translate or 
+                                 space.show_gizmo_object_rotate or 
+                                 space.show_gizmo_object_scale)
+                
+                if gizmos_enabled:
+                    # Store that gizmos were enabled
+                    _gizmos_were_enabled = True
+                    wm["ps_gizmo_translate"] = space.show_gizmo_object_translate
+                    wm["ps_gizmo_rotate"] = space.show_gizmo_object_rotate
+                    wm["ps_gizmo_scale"] = space.show_gizmo_object_scale
+                    
+                    # Disable all gizmos
+                    space.show_gizmo_object_translate = False
+                    space.show_gizmo_object_rotate = False
+                    space.show_gizmo_object_scale = False
+            
+            elif leaving_paint:
+                # Restore gizmos if they were enabled before entering paint mode
+                if _gizmos_were_enabled:
+                    space.show_gizmo_object_translate = wm.get("ps_gizmo_translate", True)
+                    space.show_gizmo_object_rotate = wm.get("ps_gizmo_rotate", True)
+                    space.show_gizmo_object_scale = wm.get("ps_gizmo_scale", False)
+                    _gizmos_were_enabled = False
         
         _last_mode = current_mode
         
     except Exception as e:
-        # Silently handle errors to avoid breaking other handlers
-        pass
+        # Log error for debugging instead of silently passing
+        print(f"Paint System mode_change_handler error: {e}")
 
 
 owner = object()
@@ -349,14 +356,12 @@ def brush_color_callback(source: str | None = None):
         except Exception:
             pass
         
-        # Force redraw of all 3D views to update sliders
+        # Force redraw of current area only (not all windows)
         try:
-            for window in context.window_manager.windows:
-                for area in window.screen.areas:
-                    if area.type == 'VIEW_3D':
-                        area.tag_redraw()
-        except Exception:
-            pass
+            if context.area and context.area.type == 'VIEW_3D':
+                context.area.tag_redraw()
+        except Exception as e:
+            logger.error(f"Paint System color sync redraw error: {e}")
 
 
 def _color_sync_timer():
@@ -369,8 +374,8 @@ def _color_sync_timer():
         return 0.2  # Keep polling but don't sync yet
     try:
         brush_color_callback("timer")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Color sync timer error: {e}")  # Debug level since this runs frequently
     return 0.2
 
 
