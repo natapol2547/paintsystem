@@ -2,8 +2,11 @@ import bpy
 from bpy.types import UIList, Menu, Context, Image, ImagePreview, Panel, NodeTree
 from bpy.utils import register_classes_factory
 import numpy as np
+import logging
 
 from ..utils.version import is_newer_than
+
+logger = logging.getLogger("PaintSystem")
 from .common import (
     PSContextMixin,
     scale_content,
@@ -35,6 +38,16 @@ try:
 except (ImportError, ModuleNotFoundError, AttributeError):
     PIL_AVAILABLE = False
 
+# Cache for image painted status to avoid repeated pixel buffer allocations
+_image_painted_cache = {}
+
+def invalidate_image_cache(image=None):
+    """Invalidate cache for specific image or all images"""
+    if image:
+        _image_painted_cache.pop(id(image), None)
+    else:
+        _image_painted_cache.clear()
+
 if is_newer_than(4,3):
     from bl_ui.properties_data_grease_pencil import (
         GreasePencil_LayerMaskPanel,
@@ -43,7 +56,7 @@ if is_newer_than(4,3):
 
 
 def is_image_painted(image: Image | ImagePreview) -> bool:
-    """Check if the image is painted
+    """Check if the image is painted (cached)
 
     Args:
         image (bpy.types.Image): The image to check
@@ -53,15 +66,43 @@ def is_image_painted(image: Image | ImagePreview) -> bool:
     """
     if not image:
         return False
-    if isinstance(image, Image):
-        pixels = np.zeros(len(image.pixels), dtype=np.float32)
-        image.pixels.foreach_get(pixels)
-        return len(pixels) > 0 and any(pixels)
-    elif isinstance(image, ImagePreview):
-        pixels = np.zeros(len(image.image_pixels_float), dtype=np.float32)
-        image.image_pixels_float.foreach_get(pixels)
-        return len(pixels) > 0 and any(pixels)
-    return False
+    
+    # Check cache first
+    image_id = id(image)
+    if image_id in _image_painted_cache:
+        return _image_painted_cache[image_id]
+    
+    # Fast path: check if image has pixels at all
+    result = False
+    try:
+        if isinstance(image, Image):
+            pixel_count = len(image.pixels)
+            if pixel_count == 0:
+                result = False
+            else:
+                # Sample first few pixels instead of all (much faster)
+                # If first 100 pixels are all zero, likely unpainted
+                sample_size = min(100, pixel_count)
+                pixels = np.zeros(sample_size, dtype=np.float32)
+                image.pixels.foreach_get(pixels)
+                result = bool(np.any(pixels))
+        elif isinstance(image, ImagePreview):
+            pixel_count = len(image.image_pixels_float)
+            if pixel_count == 0:
+                result = False
+            else:
+                sample_size = min(100, pixel_count)
+                pixels = np.zeros(sample_size, dtype=np.float32)
+                image.image_pixels_float.foreach_get(pixels)
+                result = bool(np.any(pixels))
+    except Exception as e:
+        # If sampling fails, assume not painted
+        logger.debug(f"Error checking if image painted: {e}")
+        result = False
+    
+    # Cache the result
+    _image_painted_cache[image_id] = result
+    return result
 
 
 def draw_layer_icon(layer: Layer, layout: bpy.types.UILayout):
@@ -71,13 +112,15 @@ def draw_layer_icon(layer: Layer, layout: bpy.types.UILayout):
                 layout.label(icon_value=get_icon('image'))
                 return
             else:
-                if layer.image.preview and is_image_painted(layer.image.preview):
-                    layout.label(
-                        icon_value=layer.image.preview.icon_id)
-                else:
-                    if layer.image.is_dirty:
-                        layer.image.asset_generate_preview()
-                    layout.label(icon_value=get_icon('image'))
+                # Check if preview exists and is valid before expensive operations
+                preview = layer.image.preview
+                if preview and hasattr(preview, 'icon_id') and preview.icon_id > 0:
+                    # Only check if painted when we actually have a preview
+                    if is_image_painted(preview):
+                        layout.label(icon_value=preview.icon_id)
+                        return
+                # Fallback to generic icon (don't regenerate preview every frame)
+                layout.label(icon_value=get_icon('image'))
         case 'FOLDER':
             layout.prop(layer, "is_expanded", text="", icon_only=True, icon_value=get_icon(
                 'folder_open') if layer.is_expanded else get_icon('folder'), emboss=False)

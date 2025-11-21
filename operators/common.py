@@ -1,4 +1,5 @@
 import bpy
+import logging
 from bpy.props import IntProperty
 from ..paintsystem.data import PSContextMixin, COORDINATE_TYPE_ENUM, create_ps_image, get_udim_tiles
 from ..custom_icons import get_icon
@@ -8,6 +9,8 @@ from bpy.types import Operator, Context
 from bpy.props import BoolProperty, EnumProperty, StringProperty
 
 from ..paintsystem.graph.common import DEFAULT_PS_UV_MAP_NAME
+
+logger = logging.getLogger("PaintSystem")
 
 icons = bpy.types.UILayout.bl_rna.functions["prop"].parameters["icon"].enum_items.keys()
 
@@ -37,7 +40,11 @@ class MultiMaterialOperator(Operator):
     )
     def execute(self, context: Context):
         error_count = 0
-        ps_ctx = PSContextMixin.parse_context(context)
+        ps_ctx = PSContextMixin.safe_parse_context(context)
+        if not ps_ctx or not ps_ctx.ps_object:
+            self.report({'ERROR'}, "No valid Paint System object found")
+            return {'CANCELLED'}
+        
         objects = set()
         objects.add(ps_ctx.ps_object)
         if self.multiple_objects:

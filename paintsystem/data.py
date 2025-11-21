@@ -5,6 +5,8 @@ import numpy as np
 import uuid
 from collections import Counter
 import math
+import threading
+import logging
 
 import bpy
 from bpy.app.handlers import persistent
@@ -263,6 +265,52 @@ def update_active_group(self, context):
     active_group = ps_ctx.active_group
     if active_group:
         active_group.update_node_tree(context)
+
+# Initialize logger for Paint System
+logger = logging.getLogger("PaintSystem")
+logger.setLevel(logging.WARNING)  # Change to DEBUG for verbose logging
+
+# Cache for get_all_layers to avoid expensive iteration every frame
+_all_layers_cache = None
+_all_layers_cache_dirty = True
+
+def invalidate_layers_cache():
+    """Mark layers cache as dirty - call when layers are added/removed/modified"""
+    global _all_layers_cache_dirty
+    _all_layers_cache_dirty = True
+
+# Debounce timer for update_node_tree calls
+_update_node_tree_timers = {}  # key: (layer_uid, context_hash) -> Timer
+_update_node_tree_lock = threading.Lock()
+UPDATE_NODE_TREE_DEBOUNCE_DELAY = 0.05  # 50ms debounce
+
+def debounced_update_node_tree(layer, context):
+    """Debounced version of update_node_tree to batch rapid consecutive calls"""
+    if not hasattr(layer, 'uid') or not layer.uid:
+        # Fallback to immediate update for layers without UID
+        layer.update_node_tree(context)
+        return
+    
+    key = (layer.uid, id(context))
+    
+    with _update_node_tree_lock:
+        # Cancel existing timer if present
+        if key in _update_node_tree_timers:
+            _update_node_tree_timers[key].cancel()
+        
+        # Create new timer
+        def execute_update():
+            try:
+                layer.update_node_tree(context)
+            except Exception as e:
+                logger.error(f"Error in debounced update_node_tree for layer {layer.layer_name}: {e}")
+            finally:
+                with _update_node_tree_lock:
+                    _update_node_tree_timers.pop(key, None)
+        
+        timer = threading.Timer(UPDATE_NODE_TREE_DEBOUNCE_DELAY, execute_update)
+        _update_node_tree_timers[key] = timer
+        timer.start()
 
 def find_channels_containing_layer(check_layer: "Layer") -> list["Channel"]:
     channels = []
@@ -1083,11 +1131,17 @@ class Layer(BaseNestedListItem):
         default=False,
         update=update_active_channel
     )
+    
+    def _update_enabled_with_cache_invalidation(self, context):
+        """Update callback for enabled property that invalidates cache"""
+        update_node_tree(self, context)
+        invalidate_layers_cache()
+    
     enabled: BoolProperty(
         name="Enabled",
         description="Toggle layer visibility",
         default=True,
-        update=update_node_tree,
+        update=_update_enabled_with_cache_invalidation,
         options=set()
     )
     lock_alpha: BoolProperty(
@@ -1599,6 +1653,10 @@ class Channel(BaseNestedListManager):
         layer.auto_update_node_tree = True
         layer.update_node_tree(context)
         self.update_node_tree(context)
+        invalidate_layers_cache()  # Cache invalidation after layer creation
+        ps_ctx = parse_context(context)
+        if ps_ctx.active_material:
+            _invalidate_material_layer_cache(ps_ctx.active_material)
         return layer
     
     def delete_layer(self, context, layer: "Layer"):
@@ -1617,6 +1675,10 @@ class Channel(BaseNestedListManager):
         self.active_index = min(
             self.active_index, len(self.layers) - 1)
         self.update_node_tree(context)
+        invalidate_layers_cache()  # Cache invalidation after layer deletion
+        ps_ctx = parse_context(context)
+        if ps_ctx.active_material:
+            _invalidate_material_layer_cache(ps_ctx.active_material)
     
     def delete_layers(self, context, layers: list["Layer"]):
         # Sort layer by index in descending order
@@ -2421,6 +2483,19 @@ class PSContextMixin:
     def parse_context(context: bpy.types.Context) -> PSContext:
         """Return a PSContext parsed from Blender context. Safe to call from class or instance methods."""
         return parse_context(context)
+    
+    @staticmethod
+    def safe_parse_context(context: bpy.types.Context) -> Optional[PSContext]:
+        """Safely parse context with null checking. Returns None if critical components missing."""
+        try:
+            ps_ctx = parse_context(context)
+            # Validate critical components exist
+            if not ps_ctx.active_object:
+                return None
+            return ps_ctx
+        except Exception as e:
+            logger.warning(f"Failed to parse context: {e}")
+            return None
 
 
 # Legacy properties (for backward compatibility)
