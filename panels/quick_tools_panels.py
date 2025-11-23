@@ -54,11 +54,18 @@ class MAT_PT_PaintSystemQuickToolsDisplay(PSContextMixin, Panel):
                          space.show_gizmo_object_rotate or 
                          space.show_gizmo_object_scale)
         
-        # Check if in paint/sculpt mode - button should appear off but remain clickable
+        # Check if in paint/sculpt mode
         in_paint_mode = obj and obj.mode in {'PAINT_TEXTURE', 'SCULPT', 'PAINT_VERTEX', 'PAINT_WEIGHT'}
         
-        # Main toggle button - show as off in paint modes regardless of actual state
-        display_state = False if in_paint_mode else gizmos_enabled
+        # In paint mode, show the stored preference state (what gizmos will be when exiting)
+        # Otherwise show actual gizmo state
+        if in_paint_mode:
+            wm = context.window_manager
+            stored_enabled = wm.get("ps_gizmo_translate", True) or wm.get("ps_gizmo_rotate", True) or wm.get("ps_gizmo_scale", False)
+            display_state = stored_enabled
+        else:
+            display_state = gizmos_enabled
+        
         row.operator("paint_system.toggle_transform_gizmos", text="Transform Gizmo", icon='GIZMO', depress=display_state)
         
         # Individual gizmo type toggles (grayed out when main toggle is off or in paint mode)

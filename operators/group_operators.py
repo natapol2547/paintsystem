@@ -228,7 +228,7 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
                 ps_ctx = self.parse_context(context)
                 ps_ctx.active_group.active_index = 0
 
-            case 'PAINT_OVER':
+            case 'PAINT_OVER' | 'CONVERT':
                 # Check if Engine is EEVEE
                 if 'EEVEE' not in bpy.context.scene.render.engine:
                     self.report({'ERROR'}, "Paint Over is only supported in EEVEE")
@@ -298,7 +298,7 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
             self.group_name = "New Group"
         self.get_coord_type(context)
         if ps_ctx.active_material and node_tree_has_complex_setup(ps_ctx.active_material.node_tree):
-            self.template = 'PAINT_OVER'
+            self.template = 'CONVERT'
         return context.window_manager.invoke_props_dialog(self, width=300)
     
     def draw(self, context):

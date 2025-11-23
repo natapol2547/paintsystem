@@ -72,6 +72,7 @@ for blend_mode in bpy.types.ShaderNodeMixRGB.bl_rna.properties['blend_type'].enu
 TEMPLATE_ENUM = [
     ('BASIC', "Basic", "Basic painting setup", "IMAGE", 0),
     ('PAINT_OVER', "Paint Over", "Paint over the existing material", get_icon('paintbrush'), 1),
+    ('CONVERT', "Convert to Paint System", "Convert existing material to the Paint System", get_icon('paintbrush'), 5),
     ('PBR', "PBR", "PBR painting setup", "MATERIAL", 2),
     ('NORMAL', "Normals Painting", "Start off with a normal painting setup", "NORMALS_VERTEX_FACE", 3),
     ('NONE', "None", "Just add node group to material", "NONE", 4),

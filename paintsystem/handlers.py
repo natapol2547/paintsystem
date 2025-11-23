@@ -223,17 +223,18 @@ def mode_change_handler(*args):
         
         current_mode = obj.mode
         
-        # Check if mode actually changed
-        if current_mode == _last_mode:
-            return
-        
         # Modes where gizmos should be disabled
         paint_modes = {'PAINT_TEXTURE', 'SCULPT', 'PAINT_VERTEX', 'PAINT_WEIGHT'}
         
-        # Early exit if transitioning between paint modes or non-paint modes
+        # Determine mode transitions
         entering_paint = current_mode in paint_modes and (_last_mode is None or _last_mode not in paint_modes)
-        leaving_paint = _last_mode in paint_modes and current_mode not in paint_modes
+        leaving_paint = _last_mode is not None and _last_mode in paint_modes and current_mode not in paint_modes
         
+        # Skip if mode didn't actually change (but allow first run when _last_mode is None)
+        if _last_mode is not None and current_mode == _last_mode:
+            return
+        
+        # Early exit if no relevant transition
         if not entering_paint and not leaving_paint:
             _last_mode = current_mode
             return
