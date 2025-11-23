@@ -515,28 +515,52 @@ class PAINTSYSTEM_OT_ToggleTransformGizmos(Operator):
         if not space or space.type != 'VIEW_3D':
             return {'CANCELLED'}
         
+        obj = context.object
+        wm = context.window_manager
+        
+        # Check if in paint/sculpt mode
+        in_paint_mode = obj and obj.mode in {'PAINT_TEXTURE', 'SCULPT', 'PAINT_VERTEX', 'PAINT_WEIGHT'}
+        
         # Check if gizmos are currently enabled
         gizmos_enabled = (space.show_gizmo_object_translate or 
                          space.show_gizmo_object_rotate or 
                          space.show_gizmo_object_scale)
         
-        if gizmos_enabled:
-            # Store current state in window manager
-            wm = context.window_manager
-            wm["ps_gizmo_translate"] = space.show_gizmo_object_translate
-            wm["ps_gizmo_rotate"] = space.show_gizmo_object_rotate
-            wm["ps_gizmo_scale"] = space.show_gizmo_object_scale
-            
-            # Disable all gizmos
-            space.show_gizmo_object_translate = False
-            space.show_gizmo_object_rotate = False
-            space.show_gizmo_object_scale = False
+        if in_paint_mode:
+            # In paint mode, toggle the stored preference (for when we exit paint mode)
+            stored_enabled = wm.get("ps_gizmo_translate", True) or wm.get("ps_gizmo_rotate", True) or wm.get("ps_gizmo_scale", False)
+            if stored_enabled:
+                # Disable preference - gizmos will stay off when exiting paint mode
+                wm["ps_gizmo_translate"] = False
+                wm["ps_gizmo_rotate"] = False
+                wm["ps_gizmo_scale"] = False
+            else:
+                # Enable preference - gizmos will turn on when exiting paint mode
+                wm["ps_gizmo_translate"] = True
+                wm["ps_gizmo_rotate"] = True
+                wm["ps_gizmo_scale"] = False
         else:
-            # Restore previous state from window manager
-            wm = context.window_manager
-            space.show_gizmo_object_translate = wm.get("ps_gizmo_translate", True)
-            space.show_gizmo_object_rotate = wm.get("ps_gizmo_rotate", True)
-            space.show_gizmo_object_scale = wm.get("ps_gizmo_scale", False)
+            # Not in paint mode - toggle normally
+            if gizmos_enabled:
+                # Store current state
+                wm["ps_gizmo_translate"] = space.show_gizmo_object_translate
+                wm["ps_gizmo_rotate"] = space.show_gizmo_object_rotate
+                wm["ps_gizmo_scale"] = space.show_gizmo_object_scale
+                
+                # Disable all gizmos
+                space.show_gizmo_object_translate = False
+                space.show_gizmo_object_rotate = False
+                space.show_gizmo_object_scale = False
+            else:
+                # Restore previous state
+                space.show_gizmo_object_translate = wm.get("ps_gizmo_translate", True)
+                space.show_gizmo_object_rotate = wm.get("ps_gizmo_rotate", True)
+                space.show_gizmo_object_scale = wm.get("ps_gizmo_scale", False)
+        
+        # Redraw to update button state
+        for area in context.screen.areas:
+            if area.type == 'VIEW_3D':
+                area.tag_redraw()
         
         return {'FINISHED'}
 
