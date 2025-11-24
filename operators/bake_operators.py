@@ -1,7 +1,7 @@
 import bpy
 from bpy.types import Operator
 from bpy.utils import register_classes_factory
-from bpy.props import StringProperty, BoolProperty
+from bpy.props import StringProperty, BoolProperty, IntProperty, EnumProperty
 
 from .common import PSContextMixin, PSImageCreateMixin, PSUVOptionsMixin, DEFAULT_PS_UV_MAP_NAME
 
@@ -13,6 +13,49 @@ class BakeOperator(PSContextMixin, PSUVOptionsMixin, PSImageCreateMixin, Operato
     """Bake the active channel"""
     bl_options = {'REGISTER', 'UNDO'}
 
+    image_name: StringProperty(
+        name="Image Name",
+        description="Name of the new image",
+        default="Baked Image",
+        options={'SKIP_SAVE'}
+    )
+    use_udim: BoolProperty(
+        name="Use UDIM",
+        description="Create UDIM tiled image for multi-tile UV layouts",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    udim_auto_detect: BoolProperty(
+        name="Auto-detect UDIM",
+        description="Automatically detect UDIM tiles from UV layout",
+        default=True,
+        options={'SKIP_SAVE'}
+    )
+    image_resolution: EnumProperty(
+        items=[
+            ('1024', "1024", "1024x1024"),
+            ('2048', "2048", "2048x2048"),
+            ('4096', "4096", "4096x4096"),
+            ('8192', "8192", "8192x8192"),
+            ('CUSTOM', "Custom", "Custom Resolution"),
+        ],
+        default='2048'
+    )
+    image_width: IntProperty(
+        name="Width",
+        default=1024,
+        min=1,
+        description="Width of the image in pixels",
+        subtype='PIXEL'
+    )
+    image_height: IntProperty(
+        name="Height",
+        default=1024,
+        min=1,
+        description="Height of the image in pixels",
+        subtype='PIXEL'
+    )
+    
     uv_map: StringProperty(
         name= "UV Map",
         default= "UVMap",
@@ -72,7 +115,7 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
         
         bake_image = None
         if self.as_layer:
-            bake_image = self.create_image()
+            bake_image = self.create_image(context)
             bake_image.colorspace_settings.name = 'sRGB'
             active_channel.create_layer(
                 context, 
@@ -87,7 +130,7 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
         else:
             bake_image = active_channel.bake_image
             if not bake_image:
-                bake_image = self.create_image()
+                bake_image = self.create_image(context)
                 bake_image.colorspace_settings.name = 'sRGB'
                 active_channel.bake_image = bake_image
             elif bake_image.size[0] != self.image_width or bake_image.size[1] != self.image_height:
@@ -140,7 +183,7 @@ class PAINTSYSTEM_OT_BakeAllChannels(BakeOperator):
             
             if not bake_image:
                 self.image_name = f"{ps_ctx.active_group.name}_{channel.name}"
-                bake_image = self.create_image()
+                bake_image = self.create_image(context)
                 bake_image.colorspace_settings.name = 'sRGB'
                 channel.bake_image = bake_image
             elif bake_image.size[0] != self.image_width or bake_image.size[1] != self.image_height:
@@ -404,6 +447,49 @@ class PAINTSYSTEM_OT_ConvertToImageLayer(PSContextMixin, PSUVOptionsMixin, PSIma
     bl_description = "Transfer the UV of the image layer"
     bl_options = {'REGISTER', 'UNDO'}
     
+    image_name: StringProperty(
+        name="Image Name",
+        description="Name of the new image",
+        default="Image",
+        options={'SKIP_SAVE'}
+    )
+    use_udim: BoolProperty(
+        name="Use UDIM",
+        description="Create UDIM tiled image for multi-tile UV layouts",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    udim_auto_detect: BoolProperty(
+        name="Auto-detect UDIM",
+        description="Automatically detect UDIM tiles from UV layout",
+        default=True,
+        options={'SKIP_SAVE'}
+    )
+    image_resolution: EnumProperty(
+        items=[
+            ('1024', "1024", "1024x1024"),
+            ('2048', "2048", "2048x2048"),
+            ('4096', "4096", "4096x4096"),
+            ('8192', "8192", "8192x8192"),
+            ('CUSTOM', "Custom", "Custom Resolution"),
+        ],
+        default='2048'
+    )
+    image_width: IntProperty(
+        name="Width",
+        default=1024,
+        min=1,
+        description="Width of the image in pixels",
+        subtype='PIXEL'
+    )
+    image_height: IntProperty(
+        name="Height",
+        default=1024,
+        min=1,
+        description="Height of the image in pixels",
+        subtype='PIXEL'
+    )
+    
     uv_map: StringProperty(
         name= "UV Map",
         default="UVMap",
@@ -434,11 +520,11 @@ class PAINTSYSTEM_OT_ConvertToImageLayer(PSContextMixin, PSUVOptionsMixin, PSIma
     def execute(self, context):
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
-        active_layer = ps_ctx.active_layer
+        active_channel = ps_ctx.active_channel
         if not active_channel:
             return {'CANCELLED'}
         
-        image = self.create_image()
+        image = self.create_image(context)
         
         children = active_channel.get_children(active_layer.id)
         
@@ -467,6 +553,49 @@ class PAINTSYSTEM_OT_MergeDown(PSContextMixin, PSUVOptionsMixin, PSImageCreateMi
     bl_label = "Merge Down"
     bl_description = "Merge the down layers"
     bl_options = {'REGISTER', 'UNDO'}
+    
+    image_name: StringProperty(
+        name="Image Name",
+        description="Name of the new image",
+        default="Merged",
+        options={'SKIP_SAVE'}
+    )
+    use_udim: BoolProperty(
+        name="Use UDIM",
+        description="Create UDIM tiled image for multi-tile UV layouts",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    udim_auto_detect: BoolProperty(
+        name="Auto-detect UDIM",
+        description="Automatically detect UDIM tiles from UV layout",
+        default=True,
+        options={'SKIP_SAVE'}
+    )
+    image_resolution: EnumProperty(
+        items=[
+            ('1024', "1024", "1024x1024"),
+            ('2048', "2048", "2048x2048"),
+            ('4096', "4096", "4096x4096"),
+            ('8192', "8192", "8192x8192"),
+            ('CUSTOM', "Custom", "Custom Resolution"),
+        ],
+        default='2048'
+    )
+    image_width: IntProperty(
+        name="Width",
+        default=1024,
+        min=1,
+        description="Width of the image in pixels",
+        subtype='PIXEL'
+    )
+    image_height: IntProperty(
+        name="Height",
+        default=1024,
+        min=1,
+        description="Height of the image in pixels",
+        subtype='PIXEL'
+    )
     
     uv_map: StringProperty(
         name= "UV Map",
@@ -537,7 +666,7 @@ class PAINTSYSTEM_OT_MergeDown(PSContextMixin, PSUVOptionsMixin, PSImageCreateMi
         if not active_channel:
             return {'CANCELLED'}
         
-        image = self.create_image()
+        image = self.create_image(context)
         
         to_be_enabled_layers = []
         # Enable both active layer and below layer, disable all others
@@ -583,6 +712,49 @@ class PAINTSYSTEM_OT_MergeUp(PSContextMixin, PSUVOptionsMixin, PSImageCreateMixi
     bl_label = "Merge Up"
     bl_description = "Merge the layer into the one above"
     bl_options = {'REGISTER', 'UNDO'}
+
+    image_name: StringProperty(
+        name="Image Name",
+        description="Name of the new image",
+        default="Merged",
+        options={'SKIP_SAVE'}
+    )
+    use_udim: BoolProperty(
+        name="Use UDIM",
+        description="Create UDIM tiled image for multi-tile UV layouts",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    udim_auto_detect: BoolProperty(
+        name="Auto-detect UDIM",
+        description="Automatically detect UDIM tiles from UV layout",
+        default=True,
+        options={'SKIP_SAVE'}
+    )
+    image_resolution: EnumProperty(
+        items=[
+            ('1024', "1024", "1024x1024"),
+            ('2048', "2048", "2048x2048"),
+            ('4096', "4096", "4096x4096"),
+            ('8192', "8192", "8192x8192"),
+            ('CUSTOM', "Custom", "Custom Resolution"),
+        ],
+        default='2048'
+    )
+    image_width: IntProperty(
+        name="Width",
+        default=1024,
+        min=1,
+        description="Width of the image in pixels",
+        subtype='PIXEL'
+    )
+    image_height: IntProperty(
+        name="Height",
+        default=1024,
+        min=1,
+        description="Height of the image in pixels",
+        subtype='PIXEL'
+    )
 
     uv_map: StringProperty(
         name= "UV Map",

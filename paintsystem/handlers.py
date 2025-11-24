@@ -380,6 +380,92 @@ def _color_sync_timer():
     return 0.2
 
 
+# UDIM Tile Auto-Management (Phase 2)
+_last_image_states = {}  # Cache of {image_id: (tile_count, painted_tiles_count)}
+
+@bpy.app.handlers.persistent
+def update_udim_tile_state(context=None):
+    """Track UDIM tile paint state and auto-detect UDIM images"""
+    try:
+        if not context:
+            context = bpy.context
+        ps_ctx = parse_context(context)
+        if not ps_ctx or not ps_ctx.active_material:
+            return
+        
+        from ..utils.udim import is_udim_image, get_udim_tiles_from_image
+        
+        # Check all IMAGE layers in all channels of the active material
+        for group in ps_ctx.active_material.paint_system_groups:
+            for channel in group.channels:
+                for layer in channel.layers:
+                    if layer.type != 'IMAGE' or not layer.image:
+                        continue
+                    
+                    image = layer.image
+                    is_image_udim = is_udim_image(image)
+                    
+                    # Auto-detect: if image is UDIM but layer isn't marked, mark it now
+                    if is_image_udim and not layer.is_udim:
+                        layer.is_udim = True
+                        logger.info(f"Auto-detected UDIM image for layer '{layer.layer_name}'")
+                    
+                    # If layer is marked UDIM but image isn't, clear the flag
+                    elif layer.is_udim and not is_image_udim:
+                        layer.is_udim = False
+                        layer.udim_tiles.clear()
+                        continue
+                    
+                    # Skip non-UDIM layers
+                    if not layer.is_udim:
+                        continue
+                    
+                    # Get current tile list from image
+                    current_tiles = get_udim_tiles_from_image(image)
+                    image_id = id(image)
+                    
+                    # Compare with last known state to detect changes
+                    last_state = _last_image_states.get(image_id)
+                    if not last_state:
+                        # First time seeing this image - initialize
+                        _last_image_states[image_id] = (len(current_tiles), 0)
+                        # Populate layer tile list if empty
+                        if len(layer.udim_tiles) == 0:
+                            for tile_num in current_tiles:
+                                tile = layer.udim_tiles.add()
+                                tile.number = tile_num
+                                tile.is_painted = False
+                                tile.is_dirty = False
+                        continue
+                    
+                    last_tile_count, _ = last_state
+                    
+                    # If new tiles were added to the image, update layer
+                    if len(current_tiles) > last_tile_count:
+                        new_tiles = set(current_tiles) - set([t.number for t in layer.udim_tiles])
+                        for tile_num in sorted(new_tiles):
+                            tile = layer.udim_tiles.add()
+                            tile.number = tile_num
+                            tile.is_painted = False
+                            tile.is_dirty = False
+                        logger.info(f"Auto-created UDIM tiles {new_tiles} for layer {layer.layer_name}")
+                    
+                    # Update state
+                    _last_image_states[image_id] = (len(current_tiles), len(current_tiles))
+        
+    except Exception as e:
+        logger.debug(f"UDIM tile state update error: {e}")
+
+
+def _timer_update_udim_tiles():
+    """Timer callback for UDIM tile updates (runs periodically)"""
+    try:
+        update_udim_tile_state(bpy.context)
+    except Exception as e:
+        logger.debug(f"UDIM tile timer error: {e}")
+    return 0.5  # Poll every 500ms
+
+
 def register():
     bpy.app.handlers.frame_change_pre.append(frame_change_pre)
     bpy.app.handlers.load_post.append(load_post)
@@ -419,6 +505,13 @@ def register():
     if not _color_sync_timer_running:
         _color_sync_timer_running = True
         bpy.app.timers.register(_color_sync_timer, first_interval=0.2, persistent=True)
+    
+    # Register UDIM tile tracking timer (with error handling)
+    try:
+        if not bpy.app.timers.is_registered(_timer_update_udim_tiles):
+            bpy.app.timers.register(_timer_update_udim_tiles, first_interval=0.5, persistent=True)
+    except Exception as e:
+        logger.warning(f"Could not register UDIM tile timer: {e}")
 
 def unregister():
     bpy.msgbus.clear_by_owner(owner)
@@ -436,5 +529,9 @@ def unregister():
     if hasattr(bpy.app.timers, "unregister"):
         try:
             bpy.app.timers.unregister(_color_sync_timer)
+        except Exception:
+            pass
+        try:
+            bpy.app.timers.unregister(_timer_update_udim_tiles)
         except Exception:
             pass

@@ -193,6 +193,18 @@ class PSImageCreateMixin():
         default="New Image",
         options={'SKIP_SAVE'}
     )
+    use_udim: BoolProperty(
+        name="Use UDIM",
+        description="Create UDIM tiled image for multi-tile UV layouts",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    udim_auto_detect: BoolProperty(
+        name="Auto-detect UDIM",
+        description="Automatically detect UDIM tiles from UV layout",
+        default=True,
+        options={'SKIP_SAVE'}
+    )
     image_resolution: EnumProperty(
         items=[
             ('1024', "1024", "1024x1024"),
@@ -219,23 +231,88 @@ class PSImageCreateMixin():
     )
     
     def image_create_ui(self, layout, context, show_name=True):
+        main_col = layout.column()
+
         if show_name:
-            row = layout.row(align=True)
-            scale_content(context, row)
-            row.prop(self, "image_name")
-        box = layout.box()
-        box.label(text="Image Resolution", icon='IMAGE_DATA')
-        row = box.row(align=True)
-        row.prop(self, "image_resolution", expand=True)
+            title_row = main_col.row(align=True)
+            title_row.label(text="Image Settings", icon='FILE_IMAGE')
+            name_box = main_col.box()
+            name_box.use_property_split = True
+            name_box.prop(self, "image_name", text="Name")
+
+        ps_ctx = PSContextMixin.safe_parse_context(context)
+
+        udim_box = main_col.box()
+        udim_header = udim_box.row(align=True)
+        udim_header.label(text="UDIM", icon='UV')
+        udim_header.prop(self, "use_udim", text="Enable Tiles", toggle=True)
+
+        if ps_ctx and ps_ctx.ps_object:
+            from ..utils.udim import suggest_udim_for_object, detect_udim_from_uv
+
+            suggested = suggest_udim_for_object(ps_ctx.ps_object)
+            tiles = detect_udim_from_uv(ps_ctx.ps_object) if suggested else []
+            if suggested:
+                info_row = udim_box.row(align=True)
+                info_row.alert = True
+                info_row.label(text=f"Detected tiles: {', '.join(str(t) for t in tiles[:6])}{'…' if len(tiles) > 6 else ''}", icon='INFO')
+        if self.use_udim:
+            udim_options = udim_box.column(align=True)
+            udim_options.prop(self, "udim_auto_detect", text="Auto-detect Tiles", toggle=True)
+            if ps_ctx and ps_ctx.ps_object and self.udim_auto_detect:
+                from ..utils.udim import detect_udim_from_uv
+
+                detected_tiles = detect_udim_from_uv(ps_ctx.ps_object)
+                if detected_tiles:
+                    udim_options.label(text=f"Will create {len(detected_tiles)} tile(s)")
+                else:
+                    warn = udim_options.row(align=True)
+                    warn.alert = True
+                    warn.label(text="No tiles found on mesh", icon='ERROR')
+
+        res_box = main_col.box()
+        res_box.label(text="Resolution", icon='IMAGE_DATA')
+        res_row = res_box.row(align=True)
+        res_row.prop(self, "image_resolution", expand=True)
+
+        width_value = self.image_width if self.image_resolution == 'CUSTOM' else int(self.image_resolution)
+        height_value = self.image_height if self.image_resolution == 'CUSTOM' else int(self.image_resolution)
+        details_row = res_box.row(align=True)
+        details_row.label(text=f"{width_value} x {height_value}{' per tile' if self.use_udim else ''}")
+
         if self.image_resolution == 'CUSTOM':
-            col = box.column(align=True)
-            col.prop(self, "image_width", text="Width")
-            col.prop(self, "image_height", text="Height")
+            custom_col = res_box.column(align=True)
+            split = custom_col.split(factor=0.5, align=True)
+            split.prop(self, "image_width", text="Width")
+            split.prop(self, "image_height", text="Height")
             
-    def create_image(self):
+    def create_image(self, context=None):
         if self.image_resolution != 'CUSTOM':
             self.image_width = int(self.image_resolution)
             self.image_height = int(self.image_resolution)
+        
+        # Check if UDIM should be created
+        if self.use_udim and context:
+            from ..utils.udim import create_udim_image, detect_udim_from_uv
+            ps_ctx = PSContextMixin.safe_parse_context(context)
+
+            tiles = []
+            if ps_ctx and ps_ctx.ps_object and self.udim_auto_detect:
+                tiles = detect_udim_from_uv(ps_ctx.ps_object)
+            if not tiles:
+                tiles = [1001]
+
+            img = create_udim_image(
+                name=self.image_name,
+                tiles=tiles,
+                width=self.image_width,
+                height=self.image_height,
+                alpha=True
+            )
+            if img:
+                return img
+        
+        # Create regular image
         img = bpy.data.images.new(
             name=self.image_name, width=self.image_width, height=self.image_height, alpha=True)
         img.generated_color = (0, 0, 0, 0)
