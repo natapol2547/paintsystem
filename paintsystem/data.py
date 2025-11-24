@@ -619,6 +619,27 @@ class GlobalLayer(PropertyGroup):
             case "IMAGE":
                 if self.image:
                     self.image.name = self.layer_name
+                    try:
+                        from ..utils.udim import is_udim_image, get_udim_tiles_from_image
+                        if is_udim_image(self.image):
+                            if not self.is_udim:
+                                self.is_udim = True
+                            desired_tiles = get_udim_tiles_from_image(self.image)
+                            if desired_tiles:
+                                existing_numbers = {tile.number for tile in self.udim_tiles}
+                                desired_set = set(desired_tiles)
+                                if existing_numbers != desired_set:
+                                    self.udim_tiles.clear()
+                                    for tile_number in sorted(desired_set):
+                                        tile = self.udim_tiles.add()
+                                        tile.number = tile_number
+                                        tile.is_painted = False
+                                        tile.is_dirty = False
+                        elif self.is_udim:
+                            self.is_udim = False
+                            self.udim_tiles.clear()
+                    except Exception as e:
+                        logger.debug(f"UDIM auto-detect failed for layer {self.layer_name}: {e}")
                 layer_graph = create_image_graph(self)
             case "FOLDER":
                 layer_graph = create_folder_graph(self)
@@ -674,7 +695,11 @@ class GlobalLayer(PropertyGroup):
     # Not used anymore
     def update_layer_name(self, context):
         """Update the layer name to ensure uniqueness."""
-        new_name = get_next_unique_name(self.layer_name, [layer.layer_name for layer in context.scene.ps_scene_data.layers if layer != self])
+        ps_scene_data = getattr(context.scene, 'ps_scene_data', None)
+        existing_names = []
+        if ps_scene_data and hasattr(ps_scene_data, 'layers'):
+            existing_names = [layer.layer_name for layer in ps_scene_data.layers if layer != self]
+        new_name = get_next_unique_name(self.layer_name, existing_names)
         if new_name != self.layer_name:
             self.layer_name = new_name
         self.update_node_tree(context)
@@ -848,6 +873,26 @@ def add_empty_to_collection(context: bpy.types.Context, empty_object: bpy.types.
     if empty_object.name not in collection.objects:
         collection.objects.link(empty_object)
 
+class UDIMTile(PropertyGroup):
+    """Represents a single UDIM tile"""
+    number: IntProperty(
+        name="Tile Number",
+        description="UDIM tile number (e.g., 1001, 1002)",
+        default=1001,
+        min=1001,
+        max=2000
+    )
+    is_painted: BoolProperty(
+        name="Is Painted",
+        description="Whether this tile has painted content",
+        default=False
+    )
+    is_dirty: BoolProperty(
+        name="Is Dirty",
+        description="Whether this tile needs to be saved",
+        default=False
+    )
+
 class Layer(BaseNestedListItem):
     """Base class for material layers in the Paint System"""
     
@@ -968,7 +1013,11 @@ class Layer(BaseNestedListItem):
     # Not used anymore
     def update_layer_name(self, context):
         """Update the layer name to ensure uniqueness."""
-        new_name = get_next_unique_name(self.layer_name, [layer.layer_name for layer in context.scene.ps_scene_data.layers if layer != self])
+        ps_scene_data = getattr(context.scene, 'ps_scene_data', None)
+        existing_names = []
+        if ps_scene_data and hasattr(ps_scene_data, 'layers'):
+            existing_names = [layer.layer_name for layer in ps_scene_data.layers if layer != self]
+        new_name = get_next_unique_name(self.layer_name, existing_names)
         if new_name != self.layer_name:
             self.layer_name = new_name
         self.update_node_tree(context)
@@ -1151,6 +1200,19 @@ class Layer(BaseNestedListItem):
         default=False,
         update=update_brush_settings
     )
+    
+    # UDIM support
+    is_udim: BoolProperty(
+        name="Is UDIM",
+        description="Whether this layer uses UDIM tiles",
+        default=False
+    )
+    udim_tiles: CollectionProperty(
+        type=UDIMTile,
+        name="UDIM Tiles",
+        description="Collection of UDIM tiles used by this layer"
+    )
+    
     def update_blend_mode(self, context: Context):
         layer_data = self.get_layer_data()
         layer_data.update_node_tree(context)
@@ -2358,12 +2420,12 @@ def get_all_layers() -> list[Layer]:
 
 def get_global_layer(layer: Layer) -> GlobalLayer | None:
     """Get the global layer data from the context."""
-    if not layer or not bpy.context.scene or not bpy.context.scene.ps_scene_data:
+    if not layer or not bpy.context.scene:
         return None
-    # for global_layer in bpy.context.scene.ps_scene_data.layers[layer.ref_layer_id]:
-    #     if global_layer.name == layer.ref_layer_id:
-    #         return global_layer
-    return bpy.context.scene.ps_scene_data.layers.get(layer.ref_layer_id, None)
+    ps_scene_data = getattr(bpy.context.scene, 'ps_scene_data', None)
+    if not ps_scene_data or not hasattr(ps_scene_data, 'layers'):
+        return None
+    return ps_scene_data.layers.get(layer.ref_layer_id, None)
 
 def is_layer_linked(check_layer: Layer) -> bool:
     """Check if the layer is linked"""
@@ -2414,8 +2476,8 @@ def parse_context(context: bpy.types.Context) -> PSContext:
         raise TypeError("context must be of type bpy.types.Context")
     
     ps_settings = get_preferences(context)
-    
-    ps_scene_data = context.scene.ps_scene_data
+
+    ps_scene_data = getattr(context.scene, 'ps_scene_data', None)
     
     ps_object = None
     obj = hasattr(context, 'active_object') and context.active_object
@@ -2432,7 +2494,7 @@ def parse_context(context: bpy.types.Context) -> PSContext:
             case _:
                 obj = None
                 ps_object = None
-        if obj and obj.name == "PS Camera Plane":
+        if obj and obj.name == "PS Camera Plane" and ps_scene_data:
             obj = ps_scene_data.last_selected_ps_object
             ps_object = obj
 
@@ -2491,7 +2553,7 @@ class PSContextMixin:
         try:
             ps_ctx = parse_context(context)
             # Validate critical components exist
-            if not ps_ctx.active_object:
+            if not ps_ctx.active_object or not ps_ctx.ps_scene_data:
                 return None
             return ps_ctx
         except Exception as e:
@@ -2751,6 +2813,7 @@ class LegacyPaintSystemContextParser:
 
 classes = (
     MarkerAction,
+    UDIMTile,
     GlobalLayer,
     Layer,
     Channel,
@@ -2769,12 +2832,25 @@ def register():
     """Register the Paint System data module."""
     try:
         _register()
-    except ValueError as e:
-        # Handle "already registered" errors during development/reload
-        if "already registered" not in str(e):
+    except Exception as e:
+        if isinstance(e, ValueError) and "already registered" in str(e):
             raise
+        print(f"Error registering Paint System classes: {e}")
+        # Try to identify which class failed
+        for cls in classes:
+            try:
+                bpy.utils.register_class(cls)
+                print(f"✓ Registered {cls.__name__}")
+            except Exception as cls_error:
+                print(f"✗ Failed to register {cls.__name__}: {cls_error}")
+        raise
     # Only set properties if not already present (prevents double registration errors)
-    if not hasattr(bpy.types.Scene, 'ps_scene_data'):
+    try:
+        has_scene_data = hasattr(bpy.types.Scene, 'ps_scene_data')
+    except ValueError as e:
+        print(f"Error checking Scene attributes (likely a class registration failed): {e}")
+        raise
+    if not has_scene_data:
         bpy.types.Scene.ps_scene_data = PointerProperty(
             type=PaintSystemGlobalData,
             name="Paint System Data",

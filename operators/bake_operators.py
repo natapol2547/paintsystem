@@ -1,7 +1,7 @@
 import bpy
 from bpy.types import Operator
 from bpy.utils import register_classes_factory
-from bpy.props import StringProperty, BoolProperty
+from bpy.props import StringProperty, BoolProperty, IntProperty, EnumProperty
 
 from .common import PSContextMixin, PSImageCreateMixin, PSUVOptionsMixin, DEFAULT_PS_UV_MAP_NAME
 
