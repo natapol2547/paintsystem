@@ -8,3 +8,4 @@ class PaintSystemPreferences:
     name_layers_group: bool
     hide_norm_paint_tips: bool
     hide_color_attr_tips: bool
+    loading_donations: bool

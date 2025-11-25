@@ -1,5 +1,7 @@
 import bpy
 
+from ..utils.version import is_newer_than
+
 # --
 from ..paintsystem.data import PSContextMixin, Channel
 from ..custom_icons import get_icon

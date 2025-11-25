@@ -1,6 +1,11 @@
 import bpy
+from datetime import datetime
 from bpy.utils import register_classes_factory
 from bpy.types import Panel, Menu, UIList
+
+from ..utils.version import is_newer_than, is_online
+
+from ..paintsystem.donations import get_donation_info
 from .common import (
     PSContextMixin,
     get_icon,
@@ -18,6 +23,11 @@ creators = [
     ("Zoomy Toons", "https://www.youtube.com/channel/UCNCKsXWIBFoWH6cMzeHmkhA")
 ]
 
+def align_center(layout):
+    row = layout.row(align=True)
+    row.alignment = 'CENTER'
+    return row
+
 class MAT_PT_Support(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_Support'
     bl_space_type = "VIEW_3D"
@@ -28,14 +38,56 @@ class MAT_PT_Support(PSContextMixin, Panel):
     
 
     def draw(self, context):
+        ps_ctx = self.parse_context(context)
         layout = self.layout
-        layout.label(text="Addon created by:")
-        for creator in creators:
-            layout.operator('wm.url_open', text=creator[0],
-                            icon='URL').url = creator[1]
-        layout.separator()
-        layout.operator('wm.url_open', text="Support us!",
+        row = layout.row(align=True)
+        row.scale_x = 1.5
+        row.scale_y = 1.5
+        row.operator('wm.url_open', text="Support us!",
                         icon='FUND', depress=True).url = "https://tawansunflower.gumroad.com/l/paint_system"
+        if is_online():
+            donations_box = layout.box()
+            donation_info = get_donation_info()
+            col = donations_box.column(align=True)
+            row = align_center(col)
+            row.template_icon(get_icon("star"))
+            row.label(text=f"Total Donations")
+            row.template_icon(get_icon("star"))
+            
+            if ps_ctx.ps_settings is None or ps_ctx.ps_settings.loading_donations:
+                align_center(col).label(text="Loading...", icon="INFO")
+            if donation_info:
+                align_center(col).label(text=f"*~~   ${str(donation_info['totalSales'])}   ~~*")
+                if donation_info['recentDonations'] and len(donation_info['recentDonations']) > 0:
+                    if is_newer_than(4, 2):
+                        col.separator(type = 'LINE')
+                    else:
+                        col.separator()
+                    date_format = '%d-%m-%y %H:%M'
+                    # year is current year
+                    current_year = datetime.now().year
+                    for idx, donation in enumerate(donation_info['recentDonations'][:3]):
+                        donation_year = datetime.fromisoformat(donation['timestamp']).year
+                        if donation_year != current_year:
+                            date_format = '%d %b %y %H:%M'
+                        else:
+                            date_format = '%d %b %H:%M'
+                        row = align_center(col)
+                        row.enabled = idx == 0
+                        row.label(text=f"${donation['price']} donated at {datetime.fromisoformat(donation['timestamp']).strftime(date_format)}")
+        align_center(layout).label(text="But more importantly,")
+        row = layout.row(align=True)
+        row.scale_x = 1.5
+        row.scale_y = 1.5
+        row.operator('wm.url_open', text="Donate to Blender Foundation!!!",
+                        icon='BLENDER').url = "https://fund.blender.org/"
+        header, content = layout.panel("paintsystem_credits", default_closed=True)
+        header.label(text="Credits:")
+        if content:
+            for idx, creator in enumerate(creators):
+                column = content.column(align=True)
+                column.operator('wm.url_open', text=creator[0],
+                                icon='URL').url = creator[1]
 
 class MAT_MT_PaintSystemMaterialSelectMenu(PSContextMixin, Menu):
     bl_label = "Material Select Menu"
@@ -133,11 +185,10 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
     def draw_header_preset(self, context):
         layout = self.layout
         ps_ctx = self.parse_context(context)
-        mat = ps_ctx.active_material
         row = layout.row(align=True)
-        if mat:
-            scale_content(context, row, 1.1, 1)
-            row.popover("MAT_PT_PaintSystemMaterialSettings", text="", icon="MATERIAL")
+        if ps_ctx.ps_object and ps_ctx.ps_object.material_slots and len(ps_ctx.ps_object.material_slots) > 1:
+            row.operator("w,.call")
+            row.popover("MAT_PT_PaintSystemMaterialSettings", text="Material", icon="MATERIAL")
         else:
             row.popover("MAT_PT_Support", icon="FUND", text="Wah!")
     
@@ -186,7 +237,6 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
         
         if ps_ctx.ps_settings.use_legacy_ui:
             mat = ps_ctx.active_material
-            groups = ps_ctx.ps_mat_data.groups if mat else []
             if any([ob.material_slots[i].material for i in range(len(ob.material_slots))]):
                 col = layout.column(align=True)
                 row = col.row(align=True)

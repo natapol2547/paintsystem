@@ -14,7 +14,7 @@ In blender click **Edit > Preferences > Add-ons**
 Navigate to the downloaded .zip file and install it.
 
 ## Documentation
-[Paint System Documentation](https://prairie-yarrow-e25.notion.site/PAINT-SYSTEM-DOCUMENTATION-1910a7029e86803f9ac3e0c79c67bd8c?pvs=74)
+[Paint System Documentation](https://www.notion.so/Paint-System-Documentation-2b02d71289d680f68ff9ef712d33716f?source=copy_link)
 
 ### Have questions about the addon? You can email me anytime!
 tawan.sunflower.nc@gmail.com

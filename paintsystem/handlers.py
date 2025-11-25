@@ -5,6 +5,7 @@ from .graph.basic_layers import get_layer_version_for_type
 import time
 from .graph.nodetree_builder import get_nodetree_version
 import uuid
+from .donations import get_donation_info
 
 logger = logging.getLogger("PaintSystem")
 
@@ -47,8 +48,7 @@ def frame_change_pre(scene):
             layer.enabled = enabled
 
 
-@bpy.app.handlers.persistent
-def load_post(scene):
+def load_paint_system_data():
     print(f"Loading Paint System data...")
     start_time = time.time()
     ps_ctx = parse_context(bpy.context)
@@ -125,15 +125,20 @@ def load_post(scene):
             
     print(f"Paint System: Checked {len(ps_ctx.ps_scene_data.layers) if ps_ctx.ps_scene_data else 0} layers in {round((time.time() - start_time) * 1000, 2)} ms")
 
+
+@bpy.app.handlers.persistent
+def load_post(scene):
+    
+    load_paint_system_data()
+    # Check for donation info
+    get_donation_info()
+    # if donation_info:
+    #     print(f"Donation info: {donation_info}")
+
 @bpy.app.handlers.persistent
 def save_handler(scene: bpy.types.Scene):
     print("Saving Paint System data...")
     images = set()
-    ps_ctx = parse_context(bpy.context)
-    for layer in ps_ctx.ps_scene_data.layers:
-        image = layer.image
-        if image and image.is_dirty:
-            images.add(image)
     
     for mat in bpy.data.materials:
         if hasattr(mat, 'ps_mat_data'):
@@ -142,6 +147,10 @@ def save_handler(scene: bpy.types.Scene):
                     image = channel.bake_image
                     if image and image.is_dirty:
                         images.add(image)
+                    for layer in channel.layers:
+                        image = layer.image
+                        if image:
+                            images.add(image)
             
     for image in images:
         if not image.is_dirty:

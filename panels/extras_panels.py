@@ -1,3 +1,4 @@
+from bl_ui.properties_material import EEVEE_MATERIAL_PT_context_material
 import bpy
 from bpy.types import Panel, Menu
 from bpy.utils import register_classes_factory
@@ -336,6 +337,20 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
 
             sub_row.operator("paint.brush_colors_flip", icon='FILE_REFRESH', text="")
 
+
+def draw_paint_system_material(self, context):
+    layout = self.layout
+    ps_ctx = PSContextMixin.parse_context(context)
+    if ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.groups:
+        box = layout.box()
+        box.label(text=f"Paint System Node Groups:", icon_value=get_icon("sunflower"))
+        row = box.row(align=True)
+        scale_content(context, row, 1.3, 1.2)
+        row.popover("MAT_PT_PaintSystemGroups", text="", icon="NODETREE")
+        row.prop(ps_ctx.active_group, "name", text="")
+        row.operator("paint_system.new_group", icon='ADD', text="")
+        row.operator("paint_system.delete_group", icon='REMOVE', text="")
+
 classes = (
     MAT_PT_BrushTooltips,
     MAT_PT_Brush,
@@ -344,4 +359,12 @@ classes = (
     MAT_PT_BrushColor,
 )
 
-register, unregister = register_classes_factory(classes)
+_register, _unregister = register_classes_factory(classes)
+
+def register():
+    _register()
+    EEVEE_MATERIAL_PT_context_material.append(draw_paint_system_material)
+
+def unregister():
+    _unregister()
+    EEVEE_MATERIAL_PT_context_material.remove(draw_paint_system_material)

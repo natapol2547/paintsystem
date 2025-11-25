@@ -1,7 +1,7 @@
 import bpy
 from bpy.types import Operator
 from bpy.utils import register_classes_factory
-from bpy.props import StringProperty, BoolProperty, IntProperty, EnumProperty
+from bpy.props import StringProperty, BoolProperty
 
 from .common import PSContextMixin, PSImageCreateMixin, PSUVOptionsMixin, DEFAULT_PS_UV_MAP_NAME
 
@@ -9,67 +9,16 @@ from ..paintsystem.data import set_layer_blend_type, get_layer_blend_type
 from ..panels.common import get_icon_from_channel
 
 
-class BakeOperator(PSContextMixin, PSUVOptionsMixin, PSImageCreateMixin, Operator):
+class BakeOperator(PSContextMixin, PSImageCreateMixin, Operator):
     """Bake the active channel"""
     bl_options = {'REGISTER', 'UNDO'}
-
-    image_name: StringProperty(
-        name="Image Name",
-        description="Name of the new image",
-        default="Baked Image",
-        options={'SKIP_SAVE'}
-    )
-    use_udim: BoolProperty(
-        name="Use UDIM",
-        description="Create UDIM tiled image for multi-tile UV layouts",
-        default=False,
-        options={'SKIP_SAVE'}
-    )
-    udim_auto_detect: BoolProperty(
-        name="Auto-detect UDIM",
-        description="Automatically detect UDIM tiles from UV layout",
-        default=True,
-        options={'SKIP_SAVE'}
-    )
-    image_resolution: EnumProperty(
-        items=[
-            ('1024', "1024", "1024x1024"),
-            ('2048', "2048", "2048x2048"),
-            ('4096', "4096", "4096x4096"),
-            ('8192', "8192", "8192x8192"),
-            ('CUSTOM', "Custom", "Custom Resolution"),
-        ],
-        default='2048'
-    )
-    image_width: IntProperty(
-        name="Width",
-        default=1024,
-        min=1,
-        description="Width of the image in pixels",
-        subtype='PIXEL'
-    )
-    image_height: IntProperty(
-        name="Height",
-        default=1024,
-        min=1,
-        description="Height of the image in pixels",
-        subtype='PIXEL'
-    )
-    
-    uv_map: StringProperty(
-        name= "UV Map",
-        default= "UVMap",
-        options={'SKIP_SAVE'}
-    )
     
     def invoke(self, context, event):
         """Invoke the operator to create a new channel."""
         ps_ctx = self.parse_context(context)
         self.get_coord_type(context)
         if self.use_paint_system_uv:
-            self.uv_map = DEFAULT_PS_UV_MAP_NAME
-        else:
-            self.uv_map = self.uv_map_name
+            self.uv_map_name = DEFAULT_PS_UV_MAP_NAME
         self.image_name = f"{ps_ctx.active_group.name}_{ps_ctx.active_channel.name}"
         return context.window_manager.invoke_props_dialog(self)
 
@@ -80,11 +29,6 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
     bl_description = "Bake the active channel"
     bl_options = {'REGISTER', 'UNDO'}
     
-    uv_map: StringProperty(
-        name= "UV Map",
-        default= "UVMap",
-        options={'SKIP_SAVE'}
-    )
     as_layer: BoolProperty(
         name="As Layer",
         description="Bake the channel as a layer",
@@ -103,9 +47,11 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
         self.image_create_ui(layout, context)
         box = layout.box()
         box.label(text="UV Map", icon='UV')
-        box.prop_search(self, "uv_map", ps_ctx.ps_object.data, "uv_layers", text="")
+        box.prop_search(self, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="")
     
     def execute(self, context):
+        # Set cursor to wait
+        context.window.cursor_set('WAIT')
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
         mat = ps_ctx.active_material
@@ -117,6 +63,7 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
         if self.as_layer:
             bake_image = self.create_image(context)
             bake_image.colorspace_settings.name = 'sRGB'
+            active_channel.bake(context, mat, bake_image, self.uv_map_name, force_alpha=True)
             active_channel.create_layer(
                 context, 
                 layer_name=self.image_name, 
@@ -124,9 +71,8 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
                 insert_at="START",
                 image=bake_image,
                 coord_type='UV',
-                uv_map_name=self.uv_map
+                uv_map_name=self.uv_map_name
             )
-            active_channel.bake(context, mat, bake_image, self.uv_map)
         else:
             bake_image = active_channel.bake_image
             if not bake_image:
@@ -135,13 +81,15 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
                 active_channel.bake_image = bake_image
             elif bake_image.size[0] != self.image_width or bake_image.size[1] != self.image_height:
                 bake_image.scale(self.image_width, self.image_height)
-            active_channel.bake_uv_map = self.uv_map
+            active_channel.bake_uv_map = self.uv_map_name
                 
             active_channel.use_bake_image = False
-            active_channel.bake(context, mat, bake_image, self.uv_map)
+            active_channel.bake(context, mat, bake_image, self.uv_map_name)
             active_channel.use_bake_image = True
         # Return to object mode
         bpy.ops.object.mode_set(mode="OBJECT")
+        # Set cursor to default
+        context.window.cursor_set('DEFAULT')
         return {'FINISHED'}
 
 
@@ -150,12 +98,6 @@ class PAINTSYSTEM_OT_BakeAllChannels(BakeOperator):
     bl_label = "Bake All Channels"
     bl_description = "Bake all channels"
     bl_options = {'REGISTER', 'UNDO'}
-    
-    uv_map: StringProperty(
-        name= "UV Map",
-        default= "UVMap",
-        options={'SKIP_SAVE'}
-    )
     
     @classmethod
     def poll(cls, context):
@@ -168,9 +110,11 @@ class PAINTSYSTEM_OT_BakeAllChannels(BakeOperator):
         self.image_create_ui(layout, context, show_name=False)
         box = layout.box()
         box.label(text="UV Map", icon='UV')
-        box.prop_search(self, "uv_map", ps_ctx.ps_object.data, "uv_layers", text="")
+        box.prop_search(self, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="")
     
     def execute(self, context):
+        # Set cursor to wait
+        context.window.cursor_set('WAIT')
         ps_ctx = self.parse_context(context)
         active_group = ps_ctx.active_group
         
@@ -190,11 +134,13 @@ class PAINTSYSTEM_OT_BakeAllChannels(BakeOperator):
                 bake_image.scale(self.image_width, self.image_height)
                 
             channel.use_bake_image = False
-            channel.bake_uv_map = self.uv_map
-            channel.bake(context, mat, bake_image, self.uv_map)
+            channel.bake_uv_map = self.uv_map_name
+            channel.bake(context, mat, bake_image, self.uv_map_name)
             channel.use_bake_image = True
         # Return to object mode
         bpy.ops.object.mode_set(mode="OBJECT")
+        # Set cursor to default
+        context.window.cursor_set('DEFAULT')
         return {'FINISHED'}
 
 
@@ -391,12 +337,6 @@ class PAINTSYSTEM_OT_TransferImageLayerUV(PSContextMixin, PSUVOptionsMixin, Oper
     bl_description = "Transfer the UV of the image layer"
     bl_options = {'REGISTER', 'UNDO'}
     
-    uv_map: StringProperty(
-        name= "UV Map",
-        default="UVMap",
-        options={'SKIP_SAVE'},
-    )
-    
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
@@ -410,9 +350,11 @@ class PAINTSYSTEM_OT_TransferImageLayerUV(PSContextMixin, PSUVOptionsMixin, Oper
         ps_ctx = self.parse_context(context)
         box = layout.box()
         box.label(text="UV Map", icon='UV')
-        box.prop_search(self, "uv_map", ps_ctx.ps_object.data, "uv_layers", text="")
+        box.prop_search(self, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="")
 
     def execute(self, context):
+        # Set cursor to wait
+        context.window.cursor_set('WAIT')
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
         active_layer = ps_ctx.active_layer
@@ -430,71 +372,29 @@ class PAINTSYSTEM_OT_TransferImageLayerUV(PSContextMixin, PSUVOptionsMixin, Oper
         
         original_blend_mode = get_layer_blend_type(active_layer)
         set_layer_blend_type(active_layer, 'MIX')
-        active_channel.bake(context, ps_ctx.active_material, transferred_image, self.uv_map, use_group_tree=False)
+        orig_is_clip = bool(active_layer.is_clip)
+        if active_layer.is_clip:
+            active_layer.is_clip = False
+        active_channel.bake(context, ps_ctx.active_material, transferred_image, self.uv_map_name, use_group_tree=False, force_alpha=True)
+        if active_layer.is_clip != orig_is_clip:
+            active_layer.is_clip = orig_is_clip
         set_layer_blend_type(active_layer, original_blend_mode)
         active_layer.coord_type = 'UV'
-        active_layer.uv_map_name = self.uv_map
+        active_layer.uv_map_name = self.uv_map_name
         active_layer.image = transferred_image
         # Restore the layers
         for layer in to_be_enabled_layers:
             layer.enabled = True
+        # Set cursor back to default
+        context.window.cursor_set('DEFAULT')
         return {'FINISHED'}
 
 
-class PAINTSYSTEM_OT_ConvertToImageLayer(PSContextMixin, PSUVOptionsMixin, PSImageCreateMixin, Operator):
+class PAINTSYSTEM_OT_ConvertToImageLayer(PSContextMixin, PSImageCreateMixin, Operator):
     bl_idname = "paint_system.convert_to_image_layer"
     bl_label = "Transfer Image Layer UV"
     bl_description = "Transfer the UV of the image layer"
     bl_options = {'REGISTER', 'UNDO'}
-    
-    image_name: StringProperty(
-        name="Image Name",
-        description="Name of the new image",
-        default="Image",
-        options={'SKIP_SAVE'}
-    )
-    use_udim: BoolProperty(
-        name="Use UDIM",
-        description="Create UDIM tiled image for multi-tile UV layouts",
-        default=False,
-        options={'SKIP_SAVE'}
-    )
-    udim_auto_detect: BoolProperty(
-        name="Auto-detect UDIM",
-        description="Automatically detect UDIM tiles from UV layout",
-        default=True,
-        options={'SKIP_SAVE'}
-    )
-    image_resolution: EnumProperty(
-        items=[
-            ('1024', "1024", "1024x1024"),
-            ('2048', "2048", "2048x2048"),
-            ('4096', "4096", "4096x4096"),
-            ('8192', "8192", "8192x8192"),
-            ('CUSTOM', "Custom", "Custom Resolution"),
-        ],
-        default='2048'
-    )
-    image_width: IntProperty(
-        name="Width",
-        default=1024,
-        min=1,
-        description="Width of the image in pixels",
-        subtype='PIXEL'
-    )
-    image_height: IntProperty(
-        name="Height",
-        default=1024,
-        min=1,
-        description="Height of the image in pixels",
-        subtype='PIXEL'
-    )
-    
-    uv_map: StringProperty(
-        name= "UV Map",
-        default="UVMap",
-        options={'SKIP_SAVE'},
-    )
     
     @classmethod
     def poll(cls, context):
@@ -504,9 +404,7 @@ class PAINTSYSTEM_OT_ConvertToImageLayer(PSContextMixin, PSUVOptionsMixin, PSIma
     def invoke(self, context, event):
         self.get_coord_type(context)
         if self.use_paint_system_uv:
-            self.uv_map = DEFAULT_PS_UV_MAP_NAME
-        else:
-            self.uv_map = self.uv_map_name
+            self.uv_map_name = DEFAULT_PS_UV_MAP_NAME
         return context.window_manager.invoke_props_dialog(self)
     
     def draw(self, context):
@@ -515,12 +413,14 @@ class PAINTSYSTEM_OT_ConvertToImageLayer(PSContextMixin, PSUVOptionsMixin, PSIma
         self.image_create_ui(layout, context, show_name=False)
         box = layout.box()
         box.label(text="UV Map", icon='UV')
-        box.prop_search(self, "uv_map", ps_ctx.ps_object.data, "uv_layers", text="")
+        box.prop_search(self, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="")
 
     def execute(self, context):
+        # Set cursor to wait
+        context.window.cursor_set('WAIT')
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
-        active_channel = ps_ctx.active_channel
+        active_layer = ps_ctx.active_layer
         if not active_channel:
             return {'CANCELLED'}
         
@@ -536,72 +436,30 @@ class PAINTSYSTEM_OT_ConvertToImageLayer(PSContextMixin, PSUVOptionsMixin, PSIma
                 layer.enabled = False
         original_blend_mode = get_layer_blend_type(active_layer)
         set_layer_blend_type(active_layer, 'MIX')
-        active_channel.bake(context, ps_ctx.active_material, image, self.uv_map, use_group_tree=False)
+        orig_is_clip = bool(active_layer.is_clip)
+        if active_layer.is_clip:
+            active_layer.is_clip = False
+        active_channel.bake(context, ps_ctx.active_material, image, self.uv_map_name, use_group_tree=False, force_alpha=True)
+        if active_layer.is_clip != orig_is_clip:
+            active_layer.is_clip = orig_is_clip
         set_layer_blend_type(active_layer, original_blend_mode)
-        active_layer.type = 'IMAGE'
         active_layer.coord_type = 'UV'
-        active_layer.uv_map_name = self.uv_map
+        active_layer.uv_map_name = self.uv_map_name
         active_layer.image = image
+        active_layer.type = 'IMAGE'
         for layer in to_be_enabled_layers:
             layer.enabled = True
         active_channel.remove_children(active_layer.id)
+        # Set cursor back to default
+        context.window.cursor_set('DEFAULT')
         return {'FINISHED'}
 
 
-class PAINTSYSTEM_OT_MergeDown(PSContextMixin, PSUVOptionsMixin, PSImageCreateMixin, Operator):
+class PAINTSYSTEM_OT_MergeDown(PSContextMixin, PSImageCreateMixin, Operator):
     bl_idname = "paint_system.merge_down"
     bl_label = "Merge Down"
     bl_description = "Merge the down layers"
     bl_options = {'REGISTER', 'UNDO'}
-    
-    image_name: StringProperty(
-        name="Image Name",
-        description="Name of the new image",
-        default="Merged",
-        options={'SKIP_SAVE'}
-    )
-    use_udim: BoolProperty(
-        name="Use UDIM",
-        description="Create UDIM tiled image for multi-tile UV layouts",
-        default=False,
-        options={'SKIP_SAVE'}
-    )
-    udim_auto_detect: BoolProperty(
-        name="Auto-detect UDIM",
-        description="Automatically detect UDIM tiles from UV layout",
-        default=True,
-        options={'SKIP_SAVE'}
-    )
-    image_resolution: EnumProperty(
-        items=[
-            ('1024', "1024", "1024x1024"),
-            ('2048', "2048", "2048x2048"),
-            ('4096', "4096", "4096x4096"),
-            ('8192', "8192", "8192x8192"),
-            ('CUSTOM', "Custom", "Custom Resolution"),
-        ],
-        default='2048'
-    )
-    image_width: IntProperty(
-        name="Width",
-        default=1024,
-        min=1,
-        description="Width of the image in pixels",
-        subtype='PIXEL'
-    )
-    image_height: IntProperty(
-        name="Height",
-        default=1024,
-        min=1,
-        description="Height of the image in pixels",
-        subtype='PIXEL'
-    )
-    
-    uv_map: StringProperty(
-        name= "UV Map",
-        default="UVMap",
-        options={'SKIP_SAVE'},
-    )
     
     def get_below_layer(self, context, unprocessed: bool = False):
         ps_ctx = self.parse_context(context)
@@ -620,42 +478,52 @@ class PAINTSYSTEM_OT_MergeDown(PSContextMixin, PSUVOptionsMixin, PSImageCreateMi
         if not below_layer:
             return False
         return (
-            active_layer and 
-            below_layer and 
-            active_layer.type != "FOLDER" and 
-            below_layer.type != "FOLDER" and
-            active_layer.parent_id == below_layer.parent_id and
-            active_layer.enabled and
-            below_layer.enabled
+            active_layer
+            and below_layer
+            and active_layer.type != "FOLDER"
+            and below_layer.type != "FOLDER"
+            and active_layer.parent_id == below_layer.parent_id
+            and active_layer.enabled
+            and below_layer.enabled
+            and not below_layer.modifies_color_data
             )
     
     def invoke(self, context, event):
+        # Set cursor to wait
+        context.window.cursor_set('WAIT')
         self.get_coord_type(context)
         below_layer = self.get_below_layer(context)
         if below_layer:
             if below_layer.uses_coord_type:
                 if getattr(below_layer, 'coord_type', 'UV') == 'AUTO':
-                    self.uv_map = DEFAULT_PS_UV_MAP_NAME
-                else:
-                    self.uv_map = below_layer.uv_map_name
+                    self.uv_map_name = DEFAULT_PS_UV_MAP_NAME
             else:
                 print("Using paint system UV")
-                self.uv_map = DEFAULT_PS_UV_MAP_NAME if self.use_paint_system_uv else self.uv_map_name
+                self.uv_map_name = DEFAULT_PS_UV_MAP_NAME if self.use_paint_system_uv else self.uv_map_name
         if below_layer.type == "IMAGE":
             self.image_width = below_layer.image.size[0]
             self.image_height = below_layer.image.size[1]
             return self.execute(context)
+        # Set cursor back to default
+        context.window.cursor_set('DEFAULT')
         return context.window_manager.invoke_props_dialog(self)
     
     def draw(self, context):
         layout = self.layout
         ps_ctx = self.parse_context(context)
+        box = layout.box()
+        box.alert = True
+        col = box.column(align=True)
+        col.label(text="This operation will convert the current layer", icon='INFO')
+        col.label(text="into an image layer.", icon='BLANK1')
         self.image_create_ui(layout, context, show_name=False)
         box = layout.box()
         box.label(text="UV Map", icon='UV')
-        box.prop_search(self, "uv_map", ps_ctx.ps_object.data, "uv_layers", text="")
+        box.prop_search(self, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="")
 
     def execute(self, context):
+        # Set cursor to wait
+        context.window.cursor_set('WAIT')
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
         active_layer = ps_ctx.active_layer
@@ -688,7 +556,7 @@ class PAINTSYSTEM_OT_MergeDown(PSContextMixin, PSUVOptionsMixin, PSImageCreateMi
         set_layer_blend_type(below_layer, 'MIX')
         
         # Bake both layers into the new image
-        active_channel.bake(context, ps_ctx.active_material, image, self.uv_map, use_group_tree=False)
+        active_channel.bake(context, ps_ctx.active_material, image, self.uv_map_name, use_group_tree=False, force_alpha=True)
         
         # Restore original blend modes
         set_layer_blend_type(active_layer, original_active_blend_mode)
@@ -699,74 +567,23 @@ class PAINTSYSTEM_OT_MergeDown(PSContextMixin, PSUVOptionsMixin, PSImageCreateMi
             layer.enabled = True
         
         # Remove the current layer since it's been merged
-        active_channel.delete_layer(context, unlinked_layer)
-        active_channel.delete_layer(context, below_unlinked_layer)
+        active_channel.delete_layers(context, [unlinked_layer, below_unlinked_layer])
         
-        active_channel.create_layer(context, "Merged Layer", "IMAGE", coord_type="UV", uv_map_name=self.uv_map, image=image)
-        
+        active_channel.create_layer(context, "Merged Layer", "IMAGE", coord_type="UV", uv_map_name=self.uv_map_name, image=image)
+        # Set cursor back to default
+        context.window.cursor_set('DEFAULT')
         return {'FINISHED'}
 
 
-class PAINTSYSTEM_OT_MergeUp(PSContextMixin, PSUVOptionsMixin, PSImageCreateMixin, Operator):
+class PAINTSYSTEM_OT_MergeUp(PSContextMixin, PSImageCreateMixin, Operator):
     bl_idname = "paint_system.merge_up"
     bl_label = "Merge Up"
     bl_description = "Merge the layer into the one above"
     bl_options = {'REGISTER', 'UNDO'}
 
-    image_name: StringProperty(
-        name="Image Name",
-        description="Name of the new image",
-        default="Merged",
-        options={'SKIP_SAVE'}
-    )
-    use_udim: BoolProperty(
-        name="Use UDIM",
-        description="Create UDIM tiled image for multi-tile UV layouts",
-        default=False,
-        options={'SKIP_SAVE'}
-    )
-    udim_auto_detect: BoolProperty(
-        name="Auto-detect UDIM",
-        description="Automatically detect UDIM tiles from UV layout",
-        default=True,
-        options={'SKIP_SAVE'}
-    )
-    image_resolution: EnumProperty(
-        items=[
-            ('1024', "1024", "1024x1024"),
-            ('2048', "2048", "2048x2048"),
-            ('4096', "4096", "4096x4096"),
-            ('8192', "8192", "8192x8192"),
-            ('CUSTOM', "Custom", "Custom Resolution"),
-        ],
-        default='2048'
-    )
-    image_width: IntProperty(
-        name="Width",
-        default=1024,
-        min=1,
-        description="Width of the image in pixels",
-        subtype='PIXEL'
-    )
-    image_height: IntProperty(
-        name="Height",
-        default=1024,
-        min=1,
-        description="Height of the image in pixels",
-        subtype='PIXEL'
-    )
-
-    uv_map: StringProperty(
-        name= "UV Map",
-        default="UVMap",
-        options={'SKIP_SAVE'},
-    )
-
     def get_above_layer(self, context, unprocessed: bool = False):
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
-        if not active_channel:
-            return None
         active_layer = ps_ctx.unlinked_layer if unprocessed else ps_ctx.active_layer
         flattened_layers = active_channel.flattened_unlinked_layers if unprocessed else active_channel.flattened_layers
         if active_layer and flattened_layers.index(active_layer) > 0:
@@ -776,8 +593,6 @@ class PAINTSYSTEM_OT_MergeUp(PSContextMixin, PSUVOptionsMixin, PSImageCreateMixi
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        if not ps_ctx.active_channel:
-            return False
         active_layer = ps_ctx.active_layer
         above_layer = cls.get_above_layer(cls, context)
         if not above_layer:
@@ -790,6 +605,7 @@ class PAINTSYSTEM_OT_MergeUp(PSContextMixin, PSUVOptionsMixin, PSImageCreateMixi
             and active_layer.parent_id == above_layer.parent_id
             and active_layer.enabled
             and above_layer.enabled
+            and not active_layer.modifies_color_data
         )
 
     def invoke(self, context, event):
@@ -799,11 +615,9 @@ class PAINTSYSTEM_OT_MergeUp(PSContextMixin, PSUVOptionsMixin, PSImageCreateMixi
         if above_layer:
             if above_layer.uses_coord_type:
                 if getattr(above_layer, 'coord_type', 'UV') == 'AUTO':
-                    self.uv_map = DEFAULT_PS_UV_MAP_NAME
-                else:
-                    self.uv_map = above_layer.uv_map_name
+                    self.uv_map_name = DEFAULT_PS_UV_MAP_NAME
             else:
-                self.uv_map = DEFAULT_PS_UV_MAP_NAME if self.use_paint_system_uv else self.uv_map_name
+                self.uv_map_name = DEFAULT_PS_UV_MAP_NAME if self.use_paint_system_uv else self.uv_map_name
         if above_layer.type == "IMAGE":
             self.image_width = above_layer.image.size[0]
             self.image_height = above_layer.image.size[1]
@@ -813,12 +627,19 @@ class PAINTSYSTEM_OT_MergeUp(PSContextMixin, PSUVOptionsMixin, PSImageCreateMixi
     def draw(self, context):
         layout = self.layout
         ps_ctx = self.parse_context(context)
+        box = layout.box()
+        box.alert = True
+        col = box.column(align=True)
+        col.label(text="This operation will convert the current layer", icon='INFO')
+        col.label(text="into an image layer.", icon='BLANK1')
         self.image_create_ui(layout, context, show_name=False)
         box = layout.box()
         box.label(text="UV Map", icon='UV')
-        box.prop_search(self, "uv_map", ps_ctx.ps_object.data, "uv_layers", text="")
+        box.prop_search(self, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="")
 
     def execute(self, context):
+        # Set cursor to wait
+        context.window.cursor_set('WAIT')
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
         active_layer = ps_ctx.active_layer
@@ -829,7 +650,7 @@ class PAINTSYSTEM_OT_MergeUp(PSContextMixin, PSUVOptionsMixin, PSImageCreateMixi
         if not active_channel:
             return {'CANCELLED'}
 
-        image = self.create_image()
+        image = self.create_image(context)
 
         to_be_enabled_layers = []
         # Enable both active layer and above layer, disable all others
@@ -851,7 +672,7 @@ class PAINTSYSTEM_OT_MergeUp(PSContextMixin, PSUVOptionsMixin, PSImageCreateMixi
         set_layer_blend_type(above_layer, 'MIX')
 
         # Bake both layers into the new image
-        active_channel.bake(context, ps_ctx.active_material, image, self.uv_map, use_group_tree=False)
+        active_channel.bake(context, ps_ctx.active_material, image, self.uv_map_name, use_group_tree=False, force_alpha=True)
 
         # Restore original blend modes
         set_layer_blend_type(active_layer, original_active_blend_mode)
@@ -862,10 +683,11 @@ class PAINTSYSTEM_OT_MergeUp(PSContextMixin, PSUVOptionsMixin, PSImageCreateMixi
             layer.enabled = True
 
         # Remove the current layer since it's been merged into the layer above
-        active_channel.delete_layer(context, unlinked_layer)
-        active_channel.delete_layer(context, above_unlinked_layer)
+        active_channel.delete_layers(context, [unlinked_layer, above_unlinked_layer])
         
-        active_channel.create_layer(context, "Merged Layer", "IMAGE", coord_type="UV", uv_map_name=self.uv_map, image=image)
+        active_channel.create_layer(context, "Merged Layer", "IMAGE", coord_type="UV", uv_map_name=self.uv_map_name, image=image)
+        # Set cursor back to default
+        context.window.cursor_set('DEFAULT')
         return {'FINISHED'}
 
 classes = (

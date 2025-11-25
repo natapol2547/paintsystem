@@ -67,12 +67,17 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
     bl_label = "New Group"
     bl_options = {'REGISTER', 'UNDO'}
     
+    def get_templates(self, context):
+        # If cycles remove the PAINT_OVER template
+        if "EEVEE" not in bpy.context.scene.render.engine:
+            return [template for template in TEMPLATE_ENUM if template[0] != 'PAINT_OVER']
+        return TEMPLATE_ENUM
+    
     template: EnumProperty(
         name="Template",
-        items=TEMPLATE_ENUM,
-        default='BASIC'
+        items=get_templates,
     )
-
+    
     group_name: bpy.props.StringProperty(
         name="Group Name",
         description="Name of the new group",
@@ -228,7 +233,7 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
                 ps_ctx = self.parse_context(context)
                 ps_ctx.active_group.active_index = 0
 
-            case 'PAINT_OVER' | 'CONVERT':
+            case 'PAINT_OVER':
                 # Check if Engine is EEVEE
                 if 'EEVEE' not in bpy.context.scene.render.engine:
                     self.report({'ERROR'}, "Paint Over is only supported in EEVEE")
@@ -298,12 +303,18 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
             self.group_name = "New Group"
         self.get_coord_type(context)
         if ps_ctx.active_material and node_tree_has_complex_setup(ps_ctx.active_material.node_tree):
-            self.template = 'CONVERT'
+            self.template = 'PAINT_OVER'
+        if ps_ctx.ps_object.mode == 'EDIT':
+            bpy.ops.object.mode_set(mode='OBJECT')
         return context.window_manager.invoke_props_dialog(self, width=300)
     
     def draw(self, context):
         layout = self.layout
         self.multiple_objects_ui(layout, context)
+        
+        if "EEVEE" not in bpy.context.scene.render.engine:
+            layout.label(text="Paint Over is not supported in this render engine", icon='ERROR')
+        
         row = layout.row()
         scale_content(context, row, 1.5, 1.5)
         row.prop(self, "template", text="Template")

@@ -262,7 +262,7 @@ if PIL_AVAILABLE:
         max_brush_scale: FloatProperty(name="Max Brush Scale", default=0.1, min=0.001, max=1.0)
         start_opacity: FloatProperty(name="Start Opacity", default=0.4, min=0.0, max=1.0)
         end_opacity: FloatProperty(name="End Opacity", default=1.0, min=0.0, max=1.0)
-        steps: IntProperty(name="Steps", default=7, min=1, max=20)
+        steps: IntProperty(name="Steps", default=4, min=1, max=20)
         gradient_threshold: FloatProperty(name="Gradient Threshold", default=0.0, min=0.0, max=1.0)
         gaussian_sigma: IntProperty(name="Gaussian Sigma", default=3, min=0, max=10)
         use_random_seed: BoolProperty(name="Use Random Seed", default=False)

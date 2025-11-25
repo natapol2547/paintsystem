@@ -171,3 +171,4 @@ extension_build/
 
 *.blend1
 *.zip
+donation_cache.json

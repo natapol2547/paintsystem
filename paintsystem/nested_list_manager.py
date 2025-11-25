@@ -122,10 +122,10 @@ class BaseNestedListManager(PropertyGroup):
     def remove_children(self, item_id):
         item = self.get_item_by_id(item_id)
         if item:
-            children = self.get_children(item_id)
+            children_index = [self.get_collection_index_from_id(child.id) for child in self.get_children(item_id)]
             collection = getattr(self, self.collection_name)
-            for child in sorted(children, key=lambda x: collection.find(x.name), reverse=True):
-                collection.remove(collection.find(child.name))
+            for index in sorted(children_index, reverse=True):
+                collection.remove(index)
 
     def remove_item_and_children(self, item_id, on_delete=None):
         """Remove an item and all its children"""

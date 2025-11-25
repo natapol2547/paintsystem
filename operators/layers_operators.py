@@ -42,7 +42,7 @@ def get_icon_from_type(type: str) -> int:
     }
     return get_icon(type_to_icon.get(type, 'color_socket'))
 
-class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSUVOptionsMixin, PSImageCreateMixin, MultiMaterialOperator):
+class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSImageCreateMixin, MultiMaterialOperator):
     """Create a new image layer"""
     bl_idname = "paint_system.new_image_layer"
     bl_label = "New Image Layer"

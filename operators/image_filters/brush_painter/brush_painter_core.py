@@ -368,8 +368,21 @@ class BrushPainterCore:
         canvas_rgb = canvas_region[:, :, :3]
         canvas_alpha = canvas_region[:, :, 3:4]
         
-        new_rgb = (1 - stroke_alpha) * canvas_rgb + stroke_alpha * stroke_rgb
-        new_alpha = (1 - stroke_alpha) * canvas_alpha + stroke_alpha
+        # Straight Alpha Blending:
+        # A_out = A_src + A_dst * (1 - A_src)
+        # C_out = (C_src * A_src + C_dst * A_dst * (1 - A_src)) / A_out
+        
+        out_alpha = stroke_alpha + canvas_alpha * (1 - stroke_alpha)
+        
+        # Numerator for color channels
+        numerator = stroke_rgb * stroke_alpha + canvas_rgb * canvas_alpha * (1 - stroke_alpha)
+        
+        # Avoid division by zero
+        safe_alpha = np.copy(out_alpha)
+        safe_alpha[safe_alpha < 0.0001] = 1.0
+        
+        new_rgb = numerator / safe_alpha
+        new_alpha = out_alpha
         
         canvas_region[:, :, :3] = new_rgb
         canvas_region[:, :, 3:4] = new_alpha
