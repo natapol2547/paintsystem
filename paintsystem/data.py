@@ -60,7 +60,8 @@ from .graph.common import get_library_nodetree, get_library_object, DEFAULT_PS_U
 from .nested_list_manager import BaseNestedListManager, BaseNestedListItem
 
 BLEND_MODES = []
-for blend_mode in bpy.types.ShaderNodeMixRGB.bl_rna.properties['blend_type'].enum_items:
+# Use ShaderNodeMix (Blender 4.0+) instead of deprecated ShaderNodeMixRGB for compatibility
+for blend_mode in bpy.types.ShaderNodeMix.bl_rna.properties['blend_type'].enum_items:
     BLEND_MODES.append((blend_mode.identifier, blend_mode.name, blend_mode.description))
     if blend_mode.identifier in ["MIX", "COLOR_BURN", "ADD", "LINEAR_LIGHT", "DIVIDE"]:
         if blend_mode.identifier == "MIX":
@@ -264,13 +265,15 @@ def update_active_group(self, context):
 
 def find_channels_containing_layer(check_layer: "Layer") -> list["Channel"]:
     channels = []
+    check_uid = check_layer.uid
     for material in bpy.data.materials:
-        if hasattr(material, 'ps_mat_data'):
+        if hasattr(material, 'ps_mat_data') and material.ps_mat_data:
             for group in material.ps_mat_data.groups:
                 for channel in group.channels:
-                    for layer in channel.layers:
-                        if layer == check_layer or layer.linked_layer_uid == check_layer.uid:
-                            channels.append(channel)
+                    # Use any() for early exit when match found in channel
+                    if any(layer == check_layer or layer.linked_layer_uid == check_uid 
+                           for layer in channel.layers):
+                        channels.append(channel)
     print(f"Found {len(channels)} channels containing layer {check_layer.layer_name}")
     return channels
 

@@ -22,6 +22,12 @@ jobs = [
         "sha": "released",
         "download_url": "https://download.blender.org/release/Blender4.5/blender-4.5.2-linux-x64.tar.xz",
     },
+    {  # Blender 5.0
+        "version": "5.0.0",
+        "version_x_y": "5.0",
+        "sha": "released",
+        "download_url": "https://download.blender.org/release/Blender5.0/blender-5.0.0-linux-x64.tar.xz",
+    },
     # {'version': '', 'version_x_y': '', 'download_url': ''},
 ]
 
