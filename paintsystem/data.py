@@ -61,6 +61,44 @@ from .graph import (
 from .graph.common import get_library_nodetree, get_library_object, DEFAULT_PS_UV_MAP_NAME
 from .nested_list_manager import BaseNestedListManager, BaseNestedListItem
 
+
+def update_node_tree(self, context):
+    """Module-level dispatcher for Property update callbacks."""
+    method = getattr(self.__class__, "update_node_tree", None)
+    if callable(method):
+        return method(self, context)
+    return None
+
+def _sync_uv_across_material_users(material: Material, target_uv_name: str):
+    if not material or not target_uv_name:
+        return
+    try:
+        scene = bpy.context.scene
+        for obj in getattr(scene, 'objects', []):
+            try:
+                if obj and obj.type == 'MESH' and any(ms.material == material for ms in obj.material_slots if ms.material):
+                    _sync_uv_map_to_name(obj, target_uv_name)
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+def update_uv_map_name_and_sync(self, context):
+    """Update hook for uv_map_name that also ensures all material users have this UV.
+
+    Keeps Paint System invariant: a layer uses one UV map name across all material users.
+    """
+    try:
+        ps_ctx = parse_context(context)
+        mat = getattr(ps_ctx, 'active_material', None)
+        coord = getattr(self, 'coord_type', 'UV')
+        uvn = getattr(self, 'uv_map_name', '')
+        if mat and coord == 'UV' and uvn:
+            _sync_uv_across_material_users(mat, uvn)
+    except Exception:
+        pass
+    return update_node_tree(self, context)
+
 BLEND_MODES = []
 for blend_mode in bpy.types.ShaderNodeMixRGB.bl_rna.properties['blend_type'].enum_items:
     BLEND_MODES.append((blend_mode.identifier, blend_mode.name, blend_mode.description))
@@ -784,7 +822,7 @@ class GlobalLayer(PropertyGroup):
     uv_map_name: StringProperty(
         name="UV Map",
         description="Name of the UV map to use",
-        update=update_node_tree
+        update=update_uv_map_name_and_sync
     )
     adjustment_type: EnumProperty(
         items=ADJUSTMENT_TYPE_ENUM,
@@ -1112,7 +1150,7 @@ class Layer(BaseNestedListItem):
     uv_map_name: StringProperty(
         name="UV Map",
         description="Name of the UV map to use",
-        update=update_node_tree
+        update=update_uv_map_name_and_sync
     )
     adjustment_type: EnumProperty(
         items=ADJUSTMENT_TYPE_ENUM,
@@ -1468,7 +1506,7 @@ def restore_cycles_settings(settings):
     scene.cycles.use_denoising = settings['use_denoising']
     scene.cycles.use_adaptive_sampling = settings['use_adaptive_sampling']
 
-def ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu=True):
+def ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu=True, other_objects=None):
     node_tree = mat.node_tree
     
     image_node = node_tree.nodes.new(type='ShaderNodeTexImage')
@@ -1477,7 +1515,11 @@ def ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu=True):
     cycles_settings = save_cycles_settings()
     # Switch to Cycles if needed
     
-    with context.temp_override(active_object=obj, selected_objects=[obj]):
+    selected = [obj]
+    if other_objects:
+        # Filter out duplicates and non-mesh types defensively
+        selected.extend([o for o in other_objects if o and o.type == 'MESH' and o != obj])
+    with context.temp_override(active_object=obj, selected_objects=selected):
         bake_params = {
             "type": 'EMIT',
         }
@@ -1507,6 +1549,44 @@ def ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu=True):
     restore_cycles_settings(cycles_settings)
 
     return bake_image
+
+# --- Multi-object UV synchronization helpers ---
+def _sync_uv_map_to_name(obj: bpy.types.Object, target_uv_name: str) -> None:
+    """Ensure the object has a UV layer named target_uv_name.
+
+    Strategy:
+    1. If already present -> nothing to do.
+    2. If single UV layer present -> rename it to target_uv_name (assume shared space).
+    3. Else create a new UV layer with target_uv_name and copy coordinates from the active layer.
+    
+    Note:
+        UDIM-safe: Preserves UV tile layout when copying coordinates.
+    """
+    try:
+        if obj.type != 'MESH' or not obj.data or not hasattr(obj.data, 'uv_layers'):
+            return
+        uv_layers = obj.data.uv_layers
+        if target_uv_name in uv_layers.keys():
+            return  # Already present
+        if len(uv_layers) == 1:
+            # Safe rename (preserves UDIM layout)
+            uv_layers[0].name = target_uv_name
+            print(f"UV sync: renamed -> '{target_uv_name}' on {obj.name}")
+            return
+        # Create new layer and copy data from active (maintains tile positions)
+        src = uv_layers.active or uv_layers[0]
+        new_layer = uv_layers.new(name=target_uv_name)
+        # Copy loop UVs (preserves UDIM tile positions)
+        try:
+            for i, loop in enumerate(src.data):
+                new_layer.data[i].uv = loop.uv
+            print(f"UV sync: created '{target_uv_name}' (copied from '{src.name}') on {obj.name}")
+        except Exception as e:
+            print(f"UV data copy warning: {e}")
+        # Set newly created as active for consistency
+        uv_layers.active = new_layer
+    except Exception as e:
+        print(f"UV sync failed for {obj.name}: {e}")
 
 class Channel(BaseNestedListManager):
     """Custom data for material layers in the Paint System"""
@@ -1749,19 +1829,36 @@ class Channel(BaseNestedListManager):
         for layer in layers:
             self.delete_layer(context, layer)
     
-    def bake(self, context: Context, mat: Material, bake_image: Image, uv_layer: str, use_gpu: bool = True, use_group_tree: bool = True, force_alpha: bool = False, as_tangent_normal: bool = False):
+    def bake(
+        self,
+        context: Context,
+        mat: Material,
+        bake_image: Image,
+        uv_layer: str,
+        use_gpu: bool = True,
+        use_group_tree: bool = True,
+        force_alpha: bool = False,
+        as_tangent_normal: bool = False,
+        multi_object: bool = False,
+    ):
         """Bake the channel
 
         Args:
             context (Context): The context
             mat (Material): The material
-            bake_image (Image): The bake image
+            bake_image (Image): The bake image (supports UDIM)
             uv_layer (str): The UV layer
             use_gpu (bool, optional): Whether to use the GPU. Defaults to True.
             use_group_tree (bool, optional): Whether to use the group tree if found. Defaults to True.
+            as_tangent_normal (bool, optional): Convert bake result to tangent space normal. Defaults to False.
+            multi_object (bool, optional): Include all material users in bake. Defaults to False.
 
         Raises:
             ValueError: If the node tree is not found
+            
+        Note:
+            UDIM support: If bake_image is a tiled image, Blender automatically bakes to all tiles.
+            The UV layout determines which tiles are populated.
         """
         
         node_tree = mat.node_tree
@@ -1769,14 +1866,45 @@ class Channel(BaseNestedListManager):
             raise ValueError("Node tree not found")
         ps_context = parse_context(context)
         obj = ps_context.ps_object
+        
+        # UDIM validation: ensure tiles match UV layout if UDIM image
+        try:
+            from ..utils.udim import is_udim_image, detect_udim_from_uv
+            if is_udim_image(bake_image):
+                if obj and obj.type == 'MESH' and hasattr(obj.data, 'uv_layers') and obj.data.uv_layers.get(uv_layer):
+                    uv_layer_data = obj.data.uv_layers[uv_layer]
+                    required_tiles = detect_udim_from_uv(obj)
+                    # ensure_udim_tiles called via existing helper
+                    ensure_udim_tiles(bake_image, uv_layer_data)
+                    print(f"UDIM bake: {len(required_tiles)} tiles detected for '{uv_layer}'")
+        except Exception as e:
+            print(f"UDIM validation warning: {e}")
         if force_alpha:
             orig_use_alpha = bool(self.use_alpha)
             self.use_alpha = True
         
-        # Ensure ps_object is the only object selected
+        # Build selection set (multi-object bake) before bake nodes get inserted.
         bpy.ops.object.mode_set(mode="OBJECT")
         bpy.ops.object.select_all(action='DESELECT')
+        other_objects = []
+        if multi_object:
+            try:
+                # Gather all mesh objects sharing the material and UV layer
+                mat_users = [o for o in context.scene.objects
+                             if o.type == 'MESH' and any(ms.material == mat for ms in o.material_slots if ms.material)]
+                for o in mat_users:
+                    if o != obj and uv_layer in (o.data.uv_layers.keys() if o.data and hasattr(o.data, 'uv_layers') else []):
+                        other_objects.append(o)
+                    elif o != obj:
+                        # Attempt to sync UV name so this object can participate
+                        _sync_uv_map_to_name(o, uv_layer)
+                        if uv_layer in (o.data.uv_layers.keys() if o.data and hasattr(o.data, 'uv_layers') else []):
+                            other_objects.append(o)
+            except Exception as e:
+                print(f"Multi-object bake gather failed: {e}")
         obj.select_set(True)
+        for o in other_objects:
+            o.select_set(True)
         bpy.context.view_layer.objects.active = obj
         
         material_output = get_material_output(node_tree)
@@ -1830,11 +1958,11 @@ class Channel(BaseNestedListManager):
         # Bake image
         connect_sockets(surface_socket, color_output)
         temp_alpha_image = bake_image.copy()
-        bake_image = ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu)
+        bake_image = ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu, other_objects)
         
         temp_alpha_image.colorspace_settings.name = 'Non-Color'
         connect_sockets(surface_socket, alpha_output)
-        temp_alpha_image = ps_bake(context, obj, mat, uv_layer, temp_alpha_image, use_gpu)
+        temp_alpha_image = ps_bake(context, obj, mat, uv_layer, temp_alpha_image, use_gpu, other_objects)
 
         if bake_image and temp_alpha_image:
             pixels_bake = np.empty(len(bake_image.pixels), dtype=np.float32)

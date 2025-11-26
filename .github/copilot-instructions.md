@@ -1,208 +1,68 @@
-# Paint System Add-on: Copilot Instructions
+# Paint System: Copilot Instructions
 
-## Overview
-Paint System is a Blender add-on (4.2+) providing a **non-photorealistic rendering (NPR) painting system**. It uses Blender's node-based architecture to compose complex painting workflows into a hierarchical layer structure similar to traditional paint software.
+Concise guidance for AI agents working in this Blender (4.2+) NPR painting add-on. Focus on existing patterns; do not invent new architectures.
 
-## Architecture
+## Big Picture
+- Material-centric system with three hierarchies:
+    - UI list: `nested_list_manager.py` flattens parent-child layers for display.
+    - Nodes: shader graphs in `material.node_tree` built by `graph/*.py`.
+    - Data: `paintsystem/data.py` PropertyGroups for Material → Group → Channel → Layer.
+- Changes to properties must rely on `update_node_tree()` callbacks; do not call compilers directly.
 
-### Core Data Model (Hierarchical Composition)
-```
-Material (Paint System enabled)
-├── Group (composites channels into material outputs)
-│   ├── Channel (COLOR, VECTOR, or FLOAT types)
-│   │   └── Layer (hierarchical tree of layer types)
-│   │       ├── IMAGE (texture-based)
-│   │       ├── FOLDER (groups layers with blending)
-│   │       ├── SOLID_COLOR, GRADIENT, TEXTURE
-│   │       ├── ADJUSTMENT (brightness, curves, hue-sat)
-│   │       ├── ATTRIBUTE (vertex/object attributes)
-│   │       ├── GEOMETRY (normals, positions)
-│   │       └── NODE_GROUP (custom shader nodes)
-│   └── Layer can link to another material's layer
-└── UI represents this as flat list via nested_list_manager
-```
+## Key Files
+- `paintsystem/data.py`: PropertyGroups, `parse_context()`, layer enum, core callbacks.
+- `paintsystem/graph/basic_layers.py`: Per-layer graph builders + `get_layer_version_for_type()`.
+- `operators/common.py`: Mixins (`PSContextMixin`, `MultiMaterialOperator`, `PSUVOptionsMixin`, `PSImageCreateMixin`).
+- `operators/layers_operators.py`: Creation/editing of layers; follow mixin patterns.
+- `utils/nodes.py`: Node lookup helpers; use for consistent node access.
 
-**Key File**: `paintsystem/data.py` (2200+ lines) - Contains all PropertyGroup definitions and context parsing.
-
-### Data Flow
-1. **Paint Context Parsing** (`parse_context()` in `data.py`): Extracts active object, material, group, channel, layer from Blender context
-2. **Node Tree Compilation**: Each layer/channel updates its node tree via `update_node_tree()` callbacks triggered by property changes
-3. **Graph Building**: `NodeTreeBuilder` constructs shader node networks from layer definitions
-4. **Baking**: Cycles render engine used to bake layer compositions into textures
-
-### Three Parallel Hierarchies
-- **UI Layer Hierarchy**: `BaseNestedListManager` flattens for display (parent-child relationships in UI)
-- **Node Composition**: Actual shader nodes in `.node_tree` (composed via socket linking)
-- **Global/Linked Layers**: Old system (deprecated) for layer reuse across materials - use `linked_layer_uid` property instead
-
-## Critical Patterns
-
-### 1. Update Callbacks Pattern
-All property changes trigger `update_node_tree()` callbacks. **Never manually trigger node compilation** — let callbacks handle it:
-```python
-# ✓ Correct: Property with callback
-layer_name: StringProperty(update=update_node_tree)
-
-# ✗ Wrong: Manual call
-layer.layer_name = "New"
-layer.update_node_tree(context)  # Don't do this
-```
-
-### 2. Context Access (PSContextMixin / parse_context)
-**Operators**: Inherit `PSContextMixin` and call `self.parse_context(context)` to extract hierarchy:
-```python
-from operators.common import PSContextMixin
-class MyOperator(PSContextMixin, Operator):
-    def execute(self, context):
-        ps_ctx = self.parse_context(context)  # Mixin method
-        # Access: ps_ctx.ps_object, ps_ctx.active_material, ps_ctx.active_layer, etc.
-```
-**Non-operators**: Use `parse_context()` directly:
-```python
-from paintsystem.data import parse_context
-ps_ctx = parse_context(context)
-```
-
-### 3. Layer Type Dispatch Pattern
-Each layer type has dedicated graph builder (`create_image_graph()`, `create_adjustment_graph()`, etc.). When adding new layer types:
-```python
-match self.type:
-    case "IMAGE":
-        layer_graph = create_image_graph(self)
-    case "NEW_TYPE":
-        layer_graph = create_new_type_graph(self)  # Add here
-```
-
-### 3.5. Operator Mixin Patterns
-Operators compose functionality via mixins (found in `operators/common.py`):
-- **PSContextMixin**: Provides `parse_context()` method for all operators
-- **MultiMaterialOperator**: Batch operations across selected objects/materials; override `process_material(context)` 
-- **PSUVOptionsMixin**: UV coordinate selection UI and storage; handles AUTO/UV/GENERATED/OBJECT modes
-- **PSImageCreateMixin**: Image creation/import/existing selection; provides `create_image()` helper
-
-Example:
-```python
-class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSUVOptionsMixin, PSImageCreateMixin, MultiMaterialOperator):
-    bl_idname = "paint_system.new_image_layer"
-    bl_label = "New Image Layer"
-    
-    def process_material(self, context):
-        self.store_coord_type(context)  # From PSUVOptionsMixin
-        ps_ctx = self.parse_context(context)  # From PSContextMixin
-        img = self.create_image()  # From PSImageCreateMixin
-        # Apply to all selected objects when multiple_objects=True
-```
-
-### 4. Node Tree Versioning
-Layers track node tree structure versions. After code changes affecting node counts/names:
-- Update `get_layer_version_for_type()` in `graph/basic_layers.py`
-- `load_post` handler auto-upgrades old files
-- UUIDs track layer identity across saves
-
-### 5. Linked Layers Pattern
-Layer linking enables single layer definition reused across materials:
-```python
-linked_layer_uid: StringProperty()  # References source layer's uid
-linked_material: PointerProperty(type=Material)  # Source material
-
-# get_layer_data() returns actual layer; linked layers proxy to it
-actual_layer = layer.get_layer_data()
-```
-
-### 6. UI and Brush Integration
-**Active image canvas**: `update_active_image()` auto-switches paint canvas when layer selected; checks `lock_layer` and `use_bake_image` flags before enabling
-**Brush settings**: `update_brush_settings()` syncs brush properties from active layer (color, size, alpha_lock)
-**Coordinate systems**: Layers auto-create `DEFAULT_PS_UV_MAP_NAME` UV map when needed; `coord_type` determines UV/Generated/Object/Auto mode
-
-## File Organization
-
-| Path | Purpose |
-|------|---------|
-| `paintsystem/data.py` | PropertyGroups, Layer/Channel/Group types, `parse_context()`, PSContextMixin |
-| `paintsystem/graph/` | Node tree builders (one per layer type), version tracking |
-| `paintsystem/nested_list_manager.py` | UI hierarchy management: flattens parent-child relationships for display |
-| `paintsystem/handlers.py` | Frame/action handlers, post-load versioning and migrations |
-| `operators/common.py` | Base operators: PSContextMixin, MultiMaterialOperator, PSUVOptionsMixin, PSImageCreateMixin |
-| `operators/layers_operators.py` | Layer creation/editing operators (1000+ lines) |
-| `operators/bake_operators.py` | Texture baking with GPU/CPU fallback |
-| `operators/image_operators.py` | Image import/creation with UV and resolution handling |
-| `panels/` | UI panels using Blender's layout system, context menus, pie menus |
-| `utils/nodes.py` | Node lookup utilities (`find_node()`, `get_material_output()`) |
-| `utils/unified_brushes.py` | Brush color/size/alpha sync from Paint System layer state |
+## Essential Patterns
+- Update callbacks: define properties with `update=update_node_tree`; avoid manual compilation.
+- Context access: in operators, call `self.parse_context(context)` (from `PSContextMixin`). Non-operators use `paintsystem.data.parse_context(context)`.
+- Layer dispatch: in `Layer.update_node_tree()`, add `match self.type` cases that call `create_<type>_graph()`.
+- Linked layers: use `linked_layer_uid` and `get_layer_data()` to resolve the source; do not duplicate node trees.
+- Versioning: bump `get_layer_version_for_type()` when graph node counts/ids change; migration runs via `handlers.load_post`.
 
 ## Common Workflows
+- Add new layer type:
+    1) Extend `LAYER_TYPE_ENUM` in `data.py`.
+    2) Implement `create_<type>_graph()` in `graph/basic_layers.py`.
+    3) Add dispatch case in `Layer.update_node_tree()`.
+    4) Define needed Layer properties with `update=...`.
+    5) Update version in `get_layer_version_for_type()`.
+- Bake channel: use `Channel.bake()` (Cycles). Assumes GPU-first with CPU fallback; render settings saved/restored.
+- UI panels: under `panels/*.py`, get active items via `parse_context()`; draw properties that trigger updates via callbacks.
 
-### Adding a New Layer Type
-1. Add enum to `LAYER_TYPE_ENUM` in `data.py`
-2. Create `create_<type>_graph()` in `graph/basic_layers.py` returning `NodeTreeBuilder`
-3. Add case in `Layer.update_node_tree()` match statement
-4. Define properties (e.g., `adjustment_type`, `gradient_type`) on Layer class
-5. Update `get_layer_version_for_type()` with version constant
+## Conventions & Gotchas
+- Do not mutate Blender context directly in batch ops; use `context.temp_override()` inside `MultiMaterialOperator.process_material()`.
+- Auto-UV: layers may create `DEFAULT_PS_UV_MAP_NAME` when `coord_type` requires it.
+- Brush sync: `utils/unified_brushes.py` updates brush color/size/alpha based on active layer.
+- Runtime API detection: prefer `getattr()` over version checks for Blender 5+/Bforartists.
 
-### Creating an Operator
-Always inherit from mixins needed: `PSContextMixin` (context), `MultiMaterialOperator` (batch), `PSUVOptionsMixin` (UV), `PSImageCreateMixin` (images).
-In `execute()`, call `self.parse_context(context)` first. Use `process_material(context)` override for batch ops.
-Avoid raw context access; operators must work across selected objects/materials.
+## Build/Run/Test
+- Syntax check quickly from repo root:
+    - `python -m py_compile paintsystem/data.py`
+    - `python -m py_compile paintsystem/graph/basic_layers.py`
+    - `python -m py_compile operators/layers_operators.py panels/layers_panels.py`
+- Wheels: Pillow is vendored in `wheels/`; NumPy used for baking math.
+- Extension manifest: `blender_manifest.toml` governs registration and permissions.
 
-### Baking Workflow
-1. `Channel.bake()` method composes layer tree into single texture
-2. Uses Cycles to render shader output to image
-3. Splits alpha into separate bake pass (combined afterward)
-4. Saves/restores render settings; GPU first, CPU fallback
+## Examples
+- Operator pattern:
+    ```python
+    from operators.common import PSContextMixin, MultiMaterialOperator
+    class MyOp(PSContextMixin, MultiMaterialOperator):
+            def process_material(self, context):
+                    ps = self.parse_context(context)
+                    # mutate ps.active_layer properties; callbacks rebuild nodes
+    ```
+- Layer graph addition:
+    ```python
+    # in graph/basic_layers.py
+    def create_mytype_graph(layer):
+            builder = NodeTreeBuilder(layer)
+            # build nodes + links; return builder
+            return builder
+    ```
 
-### UI Panel Creation
-1. Inherit `Panel` in `panels/` with `bl_category` set
-2. Use `parse_context()` to get active layer/channel/group
-3. Draw layer properties with callbacks triggering node updates via `update_node_tree`
-4. Use `scale_content()` utility for compact UI options
-
-## Performance Considerations
-- **Caching**: Material layer UID lookup cached in `_material_uid_cache` — invalidate when adding/deleting layers
-- **Node deduplication**: Linked layers share node trees (don't recreate)
-- **Texture vs shader**: Heavy adjustments (curves) best applied as adjustment layers, not real-time filters
-- **GPU baking**: Attempts GPU first, falls back to CPU if unavailable
-- **Nested list flattening**: `BaseNestedListManager` keeps flattened index in sync; parent-child relationships remain in properties
-- **Context temp_override**: Operators use `context.temp_override()` to apply batch ops without modifying scene state
-
-## Blender-Specific Details
-- **Render Engine**: Add-on uses Cycles (toggles automatically during bake)
-- **Node Types**: Primarily `ShaderNodeGroup`, `ShaderNodeMix`, `ShaderNodeTexImage`
-- **UV Requirements**: Auto-creates `DEFAULT_PS_UV_MAP_NAME` UV map if missing
-- **Coordinate Systems**: AUTO/UV/GENERATED/OBJECT modes in `COORDINATE_TYPE_ENUM`
-- **Permissions** (manifest): File I/O (images), clipboard (colors) in `blender_manifest.toml`
-- **Extension manifest**: Uses `blender_manifest.toml` (Blender 4.2+)
-- **Temporary objects**: "PS Camera Plane" special object for texture painting reference
-- **Node interfaces**: Layers validate nodes via `is_valid_ps_nodetree()` (Color/Alpha in/out)
-
-## Testing & Debugging
-- **Enable printing**: Layer/channel/group names help trace node tree construction
-- **Inspector**: Check `node_tree.nodes` to verify expected nodes post-update
-- **Context validation**: Always check `ps_ctx` results before accessing (nulls possible)
-- **Versioning**: `load_post` handler logs migrations; check console on file load
-
-## Dependencies
-- **Pillow**: Bundled (wheels/) for cross-platform image handling (12.0.0 for macOS)
-- **NumPy**: Used for efficient pixel array manipulation in baking
-- **Blender 4.2+**: Required for extension manifest system, node interface API
-- **Version**: Paint System 2.1.0 (per `blender_manifest.toml`)
-
-## Blender 5.0 & Bforartists Compatibility
-**Optimized for forward compatibility using runtime API detection:**
-- **Runtime Detection**: Use `getattr()` for property access instead of version checks
-  ```python
-  # ✓ Preferred
-  gpencil_brush_type = getattr(brush, 'gpencil_brush_type', None) or getattr(brush, 'gpencil_tool', None)
-  
-  # ✗ Avoid
-  if is_newer_than(5,0):
-      gpencil_brush_type = brush.gpencil_brush_type
-  ```
-- **Optional Imports**: Platform-specific features wrapped in try/except (e.g., `color_jitter_panel`)
-- **Version Checks**: Only for icon names, template availability, version-gated features (not property renames)
-- **No Max Version**: Manifest has no `blender_version_max` constraint for forward compatibility
-- **See**: `BLENDER_5_COMPATIBILITY.md` for complete compatibility guide
-
-## Known Limitations
-- Global layers system (deprecated) still present for legacy file support — use material-local groups instead
-- Adjustment layers muted during playback (performance); unmute per-frame if needed
-- Linked layers share all properties with source — changes cascade
+Questions or unclear areas? Point to file paths and I’ll refine this guide.
