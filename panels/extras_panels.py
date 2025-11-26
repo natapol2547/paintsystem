@@ -306,6 +306,8 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
                 )
                 props = eyedrop_row.operator("ui.eyedropper_color", text="", icon='EYEDROPPER')
                 props.prop_data_path = prop_path
+            except Exception:
+                pass
             # draw_color_settings(context, col, brush)
         if ps_ctx.ps_object.type == 'GREASEPENCIL':
             row = col.row()

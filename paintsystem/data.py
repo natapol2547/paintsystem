@@ -2958,25 +2958,25 @@ _register, _unregister = register_classes_factory(classes)
 
 def register():
     """Register the Paint System data module."""
+    has_scene_data = hasattr(bpy.types.Scene, 'ps_scene_data')
     try:
         _register()
-    except Exception as e:
-        if isinstance(e, ValueError) and "already registered" in str(e):
+    except ValueError as e:
+        if "already registered" in str(e):
+            # Previous reload left classes registered; clean up and retry once.
+            _unregister()
+            _register()
+        else:
+            print(f"Error registering Paint System classes: {e}")
             raise
+    except Exception as e:
         print(f"Error registering Paint System classes: {e}")
-        # Try to identify which class failed
         for cls in classes:
             try:
                 bpy.utils.register_class(cls)
-                print(f"✓ Registered {cls.__name__}")
+                print(f"\u2713 Registered {cls.__name__}")
             except Exception as cls_error:
-                print(f"✗ Failed to register {cls.__name__}: {cls_error}")
-        raise
-    # Only set properties if not already present (prevents double registration errors)
-    try:
-        has_scene_data = hasattr(bpy.types.Scene, 'ps_scene_data')
-    except ValueError as e:
-        print(f"Error checking Scene attributes (likely a class registration failed): {e}")
+                print(f"\u2717 Failed to register {cls.__name__}: {cls_error}")
         raise
     if not has_scene_data:
         bpy.types.Scene.ps_scene_data = PointerProperty(

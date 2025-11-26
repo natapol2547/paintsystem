@@ -19,4 +19,5 @@ def get_preferences(context) -> PaintSystemPreferences:
             name_layers_group=True,
             hide_norm_paint_tips=False,
             hide_color_attr_tips=False,
+            loading_donations=False,
         )

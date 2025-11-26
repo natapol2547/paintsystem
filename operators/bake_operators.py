@@ -338,15 +338,6 @@ class PAINTSYSTEM_OT_ExportAllImages(PSContextMixin, Operator):
         
         if exported_count > 0:
             self.report({'INFO'}, f"Exported {exported_count} images to {self.directory}")
-                            sig = inspect.signature(active_channel.bake)
-                            bake_kwargs = {}
-                            if 'force_alpha' in sig.parameters:
-                                bake_kwargs['force_alpha'] = True
-                            if 'as_tangent_normal' in sig.parameters:
-                                bake_kwargs['as_tangent_normal'] = self.as_tangent_normal
-                            if 'multi_object' in sig.parameters:
-                                bake_kwargs['multi_object'] = self.multi_object
-                            active_channel.bake(context, mat, bake_image, self.uv_map_name, **bake_kwargs)
         if failed_count > 0:
             self.report({'WARNING'}, f"Failed to export {failed_count} images")
         
@@ -367,13 +358,8 @@ class PAINTSYSTEM_OT_DeleteBakedImage(PSContextMixin, Operator):
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
         if not active_channel:
-                            sig = inspect.signature(active_channel.bake)
-                            bake_kwargs = {}
-                            if 'as_tangent_normal' in sig.parameters:
-                                bake_kwargs['as_tangent_normal'] = self.as_tangent_normal
-                            if 'multi_object' in sig.parameters:
-                                bake_kwargs['multi_object'] = self.multi_object
-                            active_channel.bake(context, mat, bake_image, self.uv_map_name, **bake_kwargs)
+            self.report({'ERROR'}, "No active channel found.")
+            return {'CANCELLED'}
 
         image = active_channel.bake_image
         if not image:
