@@ -327,6 +327,7 @@ class PAINTSYSTEM_OT_DeleteBakedImage(PSContextMixin, Operator):
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
         if not active_channel:
+            self.report({'ERROR'}, "No active channel found.")
             return {'CANCELLED'}
 
         image = active_channel.bake_image

@@ -252,6 +252,34 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
                     if settings.palette:
                         panel.template_palette(settings, "palette", color=True)
                 except Exception:
+                    # Fallback for older Blender versions or when panel() is not available
+                    fallback_box = col.box()
+                    fallback_box.label(text="Color Palette")
+                    palette_layout = fallback_box.column()
+                    try:
+                        palette_layout.template_ID(settings, "palette", new="palette.new")
+                        if settings.palette:
+                            swatch_col = palette_layout.column(align=True)
+                            swatch_col.scale_x = 0.9
+                            swatch_col.scale_y = 0.9
+                            swatch_col.template_palette(settings, "palette", color=True)
+                    except Exception:
+                        pass
+                
+                # Eyedropper: allow quick color sampling for texture paint brushes
+                eyedrop_row = col.row(align=True)
+                try:
+                    tool_settings = context.tool_settings
+                    ups = getattr(tool_settings, "unified_paint_settings", None)
+                    use_unified = bool(ups and getattr(ups, "use_unified_color", False))
+                    prop_path = (
+                        "tool_settings.unified_paint_settings.color"
+                        if use_unified else
+                        "tool_settings.image_paint.brush.color"
+                    )
+                    props = eyedrop_row.operator("ui.eyedropper_color", text="", icon='EYEDROPPER')
+                    props.prop_data_path = prop_path
+                except Exception:
                     pass
             # draw_color_settings(context, col, brush)
         if ps_ctx.ps_object.type == 'GREASEPENCIL':

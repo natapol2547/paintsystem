@@ -1,12 +1,12 @@
+import logging
 import bpy
-from bpy.props import IntProperty
+from bpy.types import Operator, Context
+from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
+
 from ..paintsystem.data import PSContextMixin, COORDINATE_TYPE_ENUM, create_ps_image, get_udim_tiles
 from ..custom_icons import get_icon
 from ..preferences import get_preferences
 from ..utils.unified_brushes import get_unified_settings
-from bpy.types import Operator, Context
-from bpy.props import BoolProperty, EnumProperty, StringProperty
-
 from ..paintsystem.graph.common import DEFAULT_PS_UV_MAP_NAME
 
 icons = bpy.types.UILayout.bl_rna.functions["prop"].parameters["icon"].enum_items.keys()
@@ -115,6 +115,12 @@ class PSUVOptionsMixin():
     checked_coord_type: BoolProperty(
         name="Checked Coordinate Type",
         description="Checked coordinate type",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    use_uv_checker_override = BoolProperty(
+        name="Override Material with UV Checker",
+        description="Temporarily override material with UV checker map while editing UVs",
         default=False,
         options={'SKIP_SAVE'}
     )
