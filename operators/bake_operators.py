@@ -63,15 +63,14 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
         box.label(text="UV Map", icon='UV')
         box.prop_search(self, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="")
         if ps_ctx.active_channel.type == "VECTOR":
-            box = layout.box()
-            box.prop(self, "as_tangent_normal")
+            tangent_box = layout.box()
+            tangent_box.prop(self, "as_tangent_normal")
         layout.prop(self, "multi_object")
 
     def invoke(self, context, event):
         ps_ctx = self.parse_context(context)
         self.as_tangent_normal = ps_ctx.active_channel.bake_vector_space == 'TANGENT'
         return super().invoke(context, event)
-
     def execute(self, context):
         # Set cursor to wait
         context.window.cursor_set('WAIT')

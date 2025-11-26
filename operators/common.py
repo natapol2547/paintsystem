@@ -2,7 +2,6 @@ import logging
 import bpy
 from bpy.types import Operator, Context
 from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
-
 from ..paintsystem.data import PSContextMixin, COORDINATE_TYPE_ENUM, create_ps_image, get_udim_tiles
 from ..custom_icons import get_icon
 from ..preferences import get_preferences

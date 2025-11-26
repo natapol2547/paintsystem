@@ -790,6 +790,7 @@ class MAT_PT_ImageLayerSettings(PSContextMixin, Panel):
                     if tiles:
                         tile_count = len(tiles)
                         row.label(text=f"{tile_count} tile{'s' if tile_count != 1 else ''}")
+                    # Per-tile UV sync utility helps keep meshes aligned across UDIMs
                     col = box.column(align=True)
                     col.operator_context = 'INVOKE_DEFAULT'
                     col.operator("paint_system.sync_uv_by_udim_tile", text="Sync UV by UDIM Tile", icon='GROUP_UVS')
