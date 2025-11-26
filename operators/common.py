@@ -1,5 +1,11 @@
+    use_uv_checker_override = BoolProperty(
+        name="Override Material with UV Checker",
+        description="Temporarily override material with UV checker map while editing UVs",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
 import bpy
-from bpy.props import IntProperty
+from bpy.props import IntProperty, BoolProperty, EnumProperty, StringProperty
 from ..paintsystem.data import PSContextMixin, COORDINATE_TYPE_ENUM, create_ps_image, get_udim_tiles
 from ..custom_icons import get_icon
 from ..preferences import get_preferences
@@ -89,7 +95,7 @@ class PSUVOptionsMixin():
         elif not self.use_paint_system_uv and self.coord_type == 'AUTO':
             self.coord_type = 'UV'
     
-    use_paint_system_uv: BoolProperty(
+    use_paint_system_uv = BoolProperty(
         name="Use Paint System UV",
         description="Use the Paint System UV",
         default=True,
@@ -100,19 +106,19 @@ class PSUVOptionsMixin():
         if self.coord_type == 'AUTO' and not self.use_paint_system_uv:
             self.use_paint_system_uv = True
     
-    coord_type: EnumProperty(
+    coord_type = EnumProperty(
         name="Coordinate Type",
         items=COORDINATE_TYPE_ENUM,
         default='UV',
         update=update_coord_type,
         options={'SKIP_SAVE'}
     )
-    uv_map_name: StringProperty(
+    uv_map_name = StringProperty(
         name="UV Map",
         description="Name of the UV map to use",
         options={'SKIP_SAVE'}
     )
-    checked_coord_type: BoolProperty(
+    checked_coord_type = BoolProperty(
         name="Checked Coordinate Type",
         description="Checked coordinate type",
         default=False,
@@ -159,6 +165,8 @@ class PSUVOptionsMixin():
         row = layout.row(align=True)
         row.label(text="Coordinate Type", icon='UV')
         row.prop(self, "use_paint_system_uv", text="Use AUTO UV?", toggle =1)
+        # UV checker override toggle UI
+        layout.prop(self, "use_uv_checker_override", text="Override with UV Checker")
         if self.use_paint_system_uv:
             info_box = layout.box()
             if not ps_ctx.ps_object.data.uv_layers.get(DEFAULT_PS_UV_MAP_NAME):
@@ -178,6 +186,16 @@ class PSUVOptionsMixin():
             row.prop_search(self, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="")
             if not self.uv_map_name:
                 row.alert = True
+
+    def maybe_override_material_with_uv_checker(self, context):
+        """
+        If use_uv_checker_override is True, override the material with a UV checker map.
+        This is a stub; actual implementation should load the checker image and set up the material.
+        """
+        if not self.use_uv_checker_override:
+            return
+        # TODO: Implement logic to set material to UV checker map
+        pass
 
 
 class PSImageCreateMixin(PSUVOptionsMixin):

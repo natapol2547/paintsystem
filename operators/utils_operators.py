@@ -3,7 +3,7 @@ import uuid
 import addon_utils
 import bpy
 import gpu
-from bpy.props import EnumProperty, IntProperty
+from bpy.props import EnumProperty, IntProperty, BoolProperty, StringProperty
 from bpy.types import Operator
 from bpy.utils import register_classes_factory
 from bpy_extras.node_utils import connect_sockets
@@ -565,6 +565,189 @@ class PAINTSYSTEM_OT_ToggleTransformGizmos(Operator):
         return {'FINISHED'}
 
 
+class PAINTSYSTEM_OT_AssignActiveMaterialToSelected(Operator):
+    """Assign the active object's material to all other selected mesh objects.
+    Optionally synchronize a shared UV map name across them for Paint System operations."""
+    bl_idname = "paint_system.assign_active_material_to_selected"
+    bl_label = "Assign Active Material to Selected"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Apply the active object's material to all selected meshes and optionally sync UV map names"
+
+    sync_uv: BoolProperty(
+        name="Sync UV Map Name",
+        description="Ensure all target meshes have/keep the same UV map name (created if missing)",
+        default=True
+    )
+    uv_map_name: StringProperty(
+        name="Target UV Map",
+        description="UV map name to enforce; empty uses the active object's active UV map",
+        default=""
+    )
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.view_layer.objects.active
+        return obj and obj.type == 'MESH' and obj.active_material is not None
+
+    def execute(self, context):
+        active = context.view_layer.objects.active
+        if not active or active.type != 'MESH':
+            return {'CANCELLED'}
+        mat = active.active_material
+        if mat is None:
+            return {'CANCELLED'}
+
+        # Determine target UV map name if syncing
+        target_uv = None
+        if self.sync_uv:
+            if self.uv_map_name.strip():
+                target_uv = self.uv_map_name.strip()
+            else:
+                try:
+                    uv_layers = getattr(active.data, 'uv_layers', None)
+                    if uv_layers and uv_layers.active:
+                        target_uv = uv_layers.active.name
+                except Exception:
+                    target_uv = None
+
+        selected_meshes = [o for o in context.selected_objects if o.type == 'MESH' and o != active]
+        if not selected_meshes:
+            return {'CANCELLED'}
+
+        # Lazy import of internal helper; tolerate absence gracefully.
+        sync_fn = None
+        if target_uv:
+            try:
+                from ..paintsystem.data import _sync_uv_map_to_name as _fn
+                sync_fn = _fn
+            except Exception:
+                sync_fn = None
+
+        assigned_count = 0
+        uv_synced = 0
+        for obj in selected_meshes:
+            mats = getattr(obj.data, 'materials', None)
+            if mats is None:
+                continue
+            if mat not in mats:
+                try:
+                    mats.append(mat)
+                except Exception:
+                    # Fallback: replace first slot if append fails
+                    if len(mats):
+                        mats[0] = mat
+                assigned_count += 1
+            else:
+                # Ensure the object's active material pointer references mat (optional)
+                try:
+                    obj.active_material = mat
+                except Exception:
+                    pass
+            if sync_fn and target_uv:
+                try:
+                    sync_fn(obj, target_uv)
+                    uv_synced += 1
+                except Exception:
+                    pass
+
+        self.report({'INFO'}, f"Material applied to {assigned_count} objects; UV synced on {uv_synced}.")
+        return {'FINISHED'}
+
+
+class PAINTSYSTEM_OT_SyncLayerUVNameToUsers(PSContextMixin, Operator):
+    bl_idname = "paint_system.sync_layer_uv_name_to_users"
+    bl_label = "Sync Layer UV Name to Users"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Ensure all mesh objects using the active material have a UV layer with the active layer's UV name"
+
+    @classmethod
+    def poll(cls, context):
+        try:
+            ps_ctx = cls.parse_context(context)
+            return (
+                ps_ctx.ps_object is not None and
+                ps_ctx.active_material is not None and
+                ps_ctx.active_layer is not None and
+                ps_ctx.active_layer.coord_type == 'UV' and
+                bool(ps_ctx.active_layer.uv_map_name)
+            )
+        except Exception:
+            return False
+
+    def execute(self, context):
+        ps = self.parse_context(context)
+        mat = ps.active_material
+        layer = ps.active_layer
+        target_name = layer.uv_map_name
+        synced = 0
+        try:
+            from ..paintsystem.data import _sync_uv_map_to_name as _sync_fn
+        except Exception:
+            _sync_fn = None
+        if not _sync_fn:
+            self.report({'WARNING'}, "Sync helper unavailable")
+            return {'CANCELLED'}
+        for obj in context.scene.objects:
+            try:
+                if obj.type == 'MESH' and any(ms.material == mat for ms in obj.material_slots if ms.material):
+                    _sync_fn(obj, target_name)
+                    synced += 1
+            except Exception:
+                continue
+        self.report({'INFO'}, f"Synced UV '{target_name}' on {synced} object(s)")
+        return {'FINISHED'}
+
+
+class PAINTSYSTEM_OT_SetActiveUVForSelected(PSContextMixin, Operator):
+    bl_idname = "paint_system.set_active_uv_for_selected"
+    bl_label = "Set Active UV for Selected"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Ensure selected meshes have the active layer's UV and set it active so UV edits affect the same map"
+
+    @classmethod
+    def poll(cls, context):
+        try:
+            ps_ctx = cls.parse_context(context)
+            any_selected_mesh = any(o for o in context.selected_objects or [] if getattr(o, 'type', '') == 'MESH')
+            return (
+                bool(any_selected_mesh) and
+                ps_ctx.active_layer is not None and
+                ps_ctx.active_layer.coord_type == 'UV' and
+                bool(ps_ctx.active_layer.uv_map_name)
+            )
+        except Exception:
+            return False
+
+    def execute(self, context):
+        ps = self.parse_context(context)
+        layer = ps.active_layer
+        target_name = layer.uv_map_name
+        if not target_name:
+            self.report({'WARNING'}, "Active layer UV Map name is empty")
+            return {'CANCELLED'}
+        # Lazy import to avoid cycles
+        try:
+            from ..paintsystem.data import _sync_uv_map_to_name as _ensure
+        except Exception:
+            _ensure = None
+        changed = 0
+        for obj in context.selected_objects:
+            try:
+                if getattr(obj, 'type', '') != 'MESH' or not getattr(obj, 'data', None):
+                    continue
+                # Ensure/rename/create the target UV
+                if _ensure:
+                    _ensure(obj, target_name)
+                # Make it active
+                uv_layers = getattr(obj.data, 'uv_layers', None)
+                if uv_layers and target_name in uv_layers.keys():
+                    uv_layers.active = uv_layers[target_name]
+                    changed += 1
+            except Exception:
+                continue
+        self.report({'INFO'}, f"Set active UV '{target_name}' on {changed} object(s)")
+        return {'FINISHED'}
+
 classes = (
     PAINTSYSTEM_OT_PickPaletteColor,
     PAINTSYSTEM_OT_TogglePaintMode,
@@ -582,6 +765,9 @@ classes = (
     PAINTSYSTEM_OT_HidePaintingTips,
     PAINTSYSTEM_OT_DuplicatePaintSystemData,
     PAINTSYSTEM_OT_ToggleTransformGizmos,
+    PAINTSYSTEM_OT_AssignActiveMaterialToSelected,
+    PAINTSYSTEM_OT_SyncLayerUVNameToUsers,
+    PAINTSYSTEM_OT_SetActiveUVForSelected,
 )
 
 addon_keymaps = []

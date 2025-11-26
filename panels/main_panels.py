@@ -175,6 +175,15 @@ class MAT_PT_PaintSystemMaterialSettings(PSContextMixin, Panel):
             row.operator("paint_system.new_group", icon='ADD', text="")
             row.operator("paint_system.delete_group", icon='REMOVE', text="")
 
+        # Utilities
+        if ob and ob.type == 'MESH' and mat is not None:
+            util_box = layout.box()
+            util_box.label(text="Utilities", icon='TOOL_SETTINGS')
+            row = util_box.row(align=True)
+            # Assign active material to selected meshes (with default UV sync)
+            op = row.operator("paint_system.assign_active_material_to_selected", text="Assign to Selected", icon='MATERIAL')
+            op.sync_uv = True
+
 class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_PaintSystemMainPanel'
     bl_space_type = "VIEW_3D"

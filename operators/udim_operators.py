@@ -1,11 +1,11 @@
 """UDIM tile management operators (Phase 2)"""
 import bpy
 from bpy.types import Operator
-from bpy.props import IntProperty, BoolProperty
+from bpy.props import IntProperty, BoolProperty, StringProperty, EnumProperty
 from bpy.utils import register_classes_factory
 
 from .common import PSContextMixin
-from ..utils.udim import fill_udim_tile
+from ..utils.udim import fill_udim_tile, detect_udim_from_uv
 import logging
 
 logger = logging.getLogger("PaintSystem")
@@ -216,13 +216,129 @@ class PAINTSYSTEM_OT_BakeUDIMTile(PSContextMixin, Operator):
             return {'CANCELLED'}
         
         return {'FINISHED'}
+class PAINTSYSTEM_OT_SyncUVByUDIMTile(PSContextMixin, Operator):
+    """Create per-tile UV map aliases so objects sharing a UDIM tile also share a UV map name.
+
+    Non-destructive: copies coordinates from the source UV map into new UV layers named by tile.
+    """
+    bl_idname = "paint_system.sync_uv_by_udim_tile"
+    bl_label = "Sync UV by UDIM Tile"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    scope: EnumProperty(
+        name="Scope",
+        description="Which objects to include",
+        items=[
+            ('MATERIAL_USERS', "Material Users", "All mesh objects using the active material"),
+            ('SELECTED', "Selected Meshes", "Currently selected mesh objects"),
+        ],
+        default='MATERIAL_USERS'
+    )
+
+    source_uv: StringProperty(
+        name="Source UV Map",
+        description="UV layer to copy from; empty uses the active UV on each object",
+        default=""
+    )
+
+    name_pattern: StringProperty(
+        name="Name Pattern",
+        description="Naming for per-tile UV maps. {tile} expands to UDIM number",
+        default="UV_{tile}"
+    )
+
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx and ps_ctx.ps_object and ps_ctx.ps_object.type == 'MESH' and ps_ctx.active_material
+
+    def draw(self, context):
+        layout = self.layout
+        ps_ctx = self.parse_context(context)
+        col = layout.column(align=True)
+        col.label(text="Creates per-tile UV map aliases (non-destructive)", icon='INFO')
+        box = layout.box()
+        box.label(text="Scope")
+        box.prop(self, "scope", expand=True)
+
+        box = layout.box()
+        box.label(text="UV Source & Naming", icon='UV')
+        row = box.row()
+        row.prop_search(self, "source_uv", ps_ctx.ps_object.data, "uv_layers", text="Source UV")
+        box.prop(self, "name_pattern")
+        box.label(text=f"Example: {self.name_pattern.format(tile=1001)}")
+
+        # Quick preview of tiles on active object
+        try:
+            obj = ps_ctx.ps_object
+            active = obj.data.uv_layers.active
+            if active:
+                tiles = detect_udim_from_uv(obj)
+                if tiles:
+                    layout.label(text=f"Detected tiles on active: {', '.join(map(str, tiles[:8]))}{'...' if len(tiles)>8 else ''}")
+        except Exception:
+            pass
+
+    def _copy_uv_layer(self, obj: bpy.types.Object, src_name: str, dst_name: str):
+        uv_layers = obj.data.uv_layers
+        src = uv_layers.get(src_name) if src_name else (uv_layers.active if uv_layers.active else None)
+        if not src:
+            return False
+        if dst_name in uv_layers.keys():
+            return True
+        new_layer = uv_layers.new(name=dst_name)
+        try:
+            for i, loop in enumerate(src.data):
+                new_layer.data[i].uv = loop.uv
+        except Exception:
+            pass
+        return True
+
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        mat = ps_ctx.active_material
+
+        if self.scope == 'MATERIAL_USERS':
+            targets = [o for o in context.scene.objects if o and o.type == 'MESH' and any(ms.material == mat for ms in o.material_slots if ms.material)]
+        else:
+            targets = [o for o in context.selected_objects if o and o.type == 'MESH']
+
+        created = 0
+        touched = 0
+        for obj in targets:
+            try:
+                if not obj.data or not hasattr(obj.data, 'uv_layers') or len(obj.data.uv_layers) == 0:
+                    continue
+                # Use requested source or active per object
+                source_name = self.source_uv if (self.source_uv and self.source_uv in obj.data.uv_layers.keys()) else (obj.data.uv_layers.active.name if obj.data.uv_layers.active else obj.data.uv_layers[0].name)
+                # Temporarily set active to source for detection
+                orig_active = obj.data.uv_layers.active
+                obj.data.uv_layers.active = obj.data.uv_layers[source_name]
+                tiles = detect_udim_from_uv(obj)
+                obj.data.uv_layers.active = orig_active
+                for tile in tiles:
+                    uv_name = self.name_pattern.format(tile=tile)
+                    if uv_name in obj.data.uv_layers.keys():
+                        touched += 1
+                        continue
+                    if self._copy_uv_layer(obj, source_name, uv_name):
+                        created += 1
+                        touched += 1
+            except Exception:
+                continue
+
+        self.report({'INFO'}, f"Per-tile UVs: created {created}, available {touched} across {len(targets)} objects")
+        return {'FINISHED'}
 
 
+# Register all classes (placed after class definitions)
 classes = (
     PAINTSYSTEM_OT_SelectUDIMTile,
     PAINTSYSTEM_OT_MarkUDIMTileDirty,
     PAINTSYSTEM_OT_ClearUDIMTileMarks,
     PAINTSYSTEM_OT_BakeUDIMTile,
+    PAINTSYSTEM_OT_SyncUVByUDIMTile,
 )
 
 register, unregister = register_classes_factory(classes)
+

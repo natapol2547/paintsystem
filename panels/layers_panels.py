@@ -701,8 +701,11 @@ class MAT_PT_LayerTransformSettings(PSContextMixin, Panel):
         if active_layer.coord_type in ['AUTO', 'UV'] and active_layer.type == 'IMAGE':
             row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
         if active_layer.coord_type == 'UV':
-            col.prop_search(active_layer, "uv_map_name", text="UV Map",
+            row_uv = col.row(align=True)
+            row_uv.prop_search(active_layer, "uv_map_name", text="UV Map",
                                 search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
+            row_uv.operator("paint_system.sync_layer_uv_name_to_users", text="", icon='FILE_REFRESH')
+            row_uv.operator("paint_system.set_active_uv_for_selected", text="", icon='RADIOBUT_ON')
         elif active_layer.coord_type == 'DECAL':
             decal_clip = active_layer.find_node("decal_depth_clip")
             if decal_clip:
@@ -780,6 +783,26 @@ class MAT_PT_ImageLayerSettings(PSContextMixin, Panel):
         layout = self.layout
         layout.use_property_split = True
         layout.use_property_decorate = False
+        
+        # UDIM detection display
+        if active_layer.image:
+            try:
+                from ..utils.udim import is_udim_image, get_udim_tiles_from_image
+                if is_udim_image(active_layer.image):
+                    box = layout.box()
+                    row = box.row()
+                    row.label(text="UDIM", icon='UV')
+                    tiles = get_udim_tiles_from_image(active_layer.image)
+                    if tiles:
+                        tile_count = len(tiles)
+                        row.label(text=f"{tile_count} tile{'s' if tile_count != 1 else ''}")
+                    # Per-tile UV sync utility
+                    col = box.column(align=True)
+                    col.operator_context = 'INVOKE_DEFAULT'
+                    col.operator("paint_system.sync_uv_by_udim_tile", text="Sync UV by UDIM Tile", icon='GROUP_UVS')
+            except Exception:
+                pass
+        
         row = layout.row()
         row.use_property_split = False
         row.prop(active_layer, "correct_image_aspect", text="Correct Aspect")
