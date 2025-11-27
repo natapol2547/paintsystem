@@ -701,8 +701,10 @@ class MAT_PT_LayerTransformSettings(PSContextMixin, Panel):
         if active_layer.coord_type in ['AUTO', 'UV'] and active_layer.type == 'IMAGE':
             row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
         if active_layer.coord_type == 'UV':
-            col.prop_search(active_layer, "uv_map_name", text="UV Map",
+            uv_row = col.row(align=True)
+            uv_row.prop_search(active_layer, "uv_map_name", text="UV Map",
                                 search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
+            uv_row.operator("paint_system.sync_uv_maps", text="", icon='UV_SYNC_SELECT')
         elif active_layer.coord_type == 'DECAL':
             decal_clip = active_layer.find_node("decal_depth_clip")
             if decal_clip:

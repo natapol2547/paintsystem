@@ -14,6 +14,13 @@ class BakeOperator(PSContextMixin, PSImageCreateMixin, Operator):
     """Bake the active channel"""
     bl_options = {'REGISTER', 'UNDO'}
     
+    overwrite_image: BoolProperty(
+        name="Overwrite Existing Image",
+        description="Overwrite the existing baked image instead of creating a new one",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    
     def invoke(self, context, event):
         """Invoke the operator to create a new channel."""
         ps_ctx = self.parse_context(context)
@@ -52,7 +59,19 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
     def draw(self, context):
         layout = self.layout
         ps_ctx = self.parse_context(context)
+        
+        # Image options
+        box = layout.box()
+        box.label(text="Image Options", icon='IMAGE_DATA')
+        if not self.as_layer:
+            existing_image = ps_ctx.active_channel.bake_image if ps_ctx.active_channel else None
+            if existing_image:
+                box.prop(self, "overwrite_image")
+                if self.overwrite_image:
+                    box.label(text=f"Will overwrite: {existing_image.name}", icon='INFO')
+        
         self.image_create_ui(layout, context)
+        
         box = layout.box()
         box.label(text="UV Map", icon='UV')
         box.prop_search(self, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="")
@@ -102,12 +121,15 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
             )
         else:
             bake_image = active_channel.bake_image
-            if not bake_image:
+            if not bake_image or not self.overwrite_image:
+                # Create new image if none exists or overwrite is disabled
                 bake_image = self.create_image(context)
                 bake_image.colorspace_settings.name = 'sRGB'
                 active_channel.bake_image = bake_image
-            elif bake_image.size[0] != self.image_width or bake_image.size[1] != self.image_height:
-                bake_image.scale(self.image_width, self.image_height)
+            else:
+                # Overwrite existing image - resize if needed
+                if bake_image.size[0] != self.image_width or bake_image.size[1] != self.image_height:
+                    bake_image.scale(self.image_width, self.image_height)
             active_channel.bake_uv_map = self.uv_map_name
                 
             active_channel.use_bake_image = False
@@ -143,7 +165,18 @@ class PAINTSYSTEM_OT_BakeAllChannels(BakeOperator):
     def draw(self, context):
         layout = self.layout
         ps_ctx = self.parse_context(context)
+        
+        # Image options
+        box = layout.box()
+        box.label(text="Image Options", icon='IMAGE_DATA')
+        existing_count = sum(1 for ch in ps_ctx.active_group.channels if ch.bake_image)
+        if existing_count > 0:
+            box.prop(self, "overwrite_image")
+            if self.overwrite_image:
+                box.label(text=f"Will overwrite {existing_count} existing image(s)", icon='INFO')
+        
         self.image_create_ui(layout, context, show_name=False)
+        
         box = layout.box()
         box.label(text="UV Map", icon='UV')
         box.prop_search(self, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="")
@@ -161,13 +194,16 @@ class PAINTSYSTEM_OT_BakeAllChannels(BakeOperator):
             mat = ps_ctx.active_material
             bake_image = channel.bake_image
             
-            if not bake_image:
+            if not bake_image or not self.overwrite_image:
+                # Create new image if none exists or overwrite is disabled
                 self.image_name = f"{ps_ctx.active_group.name}_{channel.name}"
                 bake_image = self.create_image(context)
                 bake_image.colorspace_settings.name = 'sRGB'
                 channel.bake_image = bake_image
-            elif bake_image.size[0] != self.image_width or bake_image.size[1] != self.image_height:
-                bake_image.scale(self.image_width, self.image_height)
+            else:
+                # Overwrite existing image - resize if needed
+                if bake_image.size[0] != self.image_width or bake_image.size[1] != self.image_height:
+                    bake_image.scale(self.image_width, self.image_height)
                 
             channel.use_bake_image = False
             channel.bake_uv_map = self.uv_map_name
@@ -365,6 +401,247 @@ class PAINTSYSTEM_OT_DeleteBakedImage(PSContextMixin, Operator):
         layout = self.layout
         layout.label(
             text="Click OK to delete the baked image.")
+
+
+class PAINTSYSTEM_OT_SyncUVMaps(PSContextMixin, Operator):
+    """Sync UV map names across all objects using the active material"""
+    bl_idname = "paint_system.sync_uv_maps"
+    bl_label = "Sync UV Names"
+    bl_description = "Synchronize UV map names across all objects sharing this material"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_material and ps_ctx.ps_object
+    
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        mat = ps_ctx.active_material
+        
+        if not mat:
+            self.report({'ERROR'}, "No active material")
+            return {'CANCELLED'}
+        
+        # Determine target UV name based on context
+        # Priority: 1) Active layer's UV, 2) Scene transfer UV, 3) First UV on object
+        target_uv_name = ''
+        
+        # Check if we're in layers panel context (active layer has UV)
+        if ps_ctx.active_layer and hasattr(ps_ctx.active_layer, 'uv_map_name') and ps_ctx.active_layer.uv_map_name:
+            target_uv_name = ps_ctx.active_layer.uv_map_name
+        
+        # Fall back to scene property (UV editor context)
+        if not target_uv_name:
+            target_uv_name = getattr(context.scene, 'ps_transfer_uv_map', '')
+        
+        # Final fallback to first UV on active object
+        if not target_uv_name and ps_ctx.ps_object and hasattr(ps_ctx.ps_object.data, 'uv_layers'):
+            uv_layers = ps_ctx.ps_object.data.uv_layers
+            if len(uv_layers) > 0:
+                target_uv_name = uv_layers[0].name
+        
+        if not target_uv_name:
+            self.report({'ERROR'}, "No target UV map to sync to. Set a UV map first.")
+            return {'CANCELLED'}
+        
+        # Find all objects using this material (check all scenes)
+        objects_using_mat = []
+        for scene in bpy.data.scenes:
+            for obj in scene.objects:
+                if obj.type not in {'MESH', 'CURVE', 'SURFACE', 'FONT', 'META'}:
+                    continue
+                for slot in obj.material_slots:
+                    if slot.material and slot.material == mat:
+                        objects_using_mat.append(obj)
+                        break
+        
+        if not objects_using_mat:
+            self.report({'WARNING'}, f"No objects found using material: {mat.name}")
+            return {'CANCELLED'}
+        
+        renamed_count = 0
+        already_correct = 0
+        skipped_count = 0
+        
+        for obj in objects_using_mat:
+            if not hasattr(obj.data, 'uv_layers'):
+                skipped_count += 1
+                continue
+            
+            uv_layers = obj.data.uv_layers
+            if len(uv_layers) == 0:
+                skipped_count += 1
+                continue
+            
+            # Check if target UV already exists
+            existing_uv = uv_layers.get(target_uv_name)
+            
+            if not existing_uv:
+                # Rename first UV layer to target name
+                try:
+                    uv_layers[0].name = target_uv_name
+                    renamed_count += 1
+                except:
+                    skipped_count += 1
+                    continue
+            else:
+                already_correct += 1
+            
+            # Set as active render UV
+            target_layer = uv_layers.get(target_uv_name)
+            if target_layer:
+                uv_layers.active = target_layer
+        
+        total_objects = len(objects_using_mat)
+        if renamed_count > 0:
+            self.report({'INFO'}, f"Renamed UV on {renamed_count} object(s) to '{target_uv_name}' ({already_correct} already correct, {skipped_count} skipped)")
+        elif already_correct > 0:
+            self.report({'INFO'}, f"All {already_correct} object(s) already have UV named '{target_uv_name}'")
+        else:
+            self.report({'WARNING'}, f"Could not sync UV on any objects ({skipped_count} skipped)")
+        return {'FINISHED'}
+
+
+class PAINTSYSTEM_OT_SetActiveUVFromLayer(PSContextMixin, Operator):
+    """Set Active UV from current layer's UV map"""
+    bl_idname = "paint_system.set_active_uv_from_layer"
+    bl_label = "Use Layer UV"
+    bl_description = "Set Active UV to the UV map used by the current layer"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_layer and hasattr(ps_ctx.active_layer, 'uv_map_name') and ps_ctx.active_layer.uv_map_name
+    
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        if ps_ctx.active_layer and hasattr(ps_ctx.active_layer, 'uv_map_name'):
+            context.scene.ps_active_uv_map = ps_ctx.active_layer.uv_map_name
+            self.report({'INFO'}, f"Active UV set to: {ps_ctx.active_layer.uv_map_name}")
+        return {'FINISHED'}
+
+
+class PAINTSYSTEM_OT_TransferImageLayerUVDirect(PSContextMixin, Operator):
+    """Transfer UV of image layer without dialog"""
+    bl_idname = "paint_system.transfer_uv_direct"
+    bl_label = "Transfer UV"
+    bl_description = "Transfer the UV of the image layer from Active UV to New UV"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_channel and ps_ctx.active_layer and ps_ctx.active_layer.type == 'IMAGE' and ps_ctx.active_layer.image
+
+    def execute(self, context):
+        # Set cursor to wait
+        context.window.cursor_set('WAIT')
+        ps_ctx = self.parse_context(context)
+        active_channel = ps_ctx.active_channel
+        active_layer = ps_ctx.active_layer
+        
+        if not active_channel or not active_layer:
+            context.window.cursor_set('DEFAULT')
+            return {'CANCELLED'}
+        
+        # Get UV mode
+        uv_mode = getattr(context.scene, 'ps_uv_transfer_mode', 'USE_EXISTING')
+        
+        # Handle different UV modes
+        if uv_mode == 'AUTO_UV':
+            # Perform auto UV unwrap on the object
+            if ps_ctx.ps_object and ps_ctx.ps_object.type == 'MESH':
+                # Create or get UV map
+                uv_layers = ps_ctx.ps_object.data.uv_layers
+                if len(uv_layers) == 0:
+                    uv_layers.new(name="UVMap")
+                target_uv_map = uv_layers.active.name
+                
+                # Perform smart UV project
+                bpy.ops.object.mode_set(mode='EDIT')
+                bpy.ops.mesh.select_all(action='SELECT')
+                bpy.ops.uv.smart_project(angle_limit=66.0, island_margin=0.02)
+                bpy.ops.object.mode_set(mode='OBJECT')
+            else:
+                self.report({'ERROR'}, "Auto UV requires a mesh object")
+                context.window.cursor_set('DEFAULT')
+                return {'CANCELLED'}
+        elif uv_mode == 'CREATE_NEW':
+            # Create a new UV map with the specified name
+            target_uv_map = getattr(context.scene, 'ps_transfer_uv_map', '')
+            if not target_uv_map:
+                target_uv_map = "UVMap_New"
+            
+            if ps_ctx.ps_object and hasattr(ps_ctx.ps_object.data, 'uv_layers'):
+                uv_layers = ps_ctx.ps_object.data.uv_layers
+                # Check if it already exists
+                if target_uv_map not in uv_layers:
+                    new_uv = uv_layers.new(name=target_uv_map)
+                    uv_layers.active = new_uv
+                else:
+                    self.report({'WARNING'}, f"UV map '{target_uv_map}' already exists, using it")
+        else:  # USE_EXISTING
+            # Get target UV map from scene property
+            target_uv_map = getattr(context.scene, 'ps_transfer_uv_map', '')
+            if not target_uv_map and ps_ctx.ps_object and hasattr(ps_ctx.ps_object.data, 'uv_layers'):
+                uv_layers = ps_ctx.ps_object.data.uv_layers
+                if len(uv_layers) > 0:
+                    target_uv_map = uv_layers[0].name
+            
+            if not target_uv_map:
+                self.report({'ERROR'}, "No target UV map selected")
+                context.window.cursor_set('DEFAULT')
+                return {'CANCELLED'}
+        
+        # Get active/source UV map - use active_uv_map if set, otherwise fall back to layer's current UV
+        source_uv_map = getattr(context.scene, 'ps_active_uv_map', '')
+        if not source_uv_map and hasattr(active_layer, 'uv_map_name') and active_layer.uv_map_name:
+            source_uv_map = active_layer.uv_map_name
+        elif not source_uv_map:
+            # Final fallback to first UV layer
+            if ps_ctx.ps_object and hasattr(ps_ctx.ps_object.data, 'uv_layers'):
+                uv_layers = ps_ctx.ps_object.data.uv_layers
+                if len(uv_layers) > 0:
+                    source_uv_map = uv_layers[0].name
+        
+        if not source_uv_map:
+            self.report({'ERROR'}, "No active UV map to bake from")
+            context.window.cursor_set('DEFAULT')
+            return {'CANCELLED'}
+        
+        transferred_image = bpy.data.images.new(name=f"{active_layer.image.name}_Transferred", width=active_layer.image.size[0], height=active_layer.image.size[1], alpha=True)
+        
+        to_be_enabled_layers = []
+        # Ensure all layers are disabled except the active layer
+        for layer in active_channel.layers:
+            if layer.enabled and layer != active_layer:
+                to_be_enabled_layers.append(layer)
+                layer.enabled = False
+        
+        original_blend_mode = get_layer_blend_type(active_layer)
+        set_layer_blend_type(active_layer, 'MIX')
+        orig_is_clip = bool(active_layer.is_clip)
+        if active_layer.is_clip:
+            active_layer.is_clip = False
+        
+        # Bake using the target UV map
+        active_channel.bake(context, ps_ctx.active_material, transferred_image, target_uv_map, use_group_tree=False, force_alpha=True)
+        
+        if active_layer.is_clip != orig_is_clip:
+            active_layer.is_clip = orig_is_clip
+        set_layer_blend_type(active_layer, original_blend_mode)
+        active_layer.coord_type = 'UV'
+        active_layer.uv_map_name = target_uv_map
+        active_layer.image = transferred_image
+        # Restore the layers
+        for layer in to_be_enabled_layers:
+            layer.enabled = True
+        # Set cursor back to default
+        context.window.cursor_set('DEFAULT')
+        self.report({'INFO'}, f"Transferred from {source_uv_map} to {target_uv_map}")
+        return {'FINISHED'}
 
 
 class PAINTSYSTEM_OT_TransferImageLayerUV(PSContextMixin, PSUVOptionsMixin, Operator):
@@ -729,6 +1006,9 @@ class PAINTSYSTEM_OT_MergeUp(PSContextMixin, PSImageCreateMixin, Operator):
 classes = (
     PAINTSYSTEM_OT_BakeChannel,
     PAINTSYSTEM_OT_BakeAllChannels,
+    PAINTSYSTEM_OT_SyncUVMaps,
+    PAINTSYSTEM_OT_SetActiveUVFromLayer,
+    PAINTSYSTEM_OT_TransferImageLayerUVDirect,
     PAINTSYSTEM_OT_TransferImageLayerUV,
     PAINTSYSTEM_OT_ExportImage,
     PAINTSYSTEM_OT_ExportAllImages,

@@ -2680,6 +2680,62 @@ def register():
         name="Paint System Data",
         description="Data for the Paint System"
     )
+    bpy.types.Scene.ps_active_uv_map = StringProperty(
+        name="Active UV Map",
+        description="Active/source UV map for baking in UV editor",
+        default=""
+    )
+    bpy.types.Scene.ps_transfer_uv_map = StringProperty(
+        name="Transfer UV Map",
+        description="Target UV map to use for transfer operations in UV editor",
+        default=""
+    )
+    bpy.types.Scene.ps_uv_transfer_mode = EnumProperty(
+        name="UV Mode",
+        description="How to handle UV mapping for the transfer",
+        items=[
+            ('CREATE_NEW', "Create New UV", "Create a new UV map with the target name"),
+            ('USE_EXISTING', "Use Existing UV", "Use an existing UV map"),
+            ('AUTO_UV', "Auto UV", "Automatically unwrap and create UV")
+        ],
+        default='USE_EXISTING'
+    )
+    bpy.types.Scene.ps_transfer_image_resolution = EnumProperty(
+        name="Image Resolution",
+        description="Resolution for transferred image output",
+        items=[
+            ('1024', "1024", "1024x1024"),
+            ('2048', "2048", "2048x2048"),
+            ('4096', "4096", "4096x4096"),
+            ('8192', "8192", "8192x8192"),
+            ('CUSTOM', "Custom", "Custom Resolution"),
+        ],
+        default='2048'
+    )
+    bpy.types.Scene.ps_transfer_image_width = IntProperty(
+        name="Width",
+        default=2048,
+        min=1,
+        description="Width of the transferred image in pixels",
+        subtype='PIXEL'
+    )
+    bpy.types.Scene.ps_transfer_image_height = IntProperty(
+        name="Height",
+        default=2048,
+        min=1,
+        description="Height of the transferred image in pixels",
+        subtype='PIXEL'
+    )
+    bpy.types.Scene.ps_transfer_use_udim = BoolProperty(
+        name="Use UDIM Tiles",
+        description="Use UDIM tiles for the transferred image",
+        default=True
+    )
+    bpy.types.Scene.ps_transfer_show_advanced = BoolProperty(
+        name="Show Advanced",
+        description="Show advanced transfer settings",
+        default=False
+    )
     bpy.types.Material.ps_mat_data = PointerProperty(
         type=MaterialData,
         name="Paint System Material Data",
@@ -2691,5 +2747,13 @@ def unregister():
     """Unregister the Paint System data module."""
     del bpy.types.Material.paint_system
     del bpy.types.Material.ps_mat_data
+    del bpy.types.Scene.ps_transfer_show_advanced
+    del bpy.types.Scene.ps_transfer_use_udim
+    del bpy.types.Scene.ps_transfer_image_height
+    del bpy.types.Scene.ps_transfer_image_width
+    del bpy.types.Scene.ps_transfer_image_resolution
+    del bpy.types.Scene.ps_uv_transfer_mode
+    del bpy.types.Scene.ps_active_uv_map
+    del bpy.types.Scene.ps_transfer_uv_map
     del bpy.types.Scene.ps_scene_data
     _unregister()
