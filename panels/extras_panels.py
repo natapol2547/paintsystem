@@ -157,6 +157,7 @@ class MAT_PT_BrushColorSettings(PSContextMixin, Panel):
         layout.prop(context.preferences.view, "color_picker_type", text="")
         layout.prop(ps_ctx.ps_settings, "color_picker_scale", text="Color Picker Scale", slider=True)
         layout.prop(ps_ctx.ps_settings, "show_hex_color", text="Show Hex Color")
+        # Keep HSV sliders toggle here (Preferences can also control RMB popover)
         layout.prop(ps_ctx.ps_settings, "show_more_color_picker_settings", text="Show HSV Sliders")
 
 class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
@@ -230,6 +231,35 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
             row = col.row()
             row.scale_y = ps_ctx.ps_settings.color_picker_scale
             self.prop_unified_color_picker(row, context, brush, "color", value_slider=True)
+
+            # Primary/Secondary swatches + flip + eyedropper
+            cards_row = col.row(align=True)
+            cards_row.scale_y = 1.1
+            swatches = cards_row.split(factor=0.5, align=True)
+            try:
+                self.prop_unified_color(swatches, context, brush, "color", text="")
+            except Exception:
+                swatches.prop(brush, "color", text="")
+            try:
+                self.prop_unified_color(swatches, context, brush, "secondary_color", text="")
+            except Exception:
+                if hasattr(brush, "secondary_color"):
+                    swatches.prop(brush, "secondary_color", text="")
+            cards_row.operator("paint.brush_colors_flip", icon='FILE_REFRESH', text="")
+            # Eyedropper resolves correct prop path based on unified color
+            try:
+                tool_settings = context.tool_settings
+                ups = getattr(tool_settings, "unified_paint_settings", None)
+                use_unified = bool(ups and getattr(ups, "use_unified_color", False))
+                prop_path = (
+                    "tool_settings.unified_paint_settings.color"
+                    if use_unified else
+                    "tool_settings.image_paint.brush.color"
+                )
+                eye = cards_row.operator("ui.eyedropper_color", text="", icon='EYEDROPPER')
+                eye.prop_data_path = prop_path
+            except Exception:
+                pass
             if ps_ctx.ps_settings.show_more_color_picker_settings:
                 if not context.preferences.view.color_picker_type == "SQUARE_SV":
                     col.prop(ps_ctx.ps_scene_data, "hue", text="Hue")
@@ -245,19 +275,39 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
                     color_jitter_panel(col, context, brush)
                 except Exception:
                     pass
+                # Palette UI with robust fallback
+                palette_layout = None
+                palette_header = None
+                if hasattr(col, "panel"):
+                    try:
+                        palette_header, palette_panel = col.panel("paintsystem_color_palette", default_closed=True)
+                    except Exception:
+                        palette_panel = None
+                else:
+                    palette_panel = None
+                if palette_panel and palette_header:
+                    palette_header.label(text="Color Palette")
+                    palette_layout = palette_panel
+                else:
+                    fallback_box = col.box()
+                    fallback_box.label(text="Color Palette")
+                    palette_layout = fallback_box.column()
                 try:
-                    header, panel = col.panel("paintsystem_color_palette", default_closed=True)
-                    header.label(text="Color Palette")
-                    panel.template_ID(settings, "palette", new="palette.new")
+                    palette_layout.template_ID(settings, "palette", new="palette.new")
                     if settings.palette:
-                        panel.template_palette(settings, "palette", color=True)
+                        swatch_col = palette_layout.column(align=True)
+                        swatch_col.scale_x = 0.9
+                        swatch_col.scale_y = 0.9
+                        swatch_col.template_palette(settings, "palette", color=True)
                 except Exception:
                     pass
             # draw_color_settings(context, col, brush)
         if ps_ctx.ps_object.type == 'GREASEPENCIL':
             row = col.row()
             row.prop(settings, "color_mode", expand=True)
-            use_unified_paint = (context.object.mode != 'PAINT_GREASE_PENCIL')
+            # Guard against missing context.object; prefer ps_ctx.ps_object
+            obj = ps_ctx.ps_object
+            use_unified_paint = bool(obj and getattr(obj, 'mode', None) != 'PAINT_GREASE_PENCIL')
             ups = context.tool_settings.unified_paint_settings
             prop_owner = ups if use_unified_paint and ups.use_unified_color else brush
             enable_color_picker = settings.color_mode == 'VERTEXCOLOR'
@@ -296,6 +346,11 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
                 sub_row.prop(brush, "secondary_color", text="")
 
             sub_row.operator("paint.brush_colors_flip", icon='FILE_REFRESH', text="")
+            # Inline eyedropper for GP if available
+            try:
+                sub_row.operator("paint_system.color_sampler", text="", icon='EYEDROPPER')
+            except Exception:
+                pass
 
 
 def draw_paint_system_material(self, context):

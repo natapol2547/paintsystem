@@ -1,4 +1,5 @@
 import bpy
+import inspect
 from bpy.types import Operator
 from bpy.utils import register_classes_factory
 from bpy.props import StringProperty, BoolProperty
@@ -70,7 +71,10 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
         mat = ps_ctx.active_material
-        self.image_name = f"{active_channel.name}_Baked"
+        # Use clearer naming: Material_Channel for saved images
+        mat_name = mat.name if mat else "Material"
+        channel_name = active_channel.name
+        self.image_name = f"{mat_name}_{channel_name}"
         self.image_width = int(self.image_resolution)
         self.image_height = int(self.image_resolution)
         
@@ -78,7 +82,15 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
         if self.as_layer:
             bake_image = self.create_image(context)
             bake_image.colorspace_settings.name = 'sRGB'
-            active_channel.bake(context, mat, bake_image, self.uv_map_name, force_alpha=True, as_tangent_normal=self.as_tangent_normal)
+            # Build bake kwargs based on signature to avoid unexpected-arg errors
+            sig = inspect.signature(active_channel.bake)
+            bake_kwargs = {}
+            if 'force_alpha' in sig.parameters:
+                bake_kwargs['force_alpha'] = True
+            if 'as_tangent_normal' in sig.parameters:
+                bake_kwargs['as_tangent_normal'] = self.as_tangent_normal
+            # Call bake safely
+            active_channel.bake(context, mat, bake_image, self.uv_map_name, **bake_kwargs)
             active_channel.create_layer(
                 context, 
                 layer_name=self.image_name, 
@@ -99,7 +111,12 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
             active_channel.bake_uv_map = self.uv_map_name
                 
             active_channel.use_bake_image = False
-            active_channel.bake(context, mat, bake_image, self.uv_map_name, as_tangent_normal=self.as_tangent_normal)
+            # Respect available kwargs
+            sig = inspect.signature(active_channel.bake)
+            if 'as_tangent_normal' in sig.parameters:
+                active_channel.bake(context, mat, bake_image, self.uv_map_name, as_tangent_normal=self.as_tangent_normal)
+            else:
+                active_channel.bake(context, mat, bake_image, self.uv_map_name)
             if self.as_tangent_normal:
                 active_channel.bake_vector_space = 'TANGENT'
             else:

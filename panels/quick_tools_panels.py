@@ -22,7 +22,12 @@ class MAT_PT_PaintSystemQuickToolsDisplay(PSContextMixin, Panel):
         ps_ctx = self.parse_context(context)
         obj = ps_ctx.active_object
         layout = self.layout
+        # Safety: ensure we're in a 3D View area
+        if not getattr(context, 'area', None) or not context.area.spaces:
+            return
         space = context.area.spaces[0]
+        if getattr(space, 'type', '') != 'VIEW_3D':
+            return
 
         box = layout.box()
         if obj:
@@ -61,9 +66,15 @@ class MAT_PT_PaintSystemQuickToolsMesh(PSContextMixin, Panel):
         ps_ctx = self.parse_context(context)
         obj = ps_ctx.active_object
         layout = self.layout
+        # Safety: ensure overlay is available from a 3D View area
+        if not getattr(context, 'area', None) or not context.area.spaces:
+            return
         space = context.area.spaces[0]
-        overlay = space.overlay
-        mode_string = context.mode
+        if getattr(space, 'type', '') != 'VIEW_3D':
+            return
+        overlay = getattr(space, 'overlay', None)
+        if overlay is None:
+            return
 
         box = layout.box()
         row = box.row()
@@ -101,7 +112,7 @@ class MAT_PT_PaintSystemQuickToolsMesh(PSContextMixin, Panel):
         row = box.row()
         row.alignment = "CENTER"
         row.label(text="Transforms:", icon="EMPTY_ARROWS")
-        if obj and (obj.scale[0] != 1 or obj.scale[1] != 1 or obj.scale[0] != 1):
+        if obj and (obj.scale[0] != 1 or obj.scale[1] != 1 or obj.scale[2] != 1):
             box1 = box.box()
             box1.alert = True
             col = box1.column(align=True)

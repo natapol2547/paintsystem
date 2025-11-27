@@ -48,7 +48,11 @@ class PAINTSYSTEM_UL_channels(PSContextMixin, UIList):
         split = layout.split(factor=0.6)
         group_node = ps_ctx.active_group.get_group_node(ps_ctx.active_material.node_tree)
         icon_row = split.row(align=True)
-        icon_row.prop(channel, "type", text="", icon_only=True, emboss=False)
+        # Draw channel type icon safely (guard against invalid enum values)
+        try:
+            icon_row.prop(channel, "type", text="", icon_only=True, emboss=False)
+        except Exception:
+            icon_row.label(icon_value=get_icon_from_channel(channel))
         icon_row.prop(channel, "name", text="", emboss=False)
         if group_node and channel.type == "FLOAT" and channel.name in group_node.inputs:
             split.prop(group_node.inputs[channel.name], "default_value", text="")
@@ -103,7 +107,14 @@ class MAT_PT_ChannelsPanel(PSContextMixin, Panel):
         ob = context.object
         if ps_ctx.active_group and check_group_multiuser(ps_ctx.active_group.node_tree):
             return False
-        return ps_ctx.ps_mat_data and ps_ctx.active_group is not None and ob.mode == 'OBJECT'
+        # Only show when we have an active channel and at least one channel, in OBJECT mode
+        if not (ps_ctx.ps_mat_data and ps_ctx.active_group is not None and ob and ob.mode == 'OBJECT'):
+            return False
+        if not ps_ctx.active_channel:
+            return False
+        if len(ps_ctx.active_group.channels) == 0:
+            return False
+        return True
     
     def draw_header(self, context):
         layout = self.layout
@@ -172,7 +183,13 @@ class MAT_PT_ChannelsSettings(PSContextMixin, Panel):
         col.label(text="Channel Settings:", icon="SETTINGS")
         col.use_property_split = True
         col.use_property_decorate = False
-        col.prop(active_channel, "type", text="Type")
+        # Guard against invalid enum value for channel.type to avoid warnings
+        try:
+            col.prop(active_channel, "type", text="Type")
+        except Exception:
+            warn = col.box()
+            warn.alert = True
+            warn.label(text="Channel type is invalid; please reselect.", icon='ERROR')
         col.prop(active_channel, "use_alpha", text="Use Alpha")
         if active_channel.type == "VECTOR":
             box = col.box()

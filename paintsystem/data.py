@@ -464,6 +464,15 @@ def ensure_sockets(node_tree: NodeTree, expected_sockets: List[ExpectedSocket], 
                 socket.min_value = -1e39
                 socket.max_value = 1e39
 
+
+def channel_socket_type(channel_type: str) -> str:
+    mapping = {
+        'COLOR': 'NodeSocketColor',
+        'VECTOR': 'NodeSocketVector',
+        'FLOAT': 'NodeSocketFloat',
+    }
+    return mapping.get(channel_type, 'NodeSocketColor')
+
 def get_udim_tiles(uv_layer: bpy.types.MeshUVLoopLayer):
     udim_tiles = set()
     uv_data = np.empty((len(uv_layer.uv), 2), dtype=np.float32)
@@ -1959,7 +1968,8 @@ class Group(PropertyGroup):
         
         expected_sockets: List[ExpectedSocket] = []
         for channel in self.channels:
-            expected_sockets.append(ExpectedSocket(channel.name, f"NodeSocket{channel.type.title()}", channel.use_max_min, channel.factor_min, channel.factor_max))
+            socket_id = channel_socket_type(channel.type)
+            expected_sockets.append(ExpectedSocket(channel.name, socket_id, channel.use_max_min, channel.factor_min, channel.factor_max))
             if channel.use_alpha:
                 expected_sockets.append(ExpectedSocket(f"{channel.name} Alpha", "NodeSocketFloat", True, 0, 1))
         
@@ -2015,12 +2025,13 @@ class Group(PropertyGroup):
     def update_channel(self, context):
         ps_ctx = parse_context(context)
         ps_mat_data = ps_ctx.ps_mat_data
-        if ps_mat_data.preview_channel:
+        active_channel = ps_ctx.active_channel
+        if ps_mat_data.preview_channel and active_channel:
             # Call paint_system.isolate_active_channel twice to ensure it's updated
-            ps_ctx.active_channel.isolate_channel(context)
-            ps_ctx.active_channel.isolate_channel(context)
-        if ps_ctx.active_channel.use_bake_image:
-            # Force to object mode
+            active_channel.isolate_channel(context)
+            active_channel.isolate_channel(context)
+        if active_channel and active_channel.use_bake_image:
+            # Force to object mode when interacting with baked channels
             bpy.ops.object.mode_set(mode="OBJECT")
         update_active_image(self, context)
     

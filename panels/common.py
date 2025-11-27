@@ -248,15 +248,18 @@ def is_basic_setup(node_tree: bpy.types.NodeTree) -> bool:
 
 
 def toggle_paint_mode_ui(layout: bpy.types.UILayout, context: bpy.types.Context):
-    current_mode = context.mode
+    # Guard against missing context or .mode attribute (e.g., during background redraws)
+    current_mode = getattr(context, "mode", None) or 'OBJECT'
     ps_ctx = PSContextMixin.parse_context(context)
     active_group = ps_ctx.active_group
     active_channel = ps_ctx.active_channel
     mat = ps_ctx.active_material
+    obj = ps_ctx.ps_object
     col = layout.column(align=True)
     row = col.row(align=True)
     row.scale_y = 1.7
     row.scale_x = 1.7
+    # Mode control: use legacy toggle button for maximum compatibility
     paint_row = row.row(align=True)
     paint_row.operator("paint_system.toggle_paint_mode",
         text="Toggle Paint Mode", depress=current_mode != 'OBJECT', icon_value=get_icon('paintbrush'))
@@ -272,7 +275,7 @@ def toggle_paint_mode_ui(layout: bpy.types.UILayout, context: bpy.types.Context)
     # Baking and Exporting
     
     if ps_ctx.ps_object.type == 'MESH':
-        paint_row.enabled = not active_channel.use_bake_image
+        paint_row.enabled = not (active_channel and getattr(active_channel, 'use_bake_image', False))
         if ps_ctx.ps_settings.show_tooltips and not ps_ctx.ps_settings.hide_norm_paint_tips and active_group.template in {'NORMAL', 'PBR'} and any(channel.name == 'Normal' for channel in active_group.channels) and active_channel.name == 'Normal':
             row = col.row(align=True)
             row.scale_y = 1.5
