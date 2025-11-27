@@ -5,6 +5,7 @@ from bpy.props import IntProperty, BoolProperty, StringProperty, EnumProperty
 from bpy.utils import register_classes_factory
 
 from .common import PSContextMixin
+from ..paintsystem.graph.common import DEFAULT_PS_UV_MAP_NAME
 from ..utils.udim import fill_udim_tile, detect_udim_from_uv
 import logging
 
@@ -68,10 +69,11 @@ class PAINTSYSTEM_OT_SelectUDIMTile(PSContextMixin, Operator):
 
 
 class PAINTSYSTEM_OT_MarkUDIMTileDirty(PSContextMixin, Operator):
-    """Mark UDIM tiles as needing re-bake"""
+    """Mark UDIM tiles as needing re-bake (works with PS_ UV workflow)"""
     bl_idname = "paint_system.mark_udim_tile_dirty"
     bl_label = "Mark UDIM Tile Dirty"
     bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Mark tiles for re-baking during Fix UV Apply"
     
     tile_number: IntProperty(
         name="Tile Number",
@@ -102,17 +104,27 @@ class PAINTSYSTEM_OT_MarkUDIMTileDirty(PSContextMixin, Operator):
             self.report({'WARNING'}, "No UDIM layer selected")
             return {'CANCELLED'}
         
+        # Check if in Fix UV session
+        ps_scene_data = ps_ctx.ps_scene_data
+        in_fix_session = ps_scene_data and getattr(ps_scene_data, 'fix_uv_session_active', False)
+        
         if self.mark_all:
             count = 0
             for tile in layer.udim_tiles:
                 tile.is_dirty = True
                 count += 1
-            self.report({'INFO'}, f"Marked {count} tiles as dirty")
+            msg = f"Marked {count} tiles as dirty"
+            if in_fix_session:
+                msg += " (will be baked during Apply)"
+            self.report({'INFO'}, msg)
         else:
             for tile in layer.udim_tiles:
                 if tile.number == self.tile_number:
                     tile.is_dirty = True
-                    self.report({'INFO'}, f"Marked tile {self.tile_number} as dirty")
+                    msg = f"Marked tile {self.tile_number} as dirty"
+                    if in_fix_session:
+                        msg += " (will be baked during Apply)"
+                    self.report({'INFO'}, msg)
                     break
         
         return {'FINISHED'}
@@ -216,118 +228,191 @@ class PAINTSYSTEM_OT_BakeUDIMTile(PSContextMixin, Operator):
             return {'CANCELLED'}
         
         return {'FINISHED'}
-class PAINTSYSTEM_OT_SyncUVByUDIMTile(PSContextMixin, Operator):
-    """Create per-tile UV map aliases so objects sharing a UDIM tile also share a UV map name.
 
-    Non-destructive: copies coordinates from the source UV map into new UV layers named by tile.
-    """
-    bl_idname = "paint_system.sync_uv_by_udim_tile"
-    bl_label = "Sync UV by UDIM Tile"
+
+class PAINTSYSTEM_OT_SelectObjectsByMaterial(PSContextMixin, Operator):
+    """Select all objects using the active Paint System material"""
+    bl_idname = "paint_system.select_objects_by_material"
+    bl_label = "Select Objects by Material"
     bl_options = {'REGISTER', 'UNDO'}
 
-    scope: EnumProperty(
-        name="Scope",
-        description="Which objects to include",
-        items=[
-            ('MATERIAL_USERS', "Material Users", "All mesh objects using the active material"),
-            ('SELECTED', "Selected Meshes", "Currently selected mesh objects"),
-        ],
-        default='MATERIAL_USERS'
+    extend: BoolProperty(
+        name="Extend Selection",
+        description="Keep current selection and add matching objects",
+        default=False,
     )
-
-    source_uv: StringProperty(
-        name="Source UV Map",
-        description="UV layer to copy from; empty uses the active UV on each object",
-        default=""
-    )
-
-    name_pattern: StringProperty(
-        name="Name Pattern",
-        description="Naming for per-tile UV maps. {tile} expands to UDIM number",
-        default="UV_{tile}"
+    switch_to_edit: BoolProperty(
+        name="Switch to Edit Mode",
+        description="Switch selected objects to Edit mode for UV editing",
+        default=False,
     )
 
     @classmethod
     def poll(cls, context):
-        ps_ctx = cls.parse_context(context)
-        return ps_ctx and ps_ctx.ps_object and ps_ctx.ps_object.type == 'MESH' and ps_ctx.active_material
-
-    def draw(self, context):
-        layout = self.layout
-        ps_ctx = self.parse_context(context)
-        col = layout.column(align=True)
-        col.label(text="Creates per-tile UV map aliases (non-destructive)", icon='INFO')
-        box = layout.box()
-        box.label(text="Scope")
-        box.prop(self, "scope", expand=True)
-
-        box = layout.box()
-        box.label(text="UV Source & Naming", icon='UV')
-        row = box.row()
-        row.prop_search(self, "source_uv", ps_ctx.ps_object.data, "uv_layers", text="Source UV")
-        box.prop(self, "name_pattern")
-        box.label(text=f"Example: {self.name_pattern.format(tile=1001)}")
-
-        # Quick preview of tiles on active object
-        try:
-            obj = ps_ctx.ps_object
-            active = obj.data.uv_layers.active
-            if active:
-                tiles = detect_udim_from_uv(obj)
-                if tiles:
-                    layout.label(text=f"Detected tiles on active: {', '.join(map(str, tiles[:8]))}{'...' if len(tiles)>8 else ''}")
-        except Exception:
-            pass
-
-    def _copy_uv_layer(self, obj: bpy.types.Object, src_name: str, dst_name: str):
-        uv_layers = obj.data.uv_layers
-        src = uv_layers.get(src_name) if src_name else (uv_layers.active if uv_layers.active else None)
-        if not src:
-            return False
-        if dst_name in uv_layers.keys():
-            return True
-        new_layer = uv_layers.new(name=dst_name)
-        try:
-            for i, loop in enumerate(src.data):
-                new_layer.data[i].uv = loop.uv
-        except Exception:
-            pass
-        return True
+        ps_ctx = cls.safe_parse_context(context)
+        return bool(ps_ctx and ps_ctx.active_material)
 
     def execute(self, context):
-        ps_ctx = self.parse_context(context)
+        ps_ctx = self.safe_parse_context(context)
+        if not ps_ctx:
+            self.report({'WARNING'}, "No active paint context")
+            return {'CANCELLED'}
+
         mat = ps_ctx.active_material
 
-        if self.scope == 'MATERIAL_USERS':
-            targets = [o for o in context.scene.objects if o and o.type == 'MESH' and any(ms.material == mat for ms in o.material_slots if ms.material)]
-        else:
-            targets = [o for o in context.selected_objects if o and o.type == 'MESH']
+        # Deselect all if not extending
+        if not self.extend:
+            for o in context.selected_objects:
+                try:
+                    o.select_set(False)
+                except Exception:
+                    pass
 
-        created = 0
-        touched = 0
-        for obj in targets:
+        # Select all mesh objects using this material
+        matched = 0
+        matched_objects = []
+        for obj in context.scene.objects:
+            if getattr(obj, 'type', None) == 'MESH':
+                if any(ms.material == mat for ms in obj.material_slots if ms.material):
+                    try:
+                        obj.select_set(True)
+                        matched += 1
+                        matched_objects.append(obj)
+                    except Exception:
+                        pass
+
+        # Switch to edit mode if requested
+        if self.switch_to_edit and matched_objects:
+            # Set last matched object as active
             try:
-                if not obj.data or not hasattr(obj.data, 'uv_layers') or len(obj.data.uv_layers) == 0:
-                    continue
-                # Use requested source or active per object
-                source_name = self.source_uv if (self.source_uv and self.source_uv in obj.data.uv_layers.keys()) else (obj.data.uv_layers.active.name if obj.data.uv_layers.active else obj.data.uv_layers[0].name)
-                # Temporarily set active to source for detection
-                orig_active = obj.data.uv_layers.active
-                obj.data.uv_layers.active = obj.data.uv_layers[source_name]
-                tiles = detect_udim_from_uv(obj)
-                obj.data.uv_layers.active = orig_active
-                for tile in tiles:
-                    uv_name = self.name_pattern.format(tile=tile)
-                    if uv_name in obj.data.uv_layers.keys():
-                        touched += 1
-                        continue
-                    if self._copy_uv_layer(obj, source_name, uv_name):
-                        created += 1
-                        touched += 1
+                context.view_layer.objects.active = matched_objects[-1]
+            except Exception:
+                pass
+            
+            # Switch to edit mode
+            if context.mode != 'EDIT_MESH':
+                try:
+                    bpy.ops.object.mode_set(mode='EDIT')
+                except Exception as e:
+                    logger.warning(f"Could not switch to edit mode: {e}")
+
+        self.report({'INFO'}, f"Selected {matched} object(s) with material '{mat.name}'")
+        return {'FINISHED'}
+
+
+class PAINTSYSTEM_OT_SelectObjectsByUVTiles(PSContextMixin, Operator):
+    """Select objects that share UDIM tile(s) with the current selection
+
+    - Gathers tiles from selected mesh objects (or active object if none selected)
+    - Restricts to objects using the active material for clarity
+    - Uses the UV map of the active IMAGE layer (or the default PS UV)
+    """
+    bl_idname = "paint_system.select_objects_by_uv_tiles"
+    bl_label = "Select Objects by UV Tiles"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    extend: BoolProperty(
+        name="Extend Selection",
+        description="Keep current selection and add matching objects",
+        default=True,
+    )
+    clear_others: BoolProperty(
+        name="Deselect Others",
+        description="Deselect objects that do not match",
+        default=False,
+    )
+    switch_to_edit: BoolProperty(
+        name="Switch to Edit Mode",
+        description="Switch selected objects to Edit mode for UV editing",
+        default=False,
+    )
+
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.safe_parse_context(context)
+        return bool(ps_ctx and ps_ctx.active_material)
+
+    def execute(self, context):
+        ps_ctx = self.safe_parse_context(context)
+        if not ps_ctx:
+            self.report({'WARNING'}, "No active paint context")
+            return {'CANCELLED'}
+
+        mat = ps_ctx.active_material
+        obj = ps_ctx.ps_object
+        layer = ps_ctx.active_layer
+
+        # Determine source UV name from active layer
+        uv_name = None
+        try:
+            if layer and getattr(layer, 'coord_type', None) == 'UV':
+                uv_name = layer.uv_map_name
+            else:
+                uv_name = DEFAULT_PS_UV_MAP_NAME
+        except Exception:
+            uv_name = None
+
+        # Gather seed objects (selected meshes using the material, else active)
+        seeds = [o for o in context.selected_objects
+                 if getattr(o, 'type', None) == 'MESH' and any(ms.material == mat for ms in o.material_slots if ms.material)]
+        if not seeds and obj and getattr(obj, 'type', None) == 'MESH':
+            seeds = [obj]
+
+        # Collect tiles from seeds
+        seed_tiles = set()
+        for so in seeds:
+            try:
+                tiles = detect_udim_from_uv(so, uv_name)
+                for t in tiles:
+                    seed_tiles.add(int(t))
             except Exception:
                 continue
 
-        self.report({'INFO'}, f"Per-tile UVs: created {created}, available {touched} across {len(targets)} objects")
+        if not seed_tiles:
+            # Fallback to base tile
+            seed_tiles = {1001}
+
+        # Candidate objects: all meshes using the same material
+        candidates = [o for o in context.scene.objects
+                      if getattr(o, 'type', None) == 'MESH' and any(ms.material == mat for ms in o.material_slots if ms.material)]
+
+        # Optionally clear others
+        if self.clear_others and not self.extend:
+            for co in candidates:
+                try:
+                    co.select_set(False)
+                except Exception:
+                    pass
+
+        # Select those that share any tile
+        matched = 0
+        matched_objects = []
+        for co in candidates:
+            try:
+                co_tiles = set(detect_udim_from_uv(co, uv_name))
+                if co_tiles & seed_tiles:
+                    co.select_set(True)
+                    matched += 1
+                    matched_objects.append(co)
+            except Exception:
+                continue
+
+        # Switch to edit mode if requested
+        if self.switch_to_edit and matched_objects:
+            # Set last matched object as active
+            try:
+                context.view_layer.objects.active = matched_objects[-1]
+            except Exception:
+                pass
+            
+            # Switch to edit mode
+            if context.mode != 'EDIT_MESH':
+                try:
+                    bpy.ops.object.mode_set(mode='EDIT')
+                except Exception as e:
+                    logger.warning(f"Could not switch to edit mode: {e}")
+
+        self.report({'INFO'}, f"Selected {matched} object(s) sharing tiles: {sorted(seed_tiles)}")
         return {'FINISHED'}
 
 
@@ -337,7 +422,8 @@ classes = (
     PAINTSYSTEM_OT_MarkUDIMTileDirty,
     PAINTSYSTEM_OT_ClearUDIMTileMarks,
     PAINTSYSTEM_OT_BakeUDIMTile,
-    PAINTSYSTEM_OT_SyncUVByUDIMTile,
+    PAINTSYSTEM_OT_SelectObjectsByMaterial,
+    PAINTSYSTEM_OT_SelectObjectsByUVTiles,
 )
 
 register, unregister = register_classes_factory(classes)

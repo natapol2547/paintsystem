@@ -17,41 +17,49 @@ import logging
 logger = logging.getLogger("PaintSystem")
 
 
-def detect_udim_from_uv(obj: bpy.types.Object) -> List[int]:
-    """
-    Detect which UDIM tiles are used by analyzing UV coordinates.
-    
+def detect_udim_from_uv(obj: bpy.types.Object, uv_layer_name: Optional[str] = None) -> List[int]:
+    """Detect which UDIM tiles are used by analyzing UV coordinates.
+
     Args:
         obj: Mesh object to analyze
-        
+        uv_layer_name: Optional UV layer name to inspect; defaults to active UV layer
+
     Returns:
-        List of UDIM tile numbers (e.g., [1001, 1002, 1003])
+        Sorted list of UDIM tile numbers (e.g., [1001, 1002, 1011])
     """
     if not obj or obj.type != 'MESH':
         return []
-    
+
     mesh = obj.data
-    if not mesh.uv_layers.active:
+    uv_layers = getattr(mesh, 'uv_layers', None)
+    if not uv_layers or len(uv_layers) == 0:
         return []
-    
-    # Get UV coordinates
-    uv_layer = mesh.uv_layers.active.data
-    uv_coords = np.zeros(len(uv_layer) * 2, dtype=np.float32)
-    uv_layer.foreach_get('uv', uv_coords)
-    
-    # Reshape to (n, 2) for easier processing
+
+    layer = uv_layers.get(uv_layer_name) if (uv_layer_name and hasattr(uv_layers, 'get')) else None
+    if not layer:
+        layer = uv_layers.active or uv_layers[0]
+    if not layer:
+        return []
+
+    uv_data = layer.data
+    if not uv_data:
+        return []
+
+    uv_coords = np.zeros(len(uv_data) * 2, dtype=np.float32)
+    uv_data.foreach_get('uv', uv_coords)
+    if uv_coords.size == 0:
+        return []
+
     uvs = uv_coords.reshape(-1, 2)
-    
-    # Find unique tile numbers based on U coordinate
-    # UDIM tile = 1000 + floor(U) + 1
-    u_coords = uvs[:, 0]
-    tile_u_offsets = np.floor(u_coords).astype(int)
-    
-    # Get unique tile numbers
-    unique_tiles = np.unique(tile_u_offsets)
-    tile_numbers = [1001 + offset for offset in unique_tiles if offset >= 0]
-    
-    return sorted(tile_numbers)
+    u_offsets = np.floor(uvs[:, 0]).astype(int)
+    v_offsets = np.floor(uvs[:, 1]).astype(int)
+    valid = (u_offsets >= 0) & (v_offsets >= 0)
+    if not np.any(valid):
+        return []
+
+    tile_numbers = 1001 + u_offsets[valid] + (v_offsets[valid] * 10)
+    unique_tiles = np.unique(tile_numbers)
+    return sorted(int(tile) for tile in unique_tiles)
 
 
 def is_udim_image(image: bpy.types.Image) -> bool:
@@ -125,6 +133,67 @@ def get_udim_tiles_from_image(image: bpy.types.Image) -> List[int]:
                 continue
     
     return sorted(tiles)
+
+
+def copy_udim_tiles(source_image: bpy.types.Image, target_image: bpy.types.Image, 
+                    tile_numbers: List[int]) -> bool:
+    """Copy specific UDIM tiles from source to target image.
+    
+    Args:
+        source_image: Source UDIM image to copy from
+        target_image: Target UDIM image to copy to
+        tile_numbers: List of tile numbers to copy (e.g., [1001, 1002])
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    if not source_image or not target_image:
+        return False
+    
+    if not is_udim_image(source_image) or not is_udim_image(target_image):
+        return False
+    
+    if not hasattr(source_image, 'tiles') or not hasattr(target_image, 'tiles'):
+        return False
+    
+    # Map tile numbers to indices
+    source_tiles = {tile.number: idx for idx, tile in enumerate(source_image.tiles)}
+    target_tiles = {tile.number: idx for idx, tile in enumerate(target_image.tiles)}
+    
+    success_count = 0
+    for tile_num in tile_numbers:
+        if tile_num not in source_tiles or tile_num not in target_tiles:
+            continue
+        
+        try:
+            # Get source and target tile data
+            source_idx = source_tiles[tile_num]
+            target_idx = target_tiles[tile_num]
+            
+            # Copy pixel data
+            width = source_image.size[0]
+            height = source_image.size[1]
+            channels = source_image.channels
+            
+            # Create numpy arrays for pixel data
+            source_pixels = np.zeros(width * height * channels, dtype=np.float32)
+            target_pixels = np.zeros(width * height * channels, dtype=np.float32)
+            
+            # Read source tile
+            source_image.tiles.active_index = source_idx
+            source_image.pixels.foreach_get(source_pixels)
+            
+            # Write to target tile
+            target_image.tiles.active_index = target_idx
+            target_image.pixels.foreach_set(source_pixels)
+            target_image.update()
+            
+            success_count += 1
+        except Exception as e:
+            print(f"Failed to copy tile {tile_num}: {e}")
+            continue
+    
+    return success_count > 0
 
 
 def create_udim_image(name: str, tiles: List[int], width: int = 2048, height: int = 2048,
@@ -372,7 +441,7 @@ def get_udim_filepath_for_tile(base_path: str, tile_number: int) -> str:
     return base_path.replace('<UDIM>', str(tile_number))
 
 
-def suggest_udim_for_object(obj: bpy.types.Object) -> bool:
+def suggest_udim_for_object(obj: bpy.types.Object, uv_layer_name: Optional[str] = None) -> bool:
     """
     Determine if UDIM should be suggested for an object.
     
@@ -385,7 +454,7 @@ def suggest_udim_for_object(obj: bpy.types.Object) -> bool:
     if not obj or obj.type != 'MESH':
         return False
     
-    tiles = detect_udim_from_uv(obj)
+    tiles = detect_udim_from_uv(obj, uv_layer_name)
     return len(tiles) > 1
 
 

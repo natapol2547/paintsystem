@@ -12,6 +12,7 @@ submodules = [
     "versioning_operators",
     "bake_operators",
     "udim_operators",
+    "fix_uv_operators",
 ]
 
 register, unregister = register_submodule_factory(__name__, submodules)

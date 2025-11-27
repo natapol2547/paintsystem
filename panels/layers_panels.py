@@ -475,6 +475,9 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
+        # Hide during UV Fix session
+        if ps_ctx.ps_scene_data and getattr(ps_ctx.ps_scene_data, 'fix_uv_session_active', False):
+            return False
         if ps_ctx.ps_object.type == 'MESH':
             if ps_ctx.active_channel.use_bake_image:
                 return False
@@ -574,9 +577,11 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     uv_row = layout.row(align=True)
                     uv_row.prop_search(active_layer, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="UV Map", icon='GROUP_UVS')
                     uv_row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
+                    uv_row.operator("paint_system.fix_uv_maps_start", text="", icon='LOOP_FORWARDS')
                 elif active_layer.coord_type == 'AUTO':
                     # For AUTO keep transfer button on coordinate/image row
                     coord_image_row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
+                    coord_image_row.operator("paint_system.fix_uv_maps_start", text="", icon='LOOP_FORWARDS')
 
 # Grease Pencil Layer Settings
 
@@ -649,6 +654,9 @@ class MAT_PT_LayerSettingsAdvanced(PSContextMixin, Panel):
         ps_ctx = cls.safe_parse_context(context)
         if not ps_ctx or not ps_ctx.active_layer:
             return False
+        # Hide during UV Fix session
+        if ps_ctx.ps_scene_data and getattr(ps_ctx.ps_scene_data, 'fix_uv_session_active', False):
+            return False
         if ps_ctx.ps_object.type == 'MESH':
             return not getattr(ps_ctx.active_channel, 'use_bake_image', True)
         return False
@@ -695,11 +703,11 @@ class MAT_PT_LayerTransformSettings(PSContextMixin, Panel):
         row.prop(active_layer, "coord_type", text="Coord Type")
         if active_layer.coord_type in ['AUTO', 'UV'] and active_layer.type == 'IMAGE':
             row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
+            row.operator("paint_system.fix_uv_maps_start", text="", icon='LOOP_FORWARDS')
         if active_layer.coord_type == 'UV':
             row_uv = col.row(align=True)
             row_uv.prop_search(active_layer, "uv_map_name", text="UV Map",
                                 search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
-            row_uv.operator("paint_system.sync_layer_uv_name_to_users", text="", icon='FILE_REFRESH')
             row_uv.operator("paint_system.set_active_uv_for_selected", text="", icon='RADIOBUT_ON')
         elif active_layer.coord_type == 'DECAL':
             decal_clip = active_layer.find_node("decal_depth_clip")
@@ -790,10 +798,6 @@ class MAT_PT_ImageLayerSettings(PSContextMixin, Panel):
                     if tiles:
                         tile_count = len(tiles)
                         row.label(text=f"{tile_count} tile{'s' if tile_count != 1 else ''}")
-                    # Per-tile UV sync utility helps keep meshes aligned across UDIMs
-                    col = box.column(align=True)
-                    col.operator_context = 'INVOKE_DEFAULT'
-                    col.operator("paint_system.sync_uv_by_udim_tile", text="Sync UV by UDIM Tile", icon='GROUP_UVS')
             except Exception:
                 pass
         
@@ -825,6 +829,15 @@ class MAT_MT_LayerMenu(PSContextMixin, Menu):
                 "paint_system.convert_to_image_layer",
                 text="Convert to Image Layer",
                 icon_value=get_icon('image')
+            )
+        
+        # Fix UV Maps (for IMAGE layers with UV)
+        if ps_ctx.active_layer and ps_ctx.active_layer.type == 'IMAGE' and ps_ctx.active_layer.uses_coord_type:
+            special_actions = True
+            layout.operator(
+                "paint_system.fix_uv_maps_start",
+                text="Fix UV Maps",
+                icon='LOOP_FORWARDS'
             )
         
         if ps_ctx.unlinked_layer and is_layer_linked(ps_ctx.unlinked_layer):
@@ -1130,12 +1143,32 @@ class MAT_PT_UDIMTileManagement(PSContextMixin, Panel):
         # Tile controls
         controls_box = layout.box()
         col = controls_box.column(align=True)
+        
+        # Check if in Fix UV session
+        ps_scene_data = ps_ctx.ps_scene_data
+        in_fix_session = ps_scene_data and getattr(ps_scene_data, 'fix_uv_session_active', False)
+        
+        if in_fix_session:
+            col.label(text="PS_ UV Workflow:", icon='UV')
+            info_col = col.column(align=True)
+            info_col.scale_y = 0.8
+            info_col.label(text="Mark tiles you edited in PS_ UV", icon='INFO')
+            info_col.label(text="Only marked tiles will be baked", icon='BLANK1')
+            col.separator()
+        
         col.label(text="Tile Actions:", icon='TOOL_SETTINGS')
         row = col.row(align=True)
-        row.operator("paint_system.bake_udim_tile", text="Bake Selected Tiles", icon='RENDER_RESULT')
-        row = col.row(align=True)
-        row.operator("paint_system.mark_udim_tile_dirty", text="Mark as Dirty", icon='ERROR').mark_all = False
-        row.operator("paint_system.clear_udim_tile_marks", text="Clear Marks", icon='X')
+        
+        if in_fix_session:
+            # During Fix UV session, only show marking controls
+            row.operator("paint_system.mark_udim_tile_dirty", text="Mark as Dirty", icon='ERROR').mark_all = False
+            row.operator("paint_system.clear_udim_tile_marks", text="Clear Marks", icon='X')
+        else:
+            # Normal workflow: allow immediate baking
+            row.operator("paint_system.bake_udim_tile", text="Bake Selected Tiles", icon='RENDER_RESULT')
+            row = col.row(align=True)
+            row.operator("paint_system.mark_udim_tile_dirty", text="Mark as Dirty", icon='ERROR').mark_all = False
+            row.operator("paint_system.clear_udim_tile_marks", text="Clear Marks", icon='X')
 
 
 class MAT_PT_UDIMTileList(PSContextMixin, Panel):
@@ -1192,6 +1225,184 @@ class MAT_PT_UDIMTileList(PSContextMixin, Panel):
             bake_op.tile_number = tile.number
 
 
+class MAT_PT_FixUVMapsSession(PSContextMixin, Panel):
+    """Layer Settings panel replacement during Fix UV Maps session"""
+    bl_idname = 'MAT_PT_FixUVMapsSession'
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_label = "Layer Settings"
+    bl_category = 'Paint System'
+    bl_parent_id = 'MAT_PT_Layers'
+
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.ps_scene_data and getattr(ps_ctx.ps_scene_data, 'fix_uv_session_active', False)
+    
+    def draw_header(self, context):
+        layout = self.layout
+        layout.alert = True
+        layout.label(text="UV Fix Mode", icon='ERROR')
+    
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        
+        ps_ctx = self.parse_context(context)
+        ps_scene_data = ps_ctx.ps_scene_data
+        mat = ps_ctx.active_material
+        active_layer = ps_ctx.active_layer
+        obj = ps_ctx.ps_object
+        
+        # Alert status row
+        row = layout.row(align=True)
+        row.alert = True
+        row.label(text="Painting Locked", icon='LOCKED')
+        row.label(text="", icon='BLANK1')
+        row.label(text="Editing UV", icon='UV')
+        
+        layout.separator()
+        
+        # === SECTION 1: UV CONFIGURATION ===
+        
+        # Mode selector (like PS setup)
+        layout.prop(ps_scene_data, 'fix_uv_target_mode', text="")
+        
+        # Original UV info
+        if active_layer and obj and obj.type == 'MESH':
+            source_uv_name = None
+            if active_layer.coord_type == 'UV':
+                source_uv_name = active_layer.uv_map_name
+            elif active_layer.coord_type == 'AUTO':
+                from ..operators.common import DEFAULT_PS_UV_MAP_NAME
+                source_uv_name = DEFAULT_PS_UV_MAP_NAME
+            
+            if source_uv_name:
+                split = layout.split(factor=0.35)
+                split.label(text="Original UV")
+                row = split.row()
+                row.enabled = False
+                row.alignment = 'LEFT'
+                row.label(text=source_uv_name)
+        
+        # Target UV - selector when using existing, text when generating
+        target_mode = getattr(ps_scene_data, 'fix_uv_target_mode', 'COPY_ORIGINAL')
+        has_mesh_uvs = bool(obj and obj.type == 'MESH' and getattr(getattr(obj, 'data', None), 'uv_layers', None))
+        if target_mode == 'USE_EXISTING' and has_mesh_uvs:
+            layout.prop_search(ps_scene_data, 'fix_uv_target_uv_name', obj.data, 'uv_layers', text="Target UV")
+        elif target_mode == 'USE_EXISTING':
+            row = layout.row()
+            row.enabled = False
+            row.label(text="No UV maps on this object", icon='ERROR')
+        else:
+            layout.prop(ps_scene_data, 'fix_uv_target_uv_name', text="New UV")
+        
+        # === DIVIDER ===
+        layout.separator()
+        layout.separator()
+        col = layout.column()
+        col.scale_y = 0.5
+        col.separator()
+        
+        # === SECTION 2: OUTPUT OPTIONS ===
+        
+        # Apply to all layers toggle
+        row = layout.row()
+        row.prop(ps_scene_data, "fix_uv_apply_to_all", text="Apply to All Layers", toggle=True)
+        
+        # Show affected channels info
+        if ps_scene_data.fix_uv_apply_to_all and ps_ctx.active_group:
+            box = layout.box()
+            col = box.column(align=True)
+            col.scale_y = 0.8
+            col.label(text="Channels:", icon='LAYER_ACTIVE')
+            for channel in ps_ctx.active_group.channels:
+                img_layer_count = sum(1 for layer in channel.flattened_layers if layer.type == 'IMAGE')
+                if img_layer_count > 0:
+                    col.label(text=f"  {channel.name} ({img_layer_count} layers)", icon='BLANK1')
+        
+        layout.separator()
+        
+        # Objects scope toggle
+        split = layout.split(factor=0.35)
+        split.label(text="Object Scope")
+        row = split.row(align=True)
+        
+        # Inverted toggle: selected_only=False means "All"
+        selected_only = getattr(ps_scene_data, 'fix_uv_selected_only', True)
+        row.prop(ps_scene_data, "fix_uv_selected_only", text="Selected", toggle=True, invert_checkbox=True)
+        
+        # Show object list when material has users
+        if mat:
+            if selected_only:
+                # Show selected objects
+                selected_meshes = [o for o in context.selected_objects 
+                                  if o.type == 'MESH' and any(ms.material == mat for ms in o.material_slots if ms.material)]
+                
+                if selected_meshes:
+                    box = layout.box()
+                    col = box.column(align=True)
+                    col.scale_y = 0.8
+                    col.label(text=f"{len(selected_meshes)} selected object(s):", icon='RESTRICT_SELECT_ON')
+                    for i, user_obj in enumerate(selected_meshes[:5]):
+                        row = col.row(align=True)
+                        row.label(text="", icon='CHECKBOX_HLT')
+                        row.label(text=user_obj.name, icon='OBJECT_DATA')
+                    if len(selected_meshes) > 5:
+                        row = col.row()
+                        row.scale_y = 0.7
+                        row.label(text=f"... and {len(selected_meshes) - 5} more", icon='THREE_DOTS')
+                else:
+                    box = layout.box()
+                    box.alert = True
+                    box.label(text="No selected objects!", icon='ERROR')
+            else:
+                # Show all material users
+                mat_users = [o for o in context.scene.objects 
+                            if o.type == 'MESH' and any(ms.material == mat for ms in o.material_slots if ms.material)]
+                
+                if len(mat_users) > 1:
+                    box = layout.box()
+                    col = box.column(align=True)
+                    col.scale_y = 0.8
+                    col.label(text=f"{len(mat_users)} object(s) with material:", icon='OBJECT_DATA')
+                    for i, user_obj in enumerate(mat_users[:5]):
+                        row = col.row(align=True)
+                        row.label(text="", icon='CHECKBOX_HLT')
+                        row.label(text=user_obj.name, icon='OBJECT_DATA')
+                    if len(mat_users) > 5:
+                        row = col.row()
+                        row.scale_y = 0.7
+                        row.label(text=f"... and {len(mat_users) - 5} more", icon='THREE_DOTS')
+        
+        # UDIM tile selector (optional)
+        if active_layer and active_layer.is_udim:
+            layout.separator()
+            box = layout.box()
+            box.label(text="UDIM Tiles", icon='UV')
+            row = box.row(align=True)
+            row.scale_y = 0.8
+            row.label(text="Bake specific tiles:", icon='INFO')
+            # TODO: Add tile selection checkboxes when implementing Phase 3
+            row = box.row()
+            row.scale_y = 0.8
+            row.label(text="All tiles will be baked", icon='BLANK1')
+        
+        layout.separator()
+        
+        # Action buttons - horizontal
+        row = layout.row(align=True)
+        row.scale_y = 1.3
+        row.operator("paint_system.fix_uv_maps_apply", 
+                    text="Apply", 
+                    icon='CHECKMARK',
+                    depress=True)
+        row.operator("paint_system.fix_uv_maps_cancel", 
+                    text="Cancel", 
+                    icon='CANCEL')
+
+
 classes = (
     MAT_PT_UL_LayerList,
     MAT_MT_AddLayerMenu,
@@ -1215,6 +1426,7 @@ classes = (
     MAT_PT_UDIMTileManagement,
     MAT_PT_UDIMTileList,
     PAINTSYSTEM_UL_Actions,
+    MAT_PT_FixUVMapsSession,
 )
 
 register, unregister = register_classes_factory(classes)

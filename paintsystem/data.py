@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, List, Literal
+from typing import Dict, List, Literal, Iterable
 import re
 import numpy as np
 import uuid
@@ -218,6 +218,12 @@ FILTER_TYPE_ENUM = [
     ('SHARPEN', "Sharpen", "Sharpen"),
 ]
 
+UV_TARGET_MODE_ENUM = [
+    ('GENERATE_NEW', "Auto UV Unwrap", "Create a fresh UV map with smart unwrap"),
+    ('COPY_ORIGINAL', "Copy UV Map", "Duplicate the layer's current UV layout for manual editing"),
+    ('USE_EXISTING', "Use Existing", "Select an existing UV map to re-bake into (no new UV created)"),
+]
+
 STRING_CACHE = {}
 def intern_enum_items(items):
     def intern_string(s):
@@ -269,6 +275,12 @@ def update_active_image(self=None, context: bpy.types.Context = None):
     active_channel = ps_ctx.active_channel
     if not mat or not active_channel:
         return
+    
+    # Lock painting during Fix UV Maps session
+    if ps_ctx.ps_scene_data and getattr(ps_ctx.ps_scene_data, 'fix_uv_session_active', False):
+        image_paint.canvas = None
+        return
+    
     active_layer = ps_ctx.active_layer
     update_brush_settings(self, context)
 
@@ -572,6 +584,65 @@ def ensure_udim_tiles(image: bpy.types.Image, uv_layer: bpy.types.MeshUVLoopLaye
         with bpy.context.temp_override(edit_image=image):
             bpy.ops.image.tile_add(number=tile, color=(0, 0, 0, 0), width=width, height=height)
     return udim_tiles
+
+def ensure_udim_tiles_for_objects(
+    image: bpy.types.Image,
+    uv_map_name: str,
+    objects: Iterable[bpy.types.Object],
+) -> set[int]:
+    """Ensure UDIM tiles exist for every object using the specified UV map.
+
+    Returns the set of tile numbers detected across all provided objects.
+    """
+    required_tiles: set[int] = set()
+    if not image or not objects:
+        return required_tiles
+
+    try:
+        from ..utils.udim import detect_udim_from_uv
+    except Exception:
+        return required_tiles
+
+    for obj in objects:
+        if not obj or obj.type != 'MESH':
+            continue
+        uv_layers = getattr(obj.data, 'uv_layers', None)
+        if not uv_layers or (uv_map_name and uv_map_name not in uv_layers.keys()):
+            continue
+        try:
+            tiles = detect_udim_from_uv(obj, uv_map_name)
+            required_tiles.update(tiles)
+        except Exception:
+            continue
+
+    if not required_tiles:
+        return required_tiles
+
+    if hasattr(image, 'source') and image.source != 'TILED':
+        image.source = 'TILED'
+
+    existing_tiles = {tile.number for tile in getattr(image, 'tiles', [])} if hasattr(image, 'tiles') else set()
+    for tile in sorted(required_tiles):
+        if tile in existing_tiles:
+            continue
+        try:
+            if hasattr(image, 'tiles'):
+                image.tiles.new(tile_number=tile)
+            else:
+                raise RuntimeError("Image does not expose tiles API")
+        except Exception:
+            try:
+                with bpy.context.temp_override(edit_image=image):
+                    bpy.ops.image.tile_add(
+                        number=tile,
+                        color=(0, 0, 0, 0),
+                        width=image.size[0],
+                        height=image.size[1],
+                    )
+            except Exception:
+                continue
+        existing_tiles.add(tile)
+    return required_tiles
 
 def create_ps_image(name: str, width: int = 2048, height: int = 2048, use_udim_tiles: bool = False, uv_layer: bpy.types.MeshUVLoopLayer = None):
     img = bpy.data.images.new(
@@ -1866,16 +1937,42 @@ class Channel(BaseNestedListManager):
             raise ValueError("Node tree not found")
         ps_context = parse_context(context)
         obj = ps_context.ps_object
-        
+        if not obj:
+            raise ValueError("Paint System object not found for baking")
+        other_objects: list[Object] = []
+        all_targets: list[Object] = []
+        if obj:
+            all_targets.append(obj)
+
+        scene = getattr(context, 'scene', None)
+        if multi_object and mat and scene:
+            try:
+                mat_users = [o for o in scene.objects
+                             if o.type == 'MESH' and any(ms.material == mat for ms in o.material_slots if ms.material)]
+                for candidate in mat_users:
+                    if not candidate or candidate == obj:
+                        continue
+                    uv_layers = getattr(candidate.data, 'uv_layers', None)
+                    if not uv_layers:
+                        continue
+                    if uv_layer in uv_layers.keys():
+                        other_objects.append(candidate)
+                        continue
+                    if uv_layer:
+                        _sync_uv_map_to_name(candidate, uv_layer)
+                    if uv_layer and uv_layer in getattr(candidate.data, 'uv_layers', {}).keys():
+                        other_objects.append(candidate)
+            except Exception as e:
+                print(f"Multi-object bake gather failed: {e}")
+
+        all_targets.extend(o for o in other_objects if o not in all_targets)
+
         # UDIM validation: ensure tiles match UV layout if UDIM image
         try:
-            from ..utils.udim import is_udim_image, detect_udim_from_uv
-            if is_udim_image(bake_image):
-                if obj and obj.type == 'MESH' and hasattr(obj.data, 'uv_layers') and obj.data.uv_layers.get(uv_layer):
-                    uv_layer_data = obj.data.uv_layers[uv_layer]
-                    required_tiles = detect_udim_from_uv(obj)
-                    # ensure_udim_tiles called via existing helper
-                    ensure_udim_tiles(bake_image, uv_layer_data)
+            from ..utils.udim import is_udim_image
+            if is_udim_image(bake_image) and all_targets:
+                required_tiles = ensure_udim_tiles_for_objects(bake_image, uv_layer, all_targets)
+                if required_tiles:
                     print(f"UDIM bake: {len(required_tiles)} tiles detected for '{uv_layer}'")
         except Exception as e:
             print(f"UDIM validation warning: {e}")
@@ -1886,22 +1983,6 @@ class Channel(BaseNestedListManager):
         # Build selection set (multi-object bake) before bake nodes get inserted.
         bpy.ops.object.mode_set(mode="OBJECT")
         bpy.ops.object.select_all(action='DESELECT')
-        other_objects = []
-        if multi_object:
-            try:
-                # Gather all mesh objects sharing the material and UV layer
-                mat_users = [o for o in context.scene.objects
-                             if o.type == 'MESH' and any(ms.material == mat for ms in o.material_slots if ms.material)]
-                for o in mat_users:
-                    if o != obj and uv_layer in (o.data.uv_layers.keys() if o.data and hasattr(o.data, 'uv_layers') else []):
-                        other_objects.append(o)
-                    elif o != obj:
-                        # Attempt to sync UV name so this object can participate
-                        _sync_uv_map_to_name(o, uv_layer)
-                        if uv_layer in (o.data.uv_layers.keys() if o.data and hasattr(o.data, 'uv_layers') else []):
-                            other_objects.append(o)
-            except Exception as e:
-                print(f"Multi-object bake gather failed: {e}")
         obj.select_set(True)
         for o in other_objects:
             o.select_set(True)
@@ -2454,6 +2535,386 @@ class PaintSystemGlobalData(PropertyGroup):
         description="Hex color of the brush",
         default="#000000",
         update=update_hex_color,
+    )
+    
+    # Fix UV Maps Session State (runtime only)
+    fix_uv_session_active: BoolProperty(
+        name="Fix UV Session Active",
+        description="UV fixing session is currently active",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    fix_uv_target_mode: EnumProperty(
+        name="Target UV Mode",
+        description="How to create the target UV map",
+        items=UV_TARGET_MODE_ENUM,
+        default='GENERATE_NEW',
+        options={'SKIP_SAVE'}
+    )
+    fix_uv_target_uv_name: StringProperty(
+        name="Target UV Name",
+        description="Name for the new UV map",
+        default="UVMap",
+        options={'SKIP_SAVE'}
+    )
+    fix_uv_apply_to_all: BoolProperty(
+        name="Apply to All Layers/Channels",
+        description="Apply UV fix to all IMAGE layers across all channels in active group",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    fix_uv_selected_only: BoolProperty(
+        name="Selected Objects Only",
+        description="Only fix UV for selected objects (useful for fixing single UDIM tiles)",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    fix_uv_smart_project_angle: FloatProperty(
+        name="Angle Limit",
+        description="Angle limit for smart UV project",
+        default=66.0,
+        min=1.0,
+        max=89.0,
+        subtype='ANGLE',
+        options={'SKIP_SAVE'}
+    )
+    fix_uv_smart_project_margin: FloatProperty(
+        name="Island Margin",
+        description="Margin between UV islands",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        options={'SKIP_SAVE'}
+    )
+    fix_uv_bake_scope: EnumProperty(
+        name="Bake Scope",
+        description="Choose whether to bake all IMAGE layers or only the active layer",
+        items=[
+            ('ALL', "Bake All Layers to New UV", "Bake all IMAGE layers across channels to the new UV"),
+            ('ACTIVE', "Bake Layer to New UV", "Bake only the active IMAGE layer to the new UV"),
+        ],
+        default='ALL',
+        options={'SKIP_SAVE'}
+    )
+    
+    fix_uv_preserve_tiles: BoolProperty(
+        name="Preserve Unchanged Tiles",
+        description="For UDIM: Only bake tiles that were painted/modified, preserve others from original image",
+        default=True,
+        options={'SKIP_SAVE'}
+    )
+    
+    fix_uv_painted_tiles: StringProperty(
+        name="Painted Tiles",
+        description="Comma-separated list of UDIM tiles that were painted (e.g., '1001,1002')",
+        default="",
+        options={'SKIP_SAVE'}
+    )
+    
+    fix_uv_cleanup_old: BoolProperty(
+        name="Remove Old UV Maps",
+        description="Remove the old UV map after successful baking (keeps new one only)",
+        default=True,
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_target_mode: EnumProperty(
+        name="Target Mode",
+        description="How to handle the target UV map",
+        items=[
+            ('USE_EXISTING', "Choose Existing", "Select an existing UV map"),
+            ('CREATE_NEW', "Create New UV", "Create a new UV map with custom name"),
+            ('CREATE_AUTOMATIC', "Create Automatic UV", "Create and unwrap UV automatically"),
+        ],
+        default='USE_EXISTING',
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_target_uv_name: StringProperty(
+        name="UV Tools Target",
+        description="Existing UV map to sync to",
+        default="",
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_new_uv_name: StringProperty(
+        name="UV Tools New Name",
+        description="Base name for new PS_ UV maps",
+        default="UVMap",
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_cleanup_mode: EnumProperty(
+        name="UV Cleanup Mode",
+        description="Which UV maps to remove after syncing",
+        items=[
+            ('NONE', "Keep Others", "Keep all other UV maps"),
+            ('PS_ONLY', "Remove PS_", "Remove other PS_ prefixed UV maps"),
+            ('ALL', "Remove All", "Remove every other UV map"),
+        ],
+        default='PS_ONLY',
+        options={'SKIP_SAVE'}
+    )
+    uv_cleanup_last_processed: IntProperty(
+        name="Cleanup Objects",
+        description="Number of objects processed in last cleanup",
+        default=0,
+        options={'SKIP_SAVE'}
+    )
+    uv_cleanup_last_removed: IntProperty(
+        name="Removed UVs",
+        description="Number of UV maps removed in last cleanup",
+        default=0,
+        options={'SKIP_SAVE'}
+    )
+    uv_cleanup_last_keep_name: StringProperty(
+        name="Kept UV Name",
+        description="The unified UV name kept during last cleanup",
+        default="",
+        options={'SKIP_SAVE'}
+    )
+    active_editing_uv: StringProperty(
+        name="Active Editing UV",
+        description="UV map currently being edited in the UV Editor (locks this UV from bake overrides)",
+        default="",
+        options={'SKIP_SAVE'}
+    )
+    lock_editing_uv: BoolProperty(
+        name="Lock Editing UV",
+        description="Prevent the active editing UV from being overwritten during bake operations",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_editing_mode: BoolProperty(
+        name="UV Tools Editing Mode",
+        description="Whether UV editing mode is active (setup vs editing stage)",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_show_advanced: BoolProperty(
+        name="Show Advanced Options",
+        description="Show advanced UV tools options",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    fix_uv_smart_angle: FloatProperty(
+        name="Smart UV Angle",
+        description="Angle limit for Smart UV Project",
+        default=66.0,
+        min=1.0,
+        max=89.0,
+        subtype='ANGLE',
+        options={'SKIP_SAVE'}
+    )
+    fix_uv_smart_margin: FloatProperty(
+        name="Smart UV Margin",
+        description="Island margin for Smart UV Project",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        options={'SKIP_SAVE'}
+    )
+    bake_selected_tiles_only: BoolProperty(
+        name="Bake Selected Tiles Only",
+        description="Only bake UDIM tiles that have been edited (requires tile tracking)",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    # UV Tools Image Settings (shown in UV Edit panel, used by Bake & Transfer)
+    uv_tools_image_name: StringProperty(
+        name="Image Name",
+        description="Name for the baked image",
+        default="New Image",
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_use_udim: BoolProperty(
+        name="Use UDIM",
+        description="Create UDIM tiled image for multi-tile UV layouts",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_udim_auto_detect: BoolProperty(
+        name="Auto-detect UDIM",
+        description="Automatically detect UDIM tiles from UV layout",
+        default=True,
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_image_resolution: EnumProperty(
+        name="Resolution",
+        description="Image resolution preset",
+        items=[
+            ('1024', "1024", "1024x1024"),
+            ('2048', "2048", "2048x2048"),
+            ('4096', "4096", "4096x4096"),
+            ('8192', "8192", "8192x8192"),
+            ('CUSTOM', "Custom", "Custom Resolution"),
+        ],
+        default='2048',
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_image_width: IntProperty(
+        name="Width",
+        default=1024,
+        min=1,
+        description="Width of the image in pixels",
+        subtype='PIXEL',
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_image_height: IntProperty(
+        name="Height",
+        default=1024,
+        min=1,
+        description="Height of the image in pixels",
+        subtype='PIXEL',
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_use_udim_tiles: BoolProperty(
+        name="Use Existing UDIM Tiles",
+        description="Use UDIM tiles detected on the mesh's UV layout",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_image_colorspace: EnumProperty(
+        name="Color Space",
+        description="Color space for the baked image",
+        items=[
+            ('sRGB', "sRGB", "Standard sRGB color space"),
+            ('Non-Color', "Non-Color", "Linear data for masks/utility maps"),
+        ],
+        default='sRGB',
+        options={'SKIP_SAVE'}
+    )
+    # Bake texture settings
+    uv_tools_bake_width: IntProperty(
+        name="Bake Width",
+        description="Width to bake at (before output scaling)",
+        default=1024,
+        min=1,
+        subtype='PIXEL',
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_bake_height: IntProperty(
+        name="Bake Height",
+        description="Height to bake at (before output scaling)",
+        default=1024,
+        min=1,
+        subtype='PIXEL',
+        options={'SKIP_SAVE'}
+    )
+    # Unified square size (updates all bake/output dims). UI will expose only this.
+    def update_uv_square_size(self, context):
+        try:
+            w = int(getattr(self, 'uv_tools_square_size', 1024))
+            self.uv_tools_bake_width = w
+            self.uv_tools_bake_height = w
+            self.uv_tools_output_width = w
+            self.uv_tools_output_height = w
+        except Exception:
+            pass
+    uv_tools_square_size: IntProperty(
+        name="Size",
+        description="Square bake & output size (width = height)",
+        default=1024,
+        min=1,
+        subtype='PIXEL',
+        update=update_uv_square_size,
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_output_width: IntProperty(
+        name="Output Width",
+        description="Final output image width",
+        default=1024,
+        min=1,
+        subtype='PIXEL',
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_output_height: IntProperty(
+        name="Output Height",
+        description="Final output image height",
+        default=1024,
+        min=1,
+        subtype='PIXEL',
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_bake_margin: IntProperty(
+        name="Bake Margin",
+        description="Margin in pixels for baking",
+        default=4,
+        min=0,
+        subtype='PIXEL',
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_margin_type: EnumProperty(
+        name="Margin Type",
+        description="How to extend the baked area beyond UV islands",
+        items=[
+            ('ADJACENT_FACES', "Adjacent Faces", "Extend using adjacent face data"),
+            ('EXTEND', "Extend", "Extend by repeating edge pixels"),
+        ],
+        default='ADJACENT_FACES',
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_use_float32: BoolProperty(
+        name="32-bit Float",
+        description="Use 32-bit float precision for baking",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_transparent_background: BoolProperty(
+        name="Transparent Background",
+        description="Use transparent background for baked image",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_clear_image: BoolProperty(
+        name="Clear Existing Image",
+        description="Clear image before baking",
+        default=True,
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_anti_aliasing: BoolProperty(
+        name="Anti-aliasing",
+        description="Enable anti-aliasing for smoother bakes",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_multi_object: BoolProperty(
+        name="Multiple Objects to One Texture Set",
+        description="Bake multiple objects using the same material to one texture set",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_show_cleanup: BoolProperty(
+        name="Show Cleanup Options",
+        description="Show UV cleanup options in UV Tools panel",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_overwrite_original: BoolProperty(
+        name="Overwrite Original Image",
+        description="Overwrite the original image instead of creating a new one",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_keep_original_uv: BoolProperty(
+        name="Keep Original UV",
+        description="Keep the original UV map after cleanup",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_original_active_uv: StringProperty(
+        name="Original Active UV",
+        description="Store original active UV before entering UV edit mode to restore on cancel",
+        default="",
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_clean_all_old_uvs: BoolProperty(
+        name="Clean All Old UVs",
+        description="After bake remove all other UV maps except target (and original if kept)",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    uv_tools_copy_objects_after_bake: BoolProperty(
+        name="Copy Objects After Bake",
+        description="Duplicate baked material user objects with '_Baked' suffix using new UV/image",
+        default=False,
+        options={'SKIP_SAVE'}
     )
     
     def add_layer_to_clipboard(self, layer: "Layer"):

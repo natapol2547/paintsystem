@@ -79,6 +79,94 @@ class MAT_PT_PaintSystemQuickToolsDisplay(PSContextMixin, Panel):
                  text="", icon='MOD_MESHDEFORM')
 
 
+class MAT_PT_PaintSystemQuickToolsSelection(PSContextMixin, Panel):
+    bl_idname = 'MAT_PT_PaintSystemQuickToolsSelection'
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_label = "Object Selection"
+    bl_category = 'Quick Tools'
+    bl_options = {'DEFAULT_CLOSED'}
+
+    def draw_header(self, context):
+        layout = self.layout
+        layout.label(icon="RESTRICT_SELECT_OFF")
+
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.safe_parse_context(context)
+        return bool(ps_ctx and ps_ctx.active_material)
+
+    def draw(self, context):
+        ps_ctx = self.parse_context(context)
+        layout = self.layout
+        
+        box = layout.box()
+        row = box.row()
+        row.alignment = "CENTER"
+        row.label(text="Select by Material:", icon="MATERIAL")
+        
+        col = box.column(align=True)
+        scale_content(context, col, 1.3, 1.3)
+        
+        # Select all objects with material
+        sel_all_op = col.operator("paint_system.select_objects_by_material", 
+                                   text="Select All Objects", icon='RESTRICT_SELECT_OFF')
+        sel_all_op.extend = False
+        sel_all_op.switch_to_edit = False
+        
+        # Edit mode variant
+        sel_edit_op = col.operator("paint_system.select_objects_by_material",
+                                    text="Select + Edit Mode", icon='EDITMODE_HLT')
+        sel_edit_op.extend = False
+        sel_edit_op.switch_to_edit = True
+        
+        # UDIM-specific selection with tile picker
+        active_layer = ps_ctx.active_layer
+        if active_layer and getattr(active_layer, 'is_udim', False):
+            try:
+                from ..utils.udim import get_udim_tiles_from_image
+                if active_layer.image:
+                    tiles = get_udim_tiles_from_image(active_layer.image)
+                    if tiles and len(tiles) > 1:
+                        box.separator()
+                        row = box.row()
+                        row.alignment = "CENTER"
+                        row.label(text="Select by UDIM Tile:", icon="UV")
+                        
+                        tile_col = box.column(align=True)
+                        scale_content(context, tile_col, 1.0, 1.0)
+                        
+                        # Grid of tiles (3 per row)
+                        for i in range(0, len(tiles), 3):
+                            tile_row = tile_col.row(align=True)
+                            for tile_num in tiles[i:i+3]:
+                                sel_tile_op = tile_row.operator("paint_system.select_objects_by_uv_tiles",
+                                                               text=str(tile_num))
+                                sel_tile_op.extend = False
+                                sel_tile_op.clear_others = True
+                                sel_tile_op.switch_to_edit = True
+                    else:
+                        # Fallback for single tile
+                        box.separator()
+                        col = box.column(align=True)
+                        scale_content(context, col, 1.3, 1.3)
+                        sel_tile_op = col.operator("paint_system.select_objects_by_uv_tiles",
+                                                   text="Select by Tile", icon='UV')
+                        sel_tile_op.extend = False
+                        sel_tile_op.clear_others = True
+                        sel_tile_op.switch_to_edit = True
+            except Exception:
+                # Fallback if UDIM utils not available
+                box.separator()
+                col = box.column(align=True)
+                scale_content(context, col, 1.3, 1.3)
+                sel_tile_op = col.operator("paint_system.select_objects_by_uv_tiles",
+                                           text="Select by Tile", icon='UV')
+                sel_tile_op.extend = False
+                sel_tile_op.clear_others = True
+                sel_tile_op.switch_to_edit = True
+
+
 class MAT_PT_PaintSystemQuickToolsMesh(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_PaintSystemQuickToolsMesh'
     bl_space_type = "VIEW_3D"
@@ -162,6 +250,7 @@ class MAT_PT_PaintSystemQuickToolsMesh(PSContextMixin, Panel):
 
 classes = (
     MAT_PT_PaintSystemQuickToolsDisplay,
+    MAT_PT_PaintSystemQuickToolsSelection,
     MAT_PT_PaintSystemQuickToolsMesh,
 )
 
