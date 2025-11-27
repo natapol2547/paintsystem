@@ -253,13 +253,35 @@ def toggle_paint_mode_ui(layout: bpy.types.UILayout, context: bpy.types.Context)
     active_group = ps_ctx.active_group
     active_channel = ps_ctx.active_channel
     mat = ps_ctx.active_material
+    obj = ps_ctx.ps_object
+
     col = layout.column(align=True)
     row = col.row(align=True)
     row.scale_y = 1.7
     row.scale_x = 1.7
-    paint_row = row.row(align=True)
-    paint_row.operator("paint_system.toggle_paint_mode",
-        text="Toggle Paint Mode", depress=current_mode != 'OBJECT', icon_value=get_icon('paintbrush'))
+
+    # Mode buttons grid (adapts to N-panel width)
+    grid = row.grid_flow(columns=0, even_columns=True, even_rows=True, align=True)
+
+    # Only show paint/edit/sculpt options for Mesh objects
+    if obj.type == 'MESH':
+        # Texture Paint button
+        op = grid.operator("paint_system.set_mode", text="",
+                           depress=current_mode == 'PAINT_TEXTURE',
+                           icon='TPAINT_HLT')
+        op.mode = 'TEXTURE_PAINT'
+
+        # Edit Mode button (context.mode reports 'EDIT_MESH' for meshes)
+        op = grid.operator("paint_system.set_mode", text="",
+                           depress=current_mode == 'EDIT_MESH',
+                           icon='EDITMODE_HLT')
+        op.mode = 'EDIT'
+
+        # Sculpt Mode button
+        op = grid.operator("paint_system.set_mode", text="",
+                           depress=current_mode == 'SCULPT',
+                           icon='SCULPTMODE_HLT')
+        op.mode = 'SCULPT'
     
     group_node = find_node(mat.node_tree, {
                                 'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree})
@@ -272,7 +294,7 @@ def toggle_paint_mode_ui(layout: bpy.types.UILayout, context: bpy.types.Context)
     # Baking and Exporting
     
     if ps_ctx.ps_object.type == 'MESH':
-        paint_row.enabled = not active_channel.use_bake_image
+        grid.enabled = not (active_channel and getattr(active_channel, 'use_bake_image', False))
         if ps_ctx.ps_settings.show_tooltips and not ps_ctx.ps_settings.hide_norm_paint_tips and active_group.template in {'NORMAL', 'PBR'} and any(channel.name == 'Normal' for channel in active_group.channels) and active_channel.name == 'Normal':
             row = col.row(align=True)
             row.scale_y = 1.5

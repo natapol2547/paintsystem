@@ -22,20 +22,55 @@ class MAT_PT_PaintSystemQuickToolsDisplay(PSContextMixin, Panel):
         ps_ctx = self.parse_context(context)
         obj = ps_ctx.active_object
         layout = self.layout
+        
+        # Safety check for space
+        if not context.area or not context.area.spaces:
+            return
         space = context.area.spaces[0]
+        if space.type != 'VIEW_3D':
+            return
 
         box = layout.box()
-        if obj:
+        if obj and hasattr(obj, 'mode'):
             row = box.row()
             scale_content(context, row)
-            row.prop(obj,
-                 "show_wire", text="Toggle Wireframe", icon='MOD_WIREFRAME')
+            # Different wireframe toggle based on mode
+            if obj.mode == 'EDIT':
+                # In edit mode, toggle overlay wireframe
+                overlay = space.overlay
+                if overlay:
+                    row.prop(overlay, "show_wireframes", text="Toggle Wireframe", icon='MOD_WIREFRAME')
+            else:
+                # In object mode, toggle object wireframe display
+                row.prop(obj, "show_wire", text="Toggle Wireframe", icon='MOD_WIREFRAME')
+        
         row = box.row()
-        if not ps_ctx.ps_settings.use_compact_design:
+        if ps_ctx.ps_settings and not ps_ctx.ps_settings.use_compact_design:
             row.scale_y = 1
             row.scale_x = 1
-        row.prop(space, "show_gizmo", text="Toggle Gizmo", icon='GIZMO')
+        
+        # Toggle gizmo button with state memory
+        gizmos_enabled = (space.show_gizmo_object_translate or 
+                         space.show_gizmo_object_rotate or 
+                         space.show_gizmo_object_scale)
+        
+        # Check if in paint/sculpt mode
+        in_paint_mode = obj and obj.mode in {'PAINT_TEXTURE', 'SCULPT', 'PAINT_VERTEX', 'PAINT_WEIGHT'}
+        
+        # In paint mode, show the stored preference state (what gizmos will be when exiting)
+        # Otherwise show actual gizmo state
+        if in_paint_mode:
+            wm = context.window_manager
+            stored_enabled = wm.get("ps_gizmo_translate", True) or wm.get("ps_gizmo_rotate", True) or wm.get("ps_gizmo_scale", False)
+            display_state = stored_enabled
+        else:
+            display_state = gizmos_enabled
+        
+        row.operator("paint_system.toggle_transform_gizmos", text="Transform Gizmo", icon='GIZMO', depress=display_state)
+        
+        # Individual gizmo type toggles (grayed out when main toggle is off or in paint mode)
         row = row.row(align=True)
+        row.enabled = gizmos_enabled and not in_paint_mode
         row.prop(space, "show_gizmo_object_translate",
                  text="", icon='EMPTY_ARROWS')
         row.prop(space, "show_gizmo_object_rotate",
@@ -61,9 +96,17 @@ class MAT_PT_PaintSystemQuickToolsMesh(PSContextMixin, Panel):
         ps_ctx = self.parse_context(context)
         obj = ps_ctx.active_object
         layout = self.layout
+        
+        # Safety check for space
+        if not context.area or not context.area.spaces:
+            return
         space = context.area.spaces[0]
+        if space.type != 'VIEW_3D':
+            return
+        
         overlay = space.overlay
-        mode_string = context.mode
+        if not overlay:
+            return
 
         box = layout.box()
         row = box.row()
@@ -101,7 +144,7 @@ class MAT_PT_PaintSystemQuickToolsMesh(PSContextMixin, Panel):
         row = box.row()
         row.alignment = "CENTER"
         row.label(text="Transforms:", icon="EMPTY_ARROWS")
-        if obj and (obj.scale[0] != 1 or obj.scale[1] != 1 or obj.scale[0] != 1):
+        if obj and hasattr(obj, 'scale') and (obj.scale[0] != 1 or obj.scale[1] != 1 or obj.scale[2] != 1):
             box1 = box.box()
             box1.alert = True
             col = box1.column(align=True)
@@ -117,35 +160,9 @@ class MAT_PT_PaintSystemQuickToolsMesh(PSContextMixin, Panel):
             "object.origin_set", text="Set Origin", property="type", icon="EMPTY_AXIS")
 
 
-class MAT_PT_PaintSystemQuickToolsPaint(PSContextMixin, Panel):
-    bl_idname = 'MAT_PT_PaintSystemQuickToolsPaint'
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_label = "Paint"
-    bl_category = 'Quick Tools'
-    # bl_parent_id = 'MAT_PT_PaintSystemQuickTools'
-    
-    @classmethod
-    def poll(cls, context):
-        ps_ctx = cls.parse_context(context)
-        obj = ps_ctx.active_object
-        return hasattr(obj, "mode") and obj.mode == 'TEXTURE_PAINT'
-    
-    def draw_header(self, context):
-        layout = self.layout
-        layout.label(icon="BRUSHES_ALL")
-    
-    def draw(self, context):
-        layout = self.layout
-        row = layout.row()
-        scale_content(context, row, 1.5, 1.5)
-        row.operator("paint_system.quick_edit", text="Edit Externally", icon='IMAGE')
-
-
 classes = (
     MAT_PT_PaintSystemQuickToolsDisplay,
     MAT_PT_PaintSystemQuickToolsMesh,
-    MAT_PT_PaintSystemQuickToolsPaint,
 )
 
-register, unregister = register_classes_factory(classes)    
+register, unregister = register_classes_factory(classes)  # type: ignore[misc]

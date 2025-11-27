@@ -1,7 +1,8 @@
 import bpy
+import inspect
 from bpy.types import Operator
 from bpy.utils import register_classes_factory
-from bpy.props import StringProperty, BoolProperty
+from bpy.props import StringProperty, BoolProperty, IntProperty, EnumProperty
 
 from .common import PSContextMixin, PSImageCreateMixin, PSUVOptionsMixin, DEFAULT_PS_UV_MAP_NAME
 
@@ -12,6 +13,12 @@ from ..panels.common import get_icon_from_channel
 class BakeOperator(PSContextMixin, PSImageCreateMixin, Operator):
     """Bake the active channel"""
     bl_options = {'REGISTER', 'UNDO'}
+    multi_object: BoolProperty(
+        name="All Material Users",
+        description="Include all mesh objects using the active material (shared UV space) in the bake",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
     
     def invoke(self, context, event):
         """Invoke the operator to create a new channel."""
@@ -28,26 +35,26 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
     bl_label = "Bake Channel"
     bl_description = "Bake the active channel"
     bl_options = {'REGISTER', 'UNDO'}
-    
+
     as_layer: BoolProperty(
         name="As Layer",
         description="Bake the channel as a layer",
         default=False,
         options={'SKIP_SAVE'}
     )
-    
+
     as_tangent_normal: BoolProperty(
         name="As Tangent Normal",
         description="Bake the channel as a tangent normal",
         default=False,
         options={'SKIP_SAVE'}
     )
-    
+
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
         return ps_ctx.active_channel
-    
+
     def draw(self, context):
         layout = self.layout
         ps_ctx = self.parse_context(context)
@@ -56,33 +63,46 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
         box.label(text="UV Map", icon='UV')
         box.prop_search(self, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="")
         if ps_ctx.active_channel.type == "VECTOR":
-            box = layout.box()
-            box.prop(self, "as_tangent_normal")
-    
+            tangent_box = layout.box()
+            tangent_box.prop(self, "as_tangent_normal")
+        layout.prop(self, "multi_object")
+
     def invoke(self, context, event):
         ps_ctx = self.parse_context(context)
         self.as_tangent_normal = ps_ctx.active_channel.bake_vector_space == 'TANGENT'
         return super().invoke(context, event)
-    
     def execute(self, context):
         # Set cursor to wait
         context.window.cursor_set('WAIT')
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
         mat = ps_ctx.active_material
-        self.image_name = f"{active_channel.name}_Baked"
+
+        # Build bake image name: "MaterialName_ChannelName"
+        mat_name = mat.name if mat else "Material"
+        channel_name = active_channel.name
+        self.image_name = f"{mat_name}_{channel_name}"
+
         self.image_width = int(self.image_resolution)
         self.image_height = int(self.image_resolution)
-        
+
         bake_image = None
         if self.as_layer:
             bake_image = self.create_image(context)
             bake_image.colorspace_settings.name = 'sRGB'
-            active_channel.bake(context, mat, bake_image, self.uv_map_name, force_alpha=True, as_tangent_normal=self.as_tangent_normal)
+            sig = inspect.signature(active_channel.bake)
+            bake_kwargs = {}
+            if 'force_alpha' in sig.parameters:
+                bake_kwargs['force_alpha'] = True
+            if 'as_tangent_normal' in sig.parameters:
+                bake_kwargs['as_tangent_normal'] = self.as_tangent_normal
+            if 'multi_object' in sig.parameters:
+                bake_kwargs['multi_object'] = self.multi_object
+            active_channel.bake(context, mat, bake_image, self.uv_map_name, **bake_kwargs)
             active_channel.create_layer(
-                context, 
-                layer_name=self.image_name, 
-                layer_type="IMAGE", 
+                context,
+                layer_name=self.image_name,
+                layer_type="IMAGE",
                 insert_at="START",
                 image=bake_image,
                 coord_type='UV',
@@ -97,9 +117,15 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
             elif bake_image.size[0] != self.image_width or bake_image.size[1] != self.image_height:
                 bake_image.scale(self.image_width, self.image_height)
             active_channel.bake_uv_map = self.uv_map_name
-                
+
             active_channel.use_bake_image = False
-            active_channel.bake(context, mat, bake_image, self.uv_map_name, as_tangent_normal=self.as_tangent_normal)
+            sig = inspect.signature(active_channel.bake)
+            bake_kwargs = {}
+            if 'as_tangent_normal' in sig.parameters:
+                bake_kwargs['as_tangent_normal'] = self.as_tangent_normal
+            if 'multi_object' in sig.parameters:
+                bake_kwargs['multi_object'] = self.multi_object
+            active_channel.bake(context, mat, bake_image, self.uv_map_name, **bake_kwargs)
             if self.as_tangent_normal:
                 active_channel.bake_vector_space = 'TANGENT'
             else:
@@ -130,6 +156,7 @@ class PAINTSYSTEM_OT_BakeAllChannels(BakeOperator):
         box = layout.box()
         box.label(text="UV Map", icon='UV')
         box.prop_search(self, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="")
+        layout.prop(self, "multi_object")
     
     def execute(self, context):
         # Set cursor to wait
@@ -154,7 +181,11 @@ class PAINTSYSTEM_OT_BakeAllChannels(BakeOperator):
                 
             channel.use_bake_image = False
             channel.bake_uv_map = self.uv_map_name
-            channel.bake(context, mat, bake_image, self.uv_map_name)
+            sig = inspect.signature(channel.bake)
+            if 'multi_object' in sig.parameters:
+                channel.bake(context, mat, bake_image, self.uv_map_name, multi_object=self.multi_object)
+            else:
+                channel.bake(context, mat, bake_image, self.uv_map_name)
             channel.use_bake_image = True
         # Return to object mode
         bpy.ops.object.mode_set(mode="OBJECT")
@@ -306,7 +337,6 @@ class PAINTSYSTEM_OT_ExportAllImages(PSContextMixin, Operator):
         
         if exported_count > 0:
             self.report({'INFO'}, f"Exported {exported_count} images to {self.directory}")
-        
         if failed_count > 0:
             self.report({'WARNING'}, f"Failed to export {failed_count} images")
         
@@ -353,59 +383,370 @@ class PAINTSYSTEM_OT_DeleteBakedImage(PSContextMixin, Operator):
 
 class PAINTSYSTEM_OT_TransferImageLayerUV(PSContextMixin, PSUVOptionsMixin, Operator):
     bl_idname = "paint_system.transfer_image_layer_uv"
-    bl_label = "Transfer Image Layer UV"
-    bl_description = "Transfer the UV of the image layer"
+    bl_label = "Bake to Different UV Layout"
+    bl_description = "Re-bake this layer's texture using a different UV map layout"
     bl_options = {'REGISTER', 'UNDO'}
-    
+
+    bake_single_tile: BoolProperty(
+        name="Single UDIM Tile",
+        description="Bake only one UDIM tile to a new image while targeting the selected UV map",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    tile_number: IntProperty(
+        name="Tile Number",
+        description="UDIM tile number to bake (1001 = first tile)",
+        default=1001,
+        min=1001,
+        max=2000,
+        options={'SKIP_SAVE'}
+    )
+    normalize_tile_uv: BoolProperty(
+        name="Normalize Tile UVs",
+        description="Remap tile UVs into 0-1 space (recommended)",
+        default=True,
+        options={'SKIP_SAVE'}
+    )
+    multi_object: BoolProperty(
+        name="All Material Users",
+        description="Include all mesh objects using the active material (shared UV space) in the bake",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
         return ps_ctx.active_channel and ps_ctx.active_layer.type == 'IMAGE' and ps_ctx.active_layer.image
-    
+
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self)
-    
+
     def draw(self, context):
         layout = self.layout
         ps_ctx = self.parse_context(context)
+        active_layer = ps_ctx.active_layer
+
         box = layout.box()
-        box.label(text="UV Map", icon='UV')
-        box.prop_search(self, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="")
+        col = box.column(align=True)
+        col.label(text="This will re-bake the layer texture to a", icon='INFO')
+        col.label(text="different UV map layout.", icon='BLANK1')
+
+        if active_layer and active_layer.image:
+            box = layout.box()
+            box.label(text="Current Layer", icon='IMAGE_DATA')
+            row = box.row()
+            row.label(text=f"  Texture: {active_layer.image.name}")
+            try:
+                from ..utils.udim import is_udim_image, get_udim_tiles_from_image
+                if is_udim_image(active_layer.image):
+                    tiles = get_udim_tiles_from_image(active_layer.image)
+                    row = box.row()
+                    row.label(text=f"  UDIM: {len(tiles)} tiles", icon='UV')
+            except Exception:
+                pass
+
+        # Target UV selection
+        box = layout.box()
+        box.label(text="Select Target UV Map", icon='UV')
+        box.prop_search(self, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="UV Map")
+
+        # Optional single-tile bake
+        try:
+            from ..utils.udim import is_udim_image, get_udim_tiles_from_image
+            if active_layer.image and is_udim_image(active_layer.image):
+                tile_box = layout.box()
+                tile_box.label(text="Optional: Bake Single UDIM Tile", icon='UV')
+                tile_box.prop(self, "bake_single_tile")
+                if self.bake_single_tile:
+                    row = tile_box.row(align=True)
+                    row.prop(self, "tile_number")
+                    row.prop(self, "normalize_tile_uv")
+                    tile_box.prop(self, "multi_object")
+                    tiles = get_udim_tiles_from_image(active_layer.image)
+                    if tiles:
+                        prev = ', '.join(str(t) for t in tiles[:12])
+                        tile_box.label(text=f"Available: {prev}{'...' if len(tiles) > 12 else ''}")
+        except Exception:
+            pass
+
+        # Material users preview
+        mat = ps_ctx.active_material
+        if mat:
+            mat_users = [o for o in context.scene.objects if o.type == 'MESH' and any(ms.material == mat for ms in o.material_slots if ms.material)]
+            if len(mat_users) > 1:
+                box = layout.box()
+                box.label(text=f"Shared Material ({len(mat_users)} objects)", icon='MATERIAL')
+                col = box.column(align=True)
+                for obj in mat_users[:3]:
+                    col.label(text=f"  • {obj.name}", icon='OBJECT_DATA')
+                if len(mat_users) > 3:
+                    col.label(text=f"  • ... {len(mat_users) - 3} more", icon='BLANK1')
+
+    # Helpers
+    def _get_targets(self, context, ps_ctx):
+        mat = ps_ctx.active_material
+        if self.multi_object and mat:
+            return [o for o in context.scene.objects if o and o.type == 'MESH' and any(ms.material == mat for ms in o.material_slots if ms.material)]
+        return [ps_ctx.ps_object] if ps_ctx.ps_object and ps_ctx.ps_object.type == 'MESH' else []
+
+    def _ensure_uv_map(self, obj: bpy.types.Object, target_uv: str, source_uv: str | None = None):
+        uvs = obj.data.uv_layers
+        if target_uv in uvs.keys():
+            return uvs[target_uv]
+        layer = uvs.new(name=target_uv)
+        if source_uv and source_uv in uvs.keys():
+            src = uvs[source_uv]
+            for i, loop in enumerate(src.data):
+                layer.data[i].uv = loop.uv
+        return layer
+
+    def _dedupe_uvs(self, obj: bpy.types.Object, name: str):
+        uvs = obj.data.uv_layers
+        seen = False
+        for layer in list(uvs):
+            if layer.name == name:
+                if not seen:
+                    seen = True
+                else:
+                    try:
+                        uvs.remove(layer)
+                    except Exception:
+                        pass
+
+    def _make_temp_tile_uv(self, obj: bpy.types.Object, src_uv: str, tgt_uv: str, tile_number: int, normalize: bool = True) -> str:
+        uvs = obj.data.uv_layers
+        temp_name = "PS_TEMP_TILE"
+        if temp_name in uvs.keys():
+            try:
+                uvs.remove(uvs[temp_name])
+            except Exception:
+                pass
+        temp = uvs.new(name=temp_name)
+        src = uvs[src_uv]
+        tgt = uvs[tgt_uv]
+        u_index = (tile_number - 1001) % 10
+        v_index = (tile_number - 1001) // 10
+        face_in_tile = [True] * len(obj.data.polygons)
+        for poly in obj.data.polygons:
+            inside = True
+            for li in poly.loop_indices:
+                suv = src.data[li].uv
+                if int(suv.x) != u_index or int(suv.y) != v_index:
+                    inside = False
+                    break
+            face_in_tile[poly.index] = inside
+        for poly in obj.data.polygons:
+            for li in poly.loop_indices:
+                if face_in_tile[poly.index]:
+                    tuv = tgt.data[li].uv
+                    temp.data[li].uv = (tuv.x - u_index, tuv.y - v_index) if normalize else tuv
+                else:
+                    temp.data[li].uv = (2.5, 2.5)
+        return temp_name
+
+    def _cleanup_temp_uv(self, obj: bpy.types.Object, temp_name: str):
+        uvs = obj.data.uv_layers
+        if temp_name in uvs.keys():
+            try:
+                uvs.remove(uvs[temp_name])
+            except Exception:
+                pass
 
     def execute(self, context):
-        # Set cursor to wait
         context.window.cursor_set('WAIT')
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
         active_layer = ps_ctx.active_layer
         if not active_channel:
             return {'CANCELLED'}
-        
+
+        # Single UDIM tile bake path (non-destructive UV sync)
+        if self.bake_single_tile:
+            try:
+                from ..utils.udim import is_udim_image
+            except Exception:
+                is_udim_image = lambda img: False
+            img = active_layer.image
+            if not (img and is_udim_image(img)):
+                self.report({'ERROR'}, "Active layer image is not UDIM.")
+                context.window.cursor_set('DEFAULT')
+                return {'CANCELLED'}
+
+            targets = self._get_targets(context, ps_ctx)
+            if not targets:
+                self.report({'ERROR'}, "No mesh targets found.")
+                context.window.cursor_set('DEFAULT')
+                return {'CANCELLED'}
+
+            # Ensure target UV exists and dedupe on each target
+            for obj in targets:
+                if not obj or obj.type != 'MESH' or not obj.data:
+                    continue
+                uvs = obj.data.uv_layers
+                src_uv = uvs.active.name if uvs.active else (list(uvs)[0].name if len(uvs) else None)
+                self._ensure_uv_map(obj, self.uv_map_name, src_uv)
+                self._dedupe_uvs(obj, self.uv_map_name)
+
+            # Build temp masked UV per object (mask by source active UV's tile membership)
+            temp_name = "PS_TEMP_TILE"
+            built = []
+            for obj in targets:
+                uvs = obj.data.uv_layers
+                # Prefer the layer's current UV (source) if available; fallback to object's active
+                src_name = None
+                try:
+                    if getattr(active_layer, 'coord_type', 'UV') == 'UV' and getattr(active_layer, 'uv_map_name', '') in uvs.keys():
+                        src_name = active_layer.uv_map_name
+                except Exception:
+                    src_name = None
+                if not src_name:
+                    src_name = uvs.active.name if uvs.active else (list(uvs)[0].name if len(uvs) else self.uv_map_name)
+                if self.uv_map_name not in uvs.keys():
+                    self._ensure_uv_map(obj, self.uv_map_name, src_name)
+                self._make_temp_tile_uv(obj, src_name, self.uv_map_name, self.tile_number, self.normalize_tile_uv)
+                built.append(obj)
+
+            # Create target image and bake using temp UV name
+            tile_image = bpy.data.images.new(name=f"{img.name}_Tile{self.tile_number}", width=img.size[0], height=img.size[1], alpha=True)
+            tile_image.colorspace_settings.name = 'sRGB'
+
+            to_be_enabled_layers = []
+            for layer in active_channel.layers:
+                if layer.enabled and layer != active_layer:
+                    to_be_enabled_layers.append(layer)
+                    layer.enabled = False
+            original_blend_mode = get_layer_blend_type(active_layer)
+            set_layer_blend_type(active_layer, 'MIX')
+            orig_is_clip = bool(active_layer.is_clip)
+            if active_layer.is_clip:
+                active_layer.is_clip = False
+
+            try:
+                import inspect as _inspect
+                sig = _inspect.signature(active_channel.bake)
+                if 'multi_object' in sig.parameters:
+                    active_channel.bake(context, ps_ctx.active_material, tile_image, temp_name, use_group_tree=False, force_alpha=True, multi_object=self.multi_object)
+                else:
+                    active_channel.bake(context, ps_ctx.active_material, tile_image, temp_name, use_group_tree=False, force_alpha=True)
+            except Exception:
+                active_channel.bake(context, ps_ctx.active_material, tile_image, temp_name, use_group_tree=False, force_alpha=True)
+
+            if active_layer.is_clip != orig_is_clip:
+                active_layer.is_clip = orig_is_clip
+            set_layer_blend_type(active_layer, original_blend_mode)
+            for layer in to_be_enabled_layers:
+                layer.enabled = True
+
+            # Cleanup temp UVs
+            for obj in built:
+                self._cleanup_temp_uv(obj, temp_name)
+
+            # Build/replace into a proper UDIM image and assign
+            try:
+                from ..utils.udim import (
+                    is_udim_image,
+                    get_udim_tiles_from_image,
+                    create_udim_image,
+                    copy_image_to_udim_tile,
+                    copy_udim_tile_to_udim_tile,
+                )
+            except Exception:
+                is_udim_image = lambda img: False
+                get_udim_tiles_from_image = lambda img: []
+                create_udim_image = None
+                copy_image_to_udim_tile = None
+                copy_udim_tile_to_udim_tile = None
+
+            tiles = []
+            src_is_udim = bool(img and is_udim_image(img))
+            if src_is_udim:
+                try:
+                    tiles = get_udim_tiles_from_image(img)
+                except Exception:
+                    tiles = []
+            if not tiles:
+                tiles = [self.tile_number]
+            if self.tile_number not in tiles:
+                tiles.append(self.tile_number)
+            tiles = sorted(set(tiles))
+
+            udim_image = None
+            if create_udim_image:
+                udim_name = f"{img.name}_UDIM"
+                udim_image = create_udim_image(udim_name, tiles, width=img.size[0], height=img.size[1], alpha=True)
+
+            if udim_image and copy_image_to_udim_tile:
+                # If source was UDIM, preserve other tiles by copying from source
+                if src_is_udim and copy_udim_tile_to_udim_tile:
+                    for t in tiles:
+                        if t == self.tile_number:
+                            continue
+                        try:
+                            copy_udim_tile_to_udim_tile(img, t, udim_image)
+                        except Exception:
+                            pass
+                # Replace baked tile
+                try:
+                    copy_image_to_udim_tile(udim_image, self.tile_number, tile_image)
+                except Exception:
+                    pass
+                # Assign UDIM image to layer
+                active_layer.coord_type = 'UV'
+                active_layer.uv_map_name = self.uv_map_name
+                active_layer.image = udim_image
+            else:
+                # Fallback: assign the baked single image
+                active_layer.coord_type = 'UV'
+                active_layer.uv_map_name = self.uv_map_name
+                active_layer.image = tile_image
+            context.window.cursor_set('DEFAULT')
+            self.report({'INFO'}, f"Baked tile {self.tile_number} to {'UDIM' if udim_image else 'image'} using UV '{self.uv_map_name}'.")
+            return {'FINISHED'}
+
+        # Full bake (ensure target UV exists across targets and bake once)
+        targets = self._get_targets(context, ps_ctx)
+        for obj in targets:
+            if not obj or obj.type != 'MESH' or not obj.data:
+                continue
+            uvs = obj.data.uv_layers
+            src_uv = uvs.active.name if uvs.active else (list(uvs)[0].name if len(uvs) else None)
+            if src_uv:
+                self._ensure_uv_map(obj, self.uv_map_name, src_uv)
+                self._dedupe_uvs(obj, self.uv_map_name)
+
         transferred_image = bpy.data.images.new(name=f"{active_layer.image.name}_Transferred", width=active_layer.image.size[0], height=active_layer.image.size[1], alpha=True)
-        
+
         to_be_enabled_layers = []
-        # Ensure all layers are disabled except the active layer
         for layer in active_channel.layers:
             if layer.enabled and layer != active_layer:
                 to_be_enabled_layers.append(layer)
                 layer.enabled = False
-        
+
         original_blend_mode = get_layer_blend_type(active_layer)
         set_layer_blend_type(active_layer, 'MIX')
         orig_is_clip = bool(active_layer.is_clip)
         if active_layer.is_clip:
             active_layer.is_clip = False
-        active_channel.bake(context, ps_ctx.active_material, transferred_image, self.uv_map_name, use_group_tree=False, force_alpha=True)
+
+        try:
+            import inspect as _inspect
+            sig = _inspect.signature(active_channel.bake)
+            if 'multi_object' in sig.parameters:
+                active_channel.bake(context, ps_ctx.active_material, transferred_image, self.uv_map_name, use_group_tree=False, force_alpha=True, multi_object=self.multi_object)
+            else:
+                active_channel.bake(context, ps_ctx.active_material, transferred_image, self.uv_map_name, use_group_tree=False, force_alpha=True)
+        except Exception:
+            active_channel.bake(context, ps_ctx.active_material, transferred_image, self.uv_map_name, use_group_tree=False, force_alpha=True)
+
         if active_layer.is_clip != orig_is_clip:
             active_layer.is_clip = orig_is_clip
         set_layer_blend_type(active_layer, original_blend_mode)
         active_layer.coord_type = 'UV'
         active_layer.uv_map_name = self.uv_map_name
         active_layer.image = transferred_image
-        # Restore the layers
         for layer in to_be_enabled_layers:
             layer.enabled = True
-        # Set cursor back to default
         context.window.cursor_set('DEFAULT')
         return {'FINISHED'}
 
@@ -604,6 +945,8 @@ class PAINTSYSTEM_OT_MergeUp(PSContextMixin, PSImageCreateMixin, Operator):
     def get_above_layer(self, context, unprocessed: bool = False):
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
+        if not active_channel:
+            return None
         active_layer = ps_ctx.unlinked_layer if unprocessed else ps_ctx.active_layer
         flattened_layers = active_channel.flattened_unlinked_layers if unprocessed else active_channel.flattened_layers
         if active_layer and flattened_layers.index(active_layer) > 0:
@@ -613,6 +956,8 @@ class PAINTSYSTEM_OT_MergeUp(PSContextMixin, PSImageCreateMixin, Operator):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
+        if not ps_ctx.active_channel:
+            return False
         active_layer = ps_ctx.active_layer
         above_layer = cls.get_above_layer(cls, context)
         if not above_layer:

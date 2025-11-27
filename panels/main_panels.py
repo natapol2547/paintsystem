@@ -175,6 +175,15 @@ class MAT_PT_PaintSystemMaterialSettings(PSContextMixin, Panel):
             row.operator("paint_system.new_group", icon='ADD', text="")
             row.operator("paint_system.delete_group", icon='REMOVE', text="")
 
+        # Utilities
+        if ob and ob.type == 'MESH' and mat is not None:
+            util_box = layout.box()
+            util_box.label(text="Utilities", icon='TOOL_SETTINGS')
+            row = util_box.row(align=True)
+            # Assign active material to selected meshes (with default UV sync)
+            op = row.operator("paint_system.assign_active_material_to_selected", text="Assign to Selected", icon='MATERIAL')
+            op.sync_uv = True
+
 class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_PaintSystemMainPanel'
     bl_space_type = "VIEW_3D"
@@ -227,6 +236,10 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
         ps_ctx = self.parse_context(context)
         if not ps_ctx.ps_settings.use_legacy_ui and ps_ctx.active_channel:
             toggle_paint_mode_ui(layout, context)
+            # Expose Use Baked Image only in the main panel when a baked image exists
+            if ps_ctx.ps_object.type == 'MESH' and ps_ctx.active_channel.bake_image:
+                row = layout.row(align=True)
+                row.prop(ps_ctx.active_channel, "use_bake_image", text="Use Baked Image", icon="TEXTURE_DATA")
         ob = ps_ctx.ps_object
         if ob.type != 'MESH':
             return

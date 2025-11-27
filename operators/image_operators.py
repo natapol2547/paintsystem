@@ -24,6 +24,39 @@ else:
 
 import os
 
+class PAINTSYSTEM_OT_ImageMakeSingleUser(PSContextMixin, Operator):
+    bl_idname = "paint_system.image_make_single_user"
+    bl_label = "Make Single User"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Create a unique copy of this image and assign it to the layer so it has a single user"
+
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        if not ps_ctx or not ps_ctx.active_layer:
+            return {'CANCELLED'}
+        layer = ps_ctx.active_layer
+        image = None
+        # Prefer layer image, fallback to channel bake image
+        if ps_ctx.active_channel.use_bake_image:
+            image = ps_ctx.active_channel.bake_image
+        else:
+            image = getattr(layer, 'image', None)
+        if not image:
+            self.report({'WARNING'}, "No image to make single user")
+            return {'CANCELLED'}
+        try:
+            new_image = image.copy()
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to copy image: {e}")
+            return {'CANCELLED'}
+        # Assign new image back
+        if ps_ctx.active_channel.use_bake_image:
+            ps_ctx.active_channel.bake_image = new_image
+        else:
+            layer.image = new_image
+        self.report({'INFO'}, f"Made single user copy: {new_image.name}")
+        return {'FINISHED'}
+
 class PAINTSYSTEM_OT_InvertColors(PSImageFilterMixin, Operator):
     bl_idname = "paint_system.invert_colors"
     bl_label = "Invert Colors"
@@ -376,6 +409,7 @@ if PIL_AVAILABLE:
 
 # Conditionally build classes list based on PIL availability
 classes = [
+    PAINTSYSTEM_OT_ImageMakeSingleUser,
     PAINTSYSTEM_OT_InvertColors,
     PAINTSYSTEM_OT_ResizeImage,
     PAINTSYSTEM_OT_ClearImage,

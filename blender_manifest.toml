@@ -18,9 +18,9 @@ type = "add-on"
 tags = ["Paint"]
 
 blender_version_min = "4.2.0"
-# # Optional: Blender version that the extension does not support, earlier versions are supported.
-# # This can be omitted and defined later on the extensions platform if an issue is found.
-# blender_version_max = "5.1.0"
+# Optimized for Blender 5.0 and Bforartists compatibility
+# Uses runtime API detection (getattr/hasattr) instead of hard version checks
+# No maximum version constraint - forward compatible by design
 
 # License conforming to https://spdx.org/licenses/ (use "SPDX: prefix)
 # https://docs.blender.org/manual/en/dev/advanced/extensions/licenses.html

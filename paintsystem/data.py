@@ -5,6 +5,8 @@ import numpy as np
 import uuid
 from collections import Counter
 import math
+import threading
+import logging
 
 import bpy
 from bpy.app.handlers import persistent
@@ -59,6 +61,44 @@ from .graph import (
 from .graph.common import get_library_nodetree, get_library_object, DEFAULT_PS_UV_MAP_NAME
 from .nested_list_manager import BaseNestedListManager, BaseNestedListItem
 
+
+def update_node_tree(self, context):
+    """Module-level dispatcher for Property update callbacks."""
+    method = getattr(self.__class__, "update_node_tree", None)
+    if callable(method):
+        return method(self, context)
+    return None
+
+def _sync_uv_across_material_users(material: Material, target_uv_name: str):
+    if not material or not target_uv_name:
+        return
+    try:
+        scene = bpy.context.scene
+        for obj in getattr(scene, 'objects', []):
+            try:
+                if obj and obj.type == 'MESH' and any(ms.material == material for ms in obj.material_slots if ms.material):
+                    _sync_uv_map_to_name(obj, target_uv_name)
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+def update_uv_map_name_and_sync(self, context):
+    """Update hook for uv_map_name that also ensures all material users have this UV.
+
+    Keeps Paint System invariant: a layer uses one UV map name across all material users.
+    """
+    try:
+        ps_ctx = parse_context(context)
+        mat = getattr(ps_ctx, 'active_material', None)
+        coord = getattr(self, 'coord_type', 'UV')
+        uvn = getattr(self, 'uv_map_name', '')
+        if mat and coord == 'UV' and uvn:
+            _sync_uv_across_material_users(mat, uvn)
+    except Exception:
+        pass
+    return update_node_tree(self, context)
+
 BLEND_MODES = []
 for blend_mode in bpy.types.ShaderNodeMixRGB.bl_rna.properties['blend_type'].enum_items:
     BLEND_MODES.append((blend_mode.identifier, blend_mode.name, blend_mode.description))
@@ -70,6 +110,7 @@ for blend_mode in bpy.types.ShaderNodeMixRGB.bl_rna.properties['blend_type'].enu
 TEMPLATE_ENUM = [
     ('BASIC', "Basic", "Basic painting setup", "IMAGE", 0),
     ('PAINT_OVER', "Paint Over", "Paint over the existing material", get_icon('paintbrush'), 1),
+    ('CONVERT', "Convert to Paint System", "Convert existing material to the Paint System", get_icon('paintbrush'), 5),
     ('PBR', "PBR", "PBR painting setup", "MATERIAL", 2),
     ('NORMAL', "Normals Painting", "Start off with a normal painting setup", "NORMALS_VERTEX_FACE", 3),
     ('NONE', "None", "Just add node group to material", "NONE", 4),
@@ -90,9 +131,11 @@ LAYER_TYPE_ENUM = [
 ]
 
 CHANNEL_TYPE_ENUM = [
-    ('COLOR', "Color", "Color channel", get_icon('color_socket'), 1),
-    ('VECTOR', "Vector", "Vector channel", get_icon('vector_socket'), 2),
-    ('FLOAT', "Value", "Value channel", get_icon('float_socket'), 3),
+    # Note: Numeric identifiers set to 0,1,2 to maintain compatibility with older .blend files
+    # that stored '0' for Color. This avoids RNA warnings like: value '0' matches no enum.
+    ('COLOR', "Color", "Color channel", get_icon('color_socket'), 0),
+    ('VECTOR', "Vector", "Vector channel", get_icon('vector_socket'), 1),
+    ('FLOAT', "Value", "Value channel", get_icon('float_socket'), 2),
 ]
 
 GRADIENT_TYPE_ENUM = [
@@ -261,6 +304,52 @@ def update_active_group(self, context):
     active_group = ps_ctx.active_group
     if active_group:
         active_group.update_node_tree(context)
+
+# Initialize logger for Paint System
+logger = logging.getLogger("PaintSystem")
+logger.setLevel(logging.WARNING)  # Change to DEBUG for verbose logging
+
+# Cache for get_all_layers to avoid expensive iteration every frame
+_all_layers_cache = None
+_all_layers_cache_dirty = True
+
+def invalidate_layers_cache():
+    """Mark layers cache as dirty - call when layers are added/removed/modified"""
+    global _all_layers_cache_dirty
+    _all_layers_cache_dirty = True
+
+# Debounce timer for update_node_tree calls
+_update_node_tree_timers = {}  # key: (layer_uid, context_hash) -> Timer
+_update_node_tree_lock = threading.Lock()
+UPDATE_NODE_TREE_DEBOUNCE_DELAY = 0.05  # 50ms debounce
+
+def debounced_update_node_tree(layer, context):
+    """Debounced version of update_node_tree to batch rapid consecutive calls"""
+    if not hasattr(layer, 'uid') or not layer.uid:
+        # Fallback to immediate update for layers without UID
+        layer.update_node_tree(context)
+        return
+    
+    key = (layer.uid, id(context))
+    
+    with _update_node_tree_lock:
+        # Cancel existing timer if present
+        if key in _update_node_tree_timers:
+            _update_node_tree_timers[key].cancel()
+        
+        # Create new timer
+        def execute_update():
+            try:
+                layer.update_node_tree(context)
+            except Exception as e:
+                logger.error(f"Error in debounced update_node_tree for layer {layer.layer_name}: {e}")
+            finally:
+                with _update_node_tree_lock:
+                    _update_node_tree_timers.pop(key, None)
+        
+        timer = threading.Timer(UPDATE_NODE_TREE_DEBOUNCE_DELAY, execute_update)
+        _update_node_tree_timers[key] = timer
+        timer.start()
 
 def find_channels_containing_layer(check_layer: "Layer") -> list["Channel"]:
     channels = []
@@ -568,6 +657,27 @@ class GlobalLayer(PropertyGroup):
             case "IMAGE":
                 if self.image:
                     self.image.name = self.layer_name
+                    try:
+                        from ..utils.udim import is_udim_image, get_udim_tiles_from_image
+                        if is_udim_image(self.image):
+                            if not self.is_udim:
+                                self.is_udim = True
+                            desired_tiles = get_udim_tiles_from_image(self.image)
+                            if desired_tiles:
+                                existing_numbers = {tile.number for tile in self.udim_tiles}
+                                desired_set = set(desired_tiles)
+                                if existing_numbers != desired_set:
+                                    self.udim_tiles.clear()
+                                    for tile_number in sorted(desired_set):
+                                        tile = self.udim_tiles.add()
+                                        tile.number = tile_number
+                                        tile.is_painted = False
+                                        tile.is_dirty = False
+                        elif self.is_udim:
+                            self.is_udim = False
+                            self.udim_tiles.clear()
+                    except Exception as e:
+                        logger.debug(f"UDIM auto-detect failed for layer {self.layer_name}: {e}")
                 layer_graph = create_image_graph(self)
             case "FOLDER":
                 layer_graph = create_folder_graph(self)
@@ -623,7 +733,11 @@ class GlobalLayer(PropertyGroup):
     # Not used anymore
     def update_layer_name(self, context):
         """Update the layer name to ensure uniqueness."""
-        new_name = get_next_unique_name(self.layer_name, [layer.layer_name for layer in context.scene.ps_scene_data.layers if layer != self])
+        ps_scene_data = getattr(context.scene, 'ps_scene_data', None)
+        existing_names = []
+        if ps_scene_data and hasattr(ps_scene_data, 'layers'):
+            existing_names = [layer.layer_name for layer in ps_scene_data.layers if layer != self]
+        new_name = get_next_unique_name(self.layer_name, existing_names)
         if new_name != self.layer_name:
             self.layer_name = new_name
         self.update_node_tree(context)
@@ -708,7 +822,7 @@ class GlobalLayer(PropertyGroup):
     uv_map_name: StringProperty(
         name="UV Map",
         description="Name of the UV map to use",
-        update=update_node_tree
+        update=update_uv_map_name_and_sync
     )
     adjustment_type: EnumProperty(
         items=ADJUSTMENT_TYPE_ENUM,
@@ -796,6 +910,26 @@ def add_empty_to_collection(context: bpy.types.Context, empty_object: bpy.types.
     collection = get_paint_system_collection(context)
     if empty_object.name not in collection.objects:
         collection.objects.link(empty_object)
+
+class UDIMTile(PropertyGroup):
+    """Represents a single UDIM tile"""
+    number: IntProperty(
+        name="Tile Number",
+        description="UDIM tile number (e.g., 1001, 1002)",
+        default=1001,
+        min=1001,
+        max=2000
+    )
+    is_painted: BoolProperty(
+        name="Is Painted",
+        description="Whether this tile has painted content",
+        default=False
+    )
+    is_dirty: BoolProperty(
+        name="Is Dirty",
+        description="Whether this tile needs to be saved",
+        default=False
+    )
 
 class Layer(BaseNestedListItem):
     """Base class for material layers in the Paint System"""
@@ -917,7 +1051,11 @@ class Layer(BaseNestedListItem):
     # Not used anymore
     def update_layer_name(self, context):
         """Update the layer name to ensure uniqueness."""
-        new_name = get_next_unique_name(self.layer_name, [layer.layer_name for layer in context.scene.ps_scene_data.layers if layer != self])
+        ps_scene_data = getattr(context.scene, 'ps_scene_data', None)
+        existing_names = []
+        if ps_scene_data and hasattr(ps_scene_data, 'layers'):
+            existing_names = [layer.layer_name for layer in ps_scene_data.layers if layer != self]
+        new_name = get_next_unique_name(self.layer_name, existing_names)
         if new_name != self.layer_name:
             self.layer_name = new_name
         self.update_node_tree(context)
@@ -1012,7 +1150,7 @@ class Layer(BaseNestedListItem):
     uv_map_name: StringProperty(
         name="UV Map",
         description="Name of the UV map to use",
-        update=update_node_tree
+        update=update_uv_map_name_and_sync
     )
     adjustment_type: EnumProperty(
         items=ADJUSTMENT_TYPE_ENUM,
@@ -1081,11 +1219,17 @@ class Layer(BaseNestedListItem):
         default=False,
         update=update_active_channel
     )
+    
+    def _update_enabled_with_cache_invalidation(self, context):
+        """Update callback for enabled property that invalidates cache"""
+        update_node_tree(self, context)
+        invalidate_layers_cache()
+    
     enabled: BoolProperty(
         name="Enabled",
         description="Toggle layer visibility",
         default=True,
-        update=update_node_tree,
+        update=_update_enabled_with_cache_invalidation,
         options=set()
     )
     lock_alpha: BoolProperty(
@@ -1094,6 +1238,19 @@ class Layer(BaseNestedListItem):
         default=False,
         update=update_brush_settings
     )
+    
+    # UDIM support
+    is_udim: BoolProperty(
+        name="Is UDIM",
+        description="Whether this layer uses UDIM tiles",
+        default=False
+    )
+    udim_tiles: CollectionProperty(
+        type=UDIMTile,
+        name="UDIM Tiles",
+        description="Collection of UDIM tiles used by this layer"
+    )
+    
     def update_blend_mode(self, context: Context):
         layer_data = self.get_layer_data()
         layer_data.update_node_tree(context)
@@ -1349,7 +1506,7 @@ def restore_cycles_settings(settings):
     scene.cycles.use_denoising = settings['use_denoising']
     scene.cycles.use_adaptive_sampling = settings['use_adaptive_sampling']
 
-def ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu=True):
+def ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu=True, other_objects=None):
     node_tree = mat.node_tree
     
     image_node = node_tree.nodes.new(type='ShaderNodeTexImage')
@@ -1358,7 +1515,11 @@ def ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu=True):
     cycles_settings = save_cycles_settings()
     # Switch to Cycles if needed
     
-    with context.temp_override(active_object=obj, selected_objects=[obj]):
+    selected = [obj]
+    if other_objects:
+        # Filter out duplicates and non-mesh types defensively
+        selected.extend([o for o in other_objects if o and o.type == 'MESH' and o != obj])
+    with context.temp_override(active_object=obj, selected_objects=selected):
         bake_params = {
             "type": 'EMIT',
         }
@@ -1388,6 +1549,44 @@ def ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu=True):
     restore_cycles_settings(cycles_settings)
 
     return bake_image
+
+# --- Multi-object UV synchronization helpers ---
+def _sync_uv_map_to_name(obj: bpy.types.Object, target_uv_name: str) -> None:
+    """Ensure the object has a UV layer named target_uv_name.
+
+    Strategy:
+    1. If already present -> nothing to do.
+    2. If single UV layer present -> rename it to target_uv_name (assume shared space).
+    3. Else create a new UV layer with target_uv_name and copy coordinates from the active layer.
+    
+    Note:
+        UDIM-safe: Preserves UV tile layout when copying coordinates.
+    """
+    try:
+        if obj.type != 'MESH' or not obj.data or not hasattr(obj.data, 'uv_layers'):
+            return
+        uv_layers = obj.data.uv_layers
+        if target_uv_name in uv_layers.keys():
+            return  # Already present
+        if len(uv_layers) == 1:
+            # Safe rename (preserves UDIM layout)
+            uv_layers[0].name = target_uv_name
+            print(f"UV sync: renamed -> '{target_uv_name}' on {obj.name}")
+            return
+        # Create new layer and copy data from active (maintains tile positions)
+        src = uv_layers.active or uv_layers[0]
+        new_layer = uv_layers.new(name=target_uv_name)
+        # Copy loop UVs (preserves UDIM tile positions)
+        try:
+            for i, loop in enumerate(src.data):
+                new_layer.data[i].uv = loop.uv
+            print(f"UV sync: created '{target_uv_name}' (copied from '{src.name}') on {obj.name}")
+        except Exception as e:
+            print(f"UV data copy warning: {e}")
+        # Set newly created as active for consistency
+        uv_layers.active = new_layer
+    except Exception as e:
+        print(f"UV sync failed for {obj.name}: {e}")
 
 class Channel(BaseNestedListManager):
     """Custom data for material layers in the Paint System"""
@@ -1597,6 +1796,10 @@ class Channel(BaseNestedListManager):
         layer.auto_update_node_tree = True
         layer.update_node_tree(context)
         self.update_node_tree(context)
+        invalidate_layers_cache()  # Cache invalidation after layer creation
+        ps_ctx = parse_context(context)
+        if ps_ctx.active_material:
+            _invalidate_material_layer_cache(ps_ctx.active_material)
         return layer
     
     def delete_layer(self, context, layer: "Layer"):
@@ -1615,6 +1818,10 @@ class Channel(BaseNestedListManager):
         self.active_index = min(
             self.active_index, len(self.layers) - 1)
         self.update_node_tree(context)
+        invalidate_layers_cache()  # Cache invalidation after layer deletion
+        ps_ctx = parse_context(context)
+        if ps_ctx.active_material:
+            _invalidate_material_layer_cache(ps_ctx.active_material)
     
     def delete_layers(self, context, layers: list["Layer"]):
         # Sort layer by index in descending order
@@ -1622,19 +1829,36 @@ class Channel(BaseNestedListManager):
         for layer in layers:
             self.delete_layer(context, layer)
     
-    def bake(self, context: Context, mat: Material, bake_image: Image, uv_layer: str, use_gpu: bool = True, use_group_tree: bool = True, force_alpha: bool = False, as_tangent_normal: bool = False):
+    def bake(
+        self,
+        context: Context,
+        mat: Material,
+        bake_image: Image,
+        uv_layer: str,
+        use_gpu: bool = True,
+        use_group_tree: bool = True,
+        force_alpha: bool = False,
+        as_tangent_normal: bool = False,
+        multi_object: bool = False,
+    ):
         """Bake the channel
 
         Args:
             context (Context): The context
             mat (Material): The material
-            bake_image (Image): The bake image
+            bake_image (Image): The bake image (supports UDIM)
             uv_layer (str): The UV layer
             use_gpu (bool, optional): Whether to use the GPU. Defaults to True.
             use_group_tree (bool, optional): Whether to use the group tree if found. Defaults to True.
+            as_tangent_normal (bool, optional): Convert bake result to tangent space normal. Defaults to False.
+            multi_object (bool, optional): Include all material users in bake. Defaults to False.
 
         Raises:
             ValueError: If the node tree is not found
+            
+        Note:
+            UDIM support: If bake_image is a tiled image, Blender automatically bakes to all tiles.
+            The UV layout determines which tiles are populated.
         """
         
         node_tree = mat.node_tree
@@ -1642,14 +1866,45 @@ class Channel(BaseNestedListManager):
             raise ValueError("Node tree not found")
         ps_context = parse_context(context)
         obj = ps_context.ps_object
+        
+        # UDIM validation: ensure tiles match UV layout if UDIM image
+        try:
+            from ..utils.udim import is_udim_image, detect_udim_from_uv
+            if is_udim_image(bake_image):
+                if obj and obj.type == 'MESH' and hasattr(obj.data, 'uv_layers') and obj.data.uv_layers.get(uv_layer):
+                    uv_layer_data = obj.data.uv_layers[uv_layer]
+                    required_tiles = detect_udim_from_uv(obj)
+                    # ensure_udim_tiles called via existing helper
+                    ensure_udim_tiles(bake_image, uv_layer_data)
+                    print(f"UDIM bake: {len(required_tiles)} tiles detected for '{uv_layer}'")
+        except Exception as e:
+            print(f"UDIM validation warning: {e}")
         if force_alpha:
             orig_use_alpha = bool(self.use_alpha)
             self.use_alpha = True
         
-        # Ensure ps_object is the only object selected
+        # Build selection set (multi-object bake) before bake nodes get inserted.
         bpy.ops.object.mode_set(mode="OBJECT")
         bpy.ops.object.select_all(action='DESELECT')
+        other_objects = []
+        if multi_object:
+            try:
+                # Gather all mesh objects sharing the material and UV layer
+                mat_users = [o for o in context.scene.objects
+                             if o.type == 'MESH' and any(ms.material == mat for ms in o.material_slots if ms.material)]
+                for o in mat_users:
+                    if o != obj and uv_layer in (o.data.uv_layers.keys() if o.data and hasattr(o.data, 'uv_layers') else []):
+                        other_objects.append(o)
+                    elif o != obj:
+                        # Attempt to sync UV name so this object can participate
+                        _sync_uv_map_to_name(o, uv_layer)
+                        if uv_layer in (o.data.uv_layers.keys() if o.data and hasattr(o.data, 'uv_layers') else []):
+                            other_objects.append(o)
+            except Exception as e:
+                print(f"Multi-object bake gather failed: {e}")
         obj.select_set(True)
+        for o in other_objects:
+            o.select_set(True)
         bpy.context.view_layer.objects.active = obj
         
         material_output = get_material_output(node_tree)
@@ -1703,11 +1958,11 @@ class Channel(BaseNestedListManager):
         # Bake image
         connect_sockets(surface_socket, color_output)
         temp_alpha_image = bake_image.copy()
-        bake_image = ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu)
+        bake_image = ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu, other_objects)
         
         temp_alpha_image.colorspace_settings.name = 'Non-Color'
         connect_sockets(surface_socket, alpha_output)
-        temp_alpha_image = ps_bake(context, obj, mat, uv_layer, temp_alpha_image, use_gpu)
+        temp_alpha_image = ps_bake(context, obj, mat, uv_layer, temp_alpha_image, use_gpu, other_objects)
 
         if bake_image and temp_alpha_image:
             pixels_bake = np.empty(len(bake_image.pixels), dtype=np.float32)
@@ -2102,11 +2357,37 @@ class PaintSystemGlobalData(PropertyGroup):
         return prop_owner.color
     
     def update_unified_color(self, context):
-        brush_color = self.get_brush_color(context)
-        if brush_color.hsv != (self.hue, self.saturation, self.value):
-            brush_color.hsv = (self.hue, self.saturation, self.value)
+        # Skip if we're currently updating FROM the brush to avoid feedback loop
+        if '_updating_from_brush' in self:
+            return
+        # Also skip if a color update happened very recently (palette click, eyedropper, etc)
+        # This prevents HSV updates from overwriting external color changes during msgbus sync
+        import time
+        from . import handlers
+        if time.time() - getattr(handlers, '_last_color_update_time', 0.0) < 0.3:  # 300ms grace period for palette clicks
+            return
+        try:
+            brush_color = self.get_brush_color(context)
+            # Only update if HSV values actually changed to prevent overwriting palette picks
+            target_hsv = (self.hue, self.saturation, self.value)
+            current_hsv = brush_color.hsv
+            # Use tolerance for float comparison
+            if (abs(current_hsv[0] - target_hsv[0]) > 0.001 or 
+                abs(current_hsv[1] - target_hsv[1]) > 0.001 or 
+                abs(current_hsv[2] - target_hsv[2]) > 0.001):
+                brush_color.hsv = target_hsv
+        except Exception:
+            pass
     
     def update_hex_color(self, context):
+        # Skip if we're currently updating FROM the brush to avoid feedback loop
+        if '_updating_from_brush' in self:
+            return
+        # Also skip if a color update happened very recently
+        import time
+        from . import handlers
+        if time.time() - getattr(handlers, '_last_color_update_time', 0.0) < 0.3:  # 300ms grace period
+            return
         brush_color = self.get_brush_color(context)
         brush_color_hex = blender_color_to_srgb_hex(brush_color)
         if brush_color_hex != self.hex_color:
@@ -2267,12 +2548,12 @@ def get_all_layers() -> list[Layer]:
 
 def get_global_layer(layer: Layer) -> GlobalLayer | None:
     """Get the global layer data from the context."""
-    if not layer or not bpy.context.scene or not bpy.context.scene.ps_scene_data:
+    if not layer or not bpy.context.scene:
         return None
-    # for global_layer in bpy.context.scene.ps_scene_data.layers[layer.ref_layer_id]:
-    #     if global_layer.name == layer.ref_layer_id:
-    #         return global_layer
-    return bpy.context.scene.ps_scene_data.layers.get(layer.ref_layer_id, None)
+    ps_scene_data = getattr(bpy.context.scene, 'ps_scene_data', None)
+    if not ps_scene_data or not hasattr(ps_scene_data, 'layers'):
+        return None
+    return ps_scene_data.layers.get(layer.ref_layer_id, None)
 
 def is_layer_linked(check_layer: Layer) -> bool:
     """Check if the layer is linked"""
@@ -2323,8 +2604,8 @@ def parse_context(context: bpy.types.Context) -> PSContext:
         raise TypeError("context must be of type bpy.types.Context")
     
     ps_settings = get_preferences(context)
-    
-    ps_scene_data = context.scene.ps_scene_data
+
+    ps_scene_data = getattr(context.scene, 'ps_scene_data', None)
     
     ps_object = None
     obj = hasattr(context, 'active_object') and context.active_object
@@ -2336,12 +2617,12 @@ def parse_context(context: bpy.types.Context) -> PSContext:
             case 'MESH':
                 ps_object = obj
             case 'GREASEPENCIL':
-                if is_newer_than(4,3,0):
-                    ps_object = obj
+                # Grease Pencil v3 support (Blender 4.3+)
+                ps_object = obj
             case _:
                 obj = None
                 ps_object = None
-        if obj and obj.name == "PS Camera Plane":
+        if obj and obj.name == "PS Camera Plane" and ps_scene_data:
             obj = ps_scene_data.last_selected_ps_object
             ps_object = obj
 
@@ -2393,6 +2674,19 @@ class PSContextMixin:
     def parse_context(context: bpy.types.Context) -> PSContext:
         """Return a PSContext parsed from Blender context. Safe to call from class or instance methods."""
         return parse_context(context)
+    
+    @staticmethod
+    def safe_parse_context(context: bpy.types.Context) -> Optional[PSContext]:
+        """Safely parse context with null checking. Returns None if critical components missing."""
+        try:
+            ps_ctx = parse_context(context)
+            # Validate critical components exist
+            if not ps_ctx.active_object or not ps_ctx.ps_scene_data:
+                return None
+            return ps_ctx
+        except Exception as e:
+            logger.warning(f"Failed to parse context: {e}")
+            return None
 
 
 # Legacy properties (for backward compatibility)
@@ -2647,6 +2941,7 @@ class LegacyPaintSystemContextParser:
 
 classes = (
     MarkerAction,
+    UDIMTile,
     GlobalLayer,
     Layer,
     Channel,
@@ -2700,7 +2995,11 @@ def register():
     
 def unregister():
     """Unregister the Paint System data module."""
-    del bpy.types.Material.paint_system
-    del bpy.types.Material.ps_mat_data
-    del bpy.types.Scene.ps_scene_data
+    # Safe deletion - check if properties exist before deleting
+    if hasattr(bpy.types.Material, 'paint_system'):
+        del bpy.types.Material.paint_system
+    if hasattr(bpy.types.Material, 'ps_mat_data'):
+        del bpy.types.Material.ps_mat_data
+    if hasattr(bpy.types.Scene, 'ps_scene_data'):
+        del bpy.types.Scene.ps_scene_data
     _unregister()

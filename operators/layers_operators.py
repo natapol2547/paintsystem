@@ -59,6 +59,43 @@ class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSImageCreateMixin, MultiMaterialO
         default="Image Layer"
     )
     
+    use_udim: BoolProperty(
+        name="Use UDIM",
+        description="Create UDIM tiled image for multi-tile UV layouts",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    udim_auto_detect: BoolProperty(
+        name="Auto-detect UDIM",
+        description="Automatically detect UDIM tiles from UV layout",
+        default=True,
+        options={'SKIP_SAVE'}
+    )
+    image_resolution: EnumProperty(
+        items=[
+            ('1024', "1024", "1024x1024"),
+            ('2048', "2048", "2048x2048"),
+            ('4096', "4096", "4096x4096"),
+            ('8192', "8192", "8192x8192"),
+            ('CUSTOM', "Custom", "Custom Resolution"),
+        ],
+        default='2048'
+    )
+    image_width: IntProperty(
+        name="Width",
+        default=1024,
+        min=1,
+        description="Width of the image in pixels",
+        subtype='PIXEL'
+    )
+    image_height: IntProperty(
+        name="Height",
+        default=1024,
+        min=1,
+        description="Height of the image in pixels",
+        subtype='PIXEL'
+    )
+    
     image_add_type: EnumProperty(
         name="Image Add Type",
         description="How to add the image layer",
@@ -104,7 +141,9 @@ class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSImageCreateMixin, MultiMaterialO
                 self.report({'ERROR'}, "Image not found")
                 return False
         img.colorspace_settings.name = 'Non-Color' if ps_ctx.active_channel.color_space == 'NONCOLOR' else 'sRGB'
-        ps_ctx.active_channel.create_layer(
+        
+        # Create the layer
+        new_layer = ps_ctx.active_channel.create_layer(
             context, 
             layer_name=self.image_name, 
             layer_type="IMAGE", 
@@ -112,6 +151,25 @@ class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSImageCreateMixin, MultiMaterialO
             coord_type=self.coord_type,
             uv_map_name=self.uv_map_name
         )
+        
+        # If UDIM image, populate tile information
+        if self.use_udim and new_layer is not None:
+            from ..utils.udim import is_udim_image, get_udim_tiles_from_image
+            layer = new_layer.get_layer_data() if hasattr(new_layer, "get_layer_data") else new_layer
+            if not layer:
+                return {'FINISHED'}
+            
+            if is_udim_image(img):
+                layer.is_udim = True
+                layer.udim_tiles.clear()
+                
+                tiles = get_udim_tiles_from_image(img)
+                for tile_num in tiles:
+                    tile = layer.udim_tiles.add()
+                    tile.number = tile_num
+                    tile.is_painted = False
+                    tile.is_dirty = False
+        
         return {'FINISHED'}
     
     def invoke(self, context, event):
@@ -862,12 +920,19 @@ class PAINTSYSTEM_OT_PasteLayer(PSContextMixin, Operator):
     
     @classmethod
     def poll(cls, context):
-        return len(bpy.context.scene.ps_scene_data.clipboard_layers) > 0
+        ps_scene_data = getattr(bpy.context.scene, 'ps_scene_data', None)
+        if not ps_scene_data or not hasattr(ps_scene_data, 'clipboard_layers'):
+            return False
+        return len(ps_scene_data.clipboard_layers) > 0
     
     def execute(self, context):
         ps_ctx = self.parse_context(context)
         active_layer = ps_ctx.active_layer
-        clipboard_layers = bpy.context.scene.ps_scene_data.clipboard_layers
+        ps_scene_data = getattr(bpy.context.scene, 'ps_scene_data', None)
+        if not ps_scene_data or not hasattr(ps_scene_data, 'clipboard_layers'):
+            self.report({'WARNING'}, "No layers in clipboard")
+            return {'CANCELLED'}
+        clipboard_layers = ps_scene_data.clipboard_layers
         new_layer_id_map = {}
         if active_layer:
             is_folder = active_layer and active_layer.type == "FOLDER"
