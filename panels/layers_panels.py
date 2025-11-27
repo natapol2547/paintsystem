@@ -634,41 +634,13 @@ class MAT_PT_GreasePencilOnionSkinningSettings(PSContextMixin, Panel):
 
 # Paint System Layer Settings Advanced
 
-class MAT_PT_LayerSettingsAdvanced(PSContextMixin, Panel):
-    """Parent panel for advanced layer settings - contains Image, Transform, and Actions child panels"""
-    bl_idname = 'MAT_PT_LayerSettingsAdvanced'
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_label = "Advanced"
-    bl_category = 'Paint System'
-    bl_parent_id = 'MAT_PT_Layers'
-    bl_options = {'DEFAULT_CLOSED'}
-
-    @classmethod
-    def poll(cls, context):
-        ps_ctx = cls.safe_parse_context(context)
-        if not ps_ctx or not ps_ctx.active_layer:
-            return False
-        if ps_ctx.ps_object.type == 'MESH':
-            return not getattr(ps_ctx.active_channel, 'use_bake_image', True)
-        return False
-
-    def draw_header(self, context):
-        layout = self.layout
-        layout.label(icon='SETTINGS')
-
-    def draw(self, context):
-        # This is a parent panel - content comes from child panels
-        pass
-
-
 class MAT_PT_LayerTransformSettings(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_LayerCoordinateSettings'
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_label = "Transform"
     bl_category = 'Paint System'
-    bl_parent_id = 'MAT_PT_LayerSettingsAdvanced'
+    bl_parent_id = 'MAT_PT_LayerSettings'
     bl_options = {'DEFAULT_CLOSED'}
 
     @classmethod
@@ -749,7 +721,7 @@ class MAT_PT_ImageLayerSettings(PSContextMixin, Panel):
     bl_region_type = "UI"
     bl_label = "Image"
     bl_category = 'Paint System'
-    bl_parent_id = 'MAT_PT_LayerSettingsAdvanced'
+    bl_parent_id = 'MAT_PT_LayerSettings'
     bl_options = {'DEFAULT_CLOSED'}
 
     @classmethod
@@ -999,7 +971,7 @@ class MAT_PT_Actions(PSContextMixin, Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = 'Paint System'
-    bl_parent_id = 'MAT_PT_LayerSettingsAdvanced'
+    bl_parent_id = 'MAT_PT_LayerSettings'
     bl_options = {'DEFAULT_CLOSED'}
 
     @classmethod
@@ -1208,7 +1180,6 @@ classes = (
     MAT_PT_LayerSettings,
     MAT_PT_GreasePencilMaskSettings,
     MAT_PT_GreasePencilOnionSkinningSettings,
-    MAT_PT_LayerSettingsAdvanced,
     MAT_PT_ImageLayerSettings,
     MAT_PT_LayerTransformSettings,
     MAT_PT_Actions,

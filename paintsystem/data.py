@@ -1519,6 +1519,16 @@ def ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu=True, other_objects
     if other_objects:
         # Filter out duplicates and non-mesh types defensively
         selected.extend([o for o in other_objects if o and o.type == 'MESH' and o != obj])
+    
+    # Store and set active UV layers for all selected objects
+    original_uv_layers = {}
+    for sel_obj in selected:
+        if sel_obj.type == 'MESH' and sel_obj.data and hasattr(sel_obj.data, 'uv_layers'):
+            uv_layers = sel_obj.data.uv_layers
+            if uv_layers and uv_layer in uv_layers:
+                original_uv_layers[sel_obj] = uv_layers.active
+                uv_layers.active = uv_layers[uv_layer]
+    
     with context.temp_override(active_object=obj, selected_objects=selected):
         bake_params = {
             "type": 'EMIT',
@@ -1543,6 +1553,11 @@ def ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu=True, other_objects
             cycles.device = 'CPU'
             bpy.ops.object.bake(**bake_params, uv_layer=uv_layer, use_clear=True)
 
+    # Restore original active UV layers
+    for sel_obj, orig_uv in original_uv_layers.items():
+        if sel_obj.type == 'MESH' and sel_obj.data and hasattr(sel_obj.data, 'uv_layers'):
+            sel_obj.data.uv_layers.active = orig_uv
+    
     # Delete bake nodes
     node_tree.nodes.remove(image_node)
     

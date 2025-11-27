@@ -16,9 +16,16 @@ class BakeOperator(PSContextMixin, PSImageCreateMixin, Operator):
     multi_object: BoolProperty(
         name="All Material Users",
         description="Include all mesh objects using the active material (shared UV space) in the bake",
-        default=False,
+        default=True,
         options={'SKIP_SAVE'}
     )
+    
+    def _get_material_users(self, context, mat):
+        """Get all mesh objects that use the given material"""
+        if not mat:
+            return []
+        return [o for o in context.scene.objects 
+                if o.type == 'MESH' and any(ms.material == mat for ms in o.material_slots if ms.material)]
     
     def invoke(self, context, event):
         """Invoke the operator to create a new channel."""
@@ -131,6 +138,15 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
             else:
                 active_channel.bake_vector_space = active_channel.vector_space
             active_channel.use_bake_image = True
+            
+            # Update UV map on all material users if multi_object is enabled
+            if self.multi_object:
+                mat_users = self._get_material_users(context, mat)
+                for obj in mat_users:
+                    if obj.type == 'MESH' and obj.data and hasattr(obj.data, 'uv_layers'):
+                        uvs = obj.data.uv_layers
+                        if self.uv_map_name in uvs:
+                            uvs.active = uvs[self.uv_map_name]
         # Return to object mode
         bpy.ops.object.mode_set(mode="OBJECT")
         # Set cursor to default
@@ -187,6 +203,15 @@ class PAINTSYSTEM_OT_BakeAllChannels(BakeOperator):
             else:
                 channel.bake(context, mat, bake_image, self.uv_map_name)
             channel.use_bake_image = True
+        
+        # Update UV map on all material users if multi_object is enabled
+        if self.multi_object:
+            mat_users = self._get_material_users(context, mat)
+            for obj in mat_users:
+                if obj.type == 'MESH' and obj.data and hasattr(obj.data, 'uv_layers'):
+                    uvs = obj.data.uv_layers
+                    if self.uv_map_name in uvs:
+                        uvs.active = uvs[self.uv_map_name]
         # Return to object mode
         bpy.ops.object.mode_set(mode="OBJECT")
         # Set cursor to default
@@ -747,6 +772,18 @@ class PAINTSYSTEM_OT_TransferImageLayerUV(PSContextMixin, PSUVOptionsMixin, Oper
         active_layer.image = transferred_image
         for layer in to_be_enabled_layers:
             layer.enabled = True
+        
+        # Update UV map on all material users
+        mat = ps_ctx.active_material
+        if mat:
+            mat_users = [o for o in context.scene.objects 
+                        if o.type == 'MESH' and any(ms.material == mat for ms in o.material_slots if ms.material)]
+            for obj in mat_users:
+                if obj.type == 'MESH' and obj.data and hasattr(obj.data, 'uv_layers'):
+                    uvs = obj.data.uv_layers
+                    if self.uv_map_name in uvs:
+                        uvs.active = uvs[self.uv_map_name]
+        
         context.window.cursor_set('DEFAULT')
         return {'FINISHED'}
 
@@ -811,6 +848,18 @@ class PAINTSYSTEM_OT_ConvertToImageLayer(PSContextMixin, PSImageCreateMixin, Ope
         for layer in to_be_enabled_layers:
             layer.enabled = True
         active_channel.remove_children(active_layer.id)
+        
+        # Update UV map on all material users
+        mat = ps_ctx.active_material
+        if mat:
+            mat_users = [o for o in context.scene.objects 
+                        if o.type == 'MESH' and any(ms.material == mat for ms in o.material_slots if ms.material)]
+            for obj in mat_users:
+                if obj.type == 'MESH' and obj.data and hasattr(obj.data, 'uv_layers'):
+                    uvs = obj.data.uv_layers
+                    if self.uv_map_name in uvs:
+                        uvs.active = uvs[self.uv_map_name]
+        
         # Set cursor back to default
         context.window.cursor_set('DEFAULT')
         return {'FINISHED'}
@@ -931,6 +980,18 @@ class PAINTSYSTEM_OT_MergeDown(PSContextMixin, PSImageCreateMixin, Operator):
         active_channel.delete_layers(context, [unlinked_layer, below_unlinked_layer])
         
         active_channel.create_layer(context, "Merged Layer", "IMAGE", coord_type="UV", uv_map_name=self.uv_map_name, image=image)
+        
+        # Update UV map on all material users
+        mat = ps_ctx.active_material
+        if mat:
+            mat_users = [o for o in context.scene.objects 
+                        if o.type == 'MESH' and any(ms.material == mat for ms in o.material_slots if ms.material)]
+            for obj in mat_users:
+                if obj.type == 'MESH' and obj.data and hasattr(obj.data, 'uv_layers'):
+                    uvs = obj.data.uv_layers
+                    if self.uv_map_name in uvs:
+                        uvs.active = uvs[self.uv_map_name]
+        
         # Set cursor back to default
         context.window.cursor_set('DEFAULT')
         return {'FINISHED'}
@@ -1051,6 +1112,18 @@ class PAINTSYSTEM_OT_MergeUp(PSContextMixin, PSImageCreateMixin, Operator):
         active_channel.delete_layers(context, [unlinked_layer, above_unlinked_layer])
         
         active_channel.create_layer(context, "Merged Layer", "IMAGE", coord_type="UV", uv_map_name=self.uv_map_name, image=image)
+        
+        # Update UV map on all material users
+        mat = ps_ctx.active_material
+        if mat:
+            mat_users = [o for o in context.scene.objects 
+                        if o.type == 'MESH' and any(ms.material == mat for ms in o.material_slots if ms.material)]
+            for obj in mat_users:
+                if obj.type == 'MESH' and obj.data and hasattr(obj.data, 'uv_layers'):
+                    uvs = obj.data.uv_layers
+                    if self.uv_map_name in uvs:
+                        uvs.active = uvs[self.uv_map_name]
+        
         # Set cursor back to default
         context.window.cursor_set('DEFAULT')
         return {'FINISHED'}
