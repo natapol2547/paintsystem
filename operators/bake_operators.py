@@ -21,6 +21,13 @@ class BakeOperator(PSContextMixin, PSImageCreateMixin, Operator):
         options={'SKIP_SAVE'}
     )
     
+    bake_all_material_objects: BoolProperty(
+        name="Bake All Material Objects",
+        description="Bake all objects using this material, not just selected objects. Recommended for UDIM to capture all tiles",
+        default=True,
+        options={'SKIP_SAVE'}
+    )
+    
     def invoke(self, context, event):
         """Invoke the operator to create a new channel."""
         ps_ctx = self.parse_context(context)
@@ -75,6 +82,12 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
         box = layout.box()
         box.label(text="UV Map", icon='UV')
         box.prop_search(self, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="")
+        
+        # Multi-object baking option
+        box = layout.box()
+        box.label(text="Object Selection", icon='OBJECT_DATA')
+        box.prop(self, "bake_all_material_objects")
+        
         if ps_ctx.active_channel.type == "VECTOR":
             box = layout.box()
             box.prop(self, "as_tangent_normal")
@@ -101,6 +114,10 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
         if self.as_layer:
             bake_image = self.create_image(context)
             bake_image.colorspace_settings.name = 'sRGB'
+            
+            # Get list of objects to bake
+            mesh_objects = self._get_mesh_objects(context, ps_ctx)
+            
             # Build bake kwargs based on signature to avoid unexpected-arg errors
             sig = inspect.signature(active_channel.bake)
             bake_kwargs = {}
@@ -108,6 +125,8 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
                 bake_kwargs['force_alpha'] = True
             if 'as_tangent_normal' in sig.parameters:
                 bake_kwargs['as_tangent_normal'] = self.as_tangent_normal
+            if 'bake_objects' in sig.parameters:
+                bake_kwargs['bake_objects'] = mesh_objects
             # Call bake safely
             active_channel.bake(context, mat, bake_image, self.uv_map_name, **bake_kwargs)
             active_channel.create_layer(
@@ -131,14 +150,19 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
                 if bake_image.size[0] != self.image_width or bake_image.size[1] != self.image_height:
                     bake_image.scale(self.image_width, self.image_height)
             active_channel.bake_uv_map = self.uv_map_name
+            
+            # Get list of objects to bake
+            mesh_objects = self._get_mesh_objects(context, ps_ctx)
                 
             active_channel.use_bake_image = False
             # Respect available kwargs
             sig = inspect.signature(active_channel.bake)
+            bake_kwargs = {}
             if 'as_tangent_normal' in sig.parameters:
-                active_channel.bake(context, mat, bake_image, self.uv_map_name, as_tangent_normal=self.as_tangent_normal)
-            else:
-                active_channel.bake(context, mat, bake_image, self.uv_map_name)
+                bake_kwargs['as_tangent_normal'] = self.as_tangent_normal
+            if 'bake_objects' in sig.parameters:
+                bake_kwargs['bake_objects'] = mesh_objects
+            active_channel.bake(context, mat, bake_image, self.uv_map_name, **bake_kwargs)
             if self.as_tangent_normal:
                 active_channel.bake_vector_space = 'TANGENT'
             else:
@@ -180,6 +204,11 @@ class PAINTSYSTEM_OT_BakeAllChannels(BakeOperator):
         box = layout.box()
         box.label(text="UV Map", icon='UV')
         box.prop_search(self, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="")
+        
+        # Multi-object baking option
+        box = layout.box()
+        box.label(text="Object Selection", icon='OBJECT_DATA')
+        box.prop(self, "bake_all_material_objects")
     
     def execute(self, context):
         # Set cursor to wait
@@ -404,16 +433,147 @@ class PAINTSYSTEM_OT_DeleteBakedImage(PSContextMixin, Operator):
 
 
 class PAINTSYSTEM_OT_SyncUVMaps(PSContextMixin, Operator):
-    """Sync UV map names across all objects using the active material"""
+    """Sync UV map names and settings across all objects using the active material"""
     bl_idname = "paint_system.sync_uv_maps"
-    bl_label = "Sync UV Names"
-    bl_description = "Synchronize UV map names across all objects sharing this material"
+    bl_label = "Sync UV Maps"
+    bl_description = "Synchronize UV map names and settings across all objects sharing this material"
     bl_options = {'REGISTER', 'UNDO'}
+    
+    sync_all_material_objects: BoolProperty(
+        name="Sync All Objects with Material",
+        description="Sync UV on all objects using this material (if disabled, only sync selected objects)",
+        default=True
+    )
+    
+    cleanup_mode: bpy.props.EnumProperty(
+        name="Cleanup Mode",
+        description="How to clean up extra UV maps",
+        items=[
+            ('NONE', "Keep All UVs", "Don't remove any UV maps"),
+            ('NON_PS', "Remove Non-PS UVs", "Remove UVs without PS_ prefix (except active)"),
+            ('ALL_NON_ACTIVE', "Remove All Non-Active", "Remove all UVs except the active one"),
+        ],
+        default='NONE'
+    )
     
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
         return ps_ctx.active_material and ps_ctx.ps_object
+    
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+    
+    def draw(self, context):
+        layout = self.layout
+        ps_ctx = self.parse_context(context)
+        
+        # Get target UV name to show in UI
+        target_uv_name = self._get_target_uv_name(context, ps_ctx)
+        
+        box = layout.box()
+        box.label(text="Sync Settings", icon='UV')
+        if target_uv_name:
+            box.label(text=f"Target UV: {target_uv_name}", icon='CHECKMARK')
+        else:
+            box.label(text="No target UV found", icon='ERROR')
+        
+        box.prop(self, "sync_all_material_objects")
+        
+        # Show object count
+        if ps_ctx.active_material:
+            objects_using_mat = self._get_objects_using_material(context, ps_ctx.active_material, self.sync_all_material_objects)
+            box.label(text=f"Will sync {len(objects_using_mat)} object(s)")
+        
+        box = layout.box()
+        box.label(text="UV Cleanup", icon='BRUSH_DATA')
+        box.prop(self, "cleanup_mode", text="")
+        
+        if self.cleanup_mode == 'NON_PS':
+            box.label(text="Keeps: Active UV + PS_* UVs", icon='INFO')
+        elif self.cleanup_mode == 'ALL_NON_ACTIVE':
+            box.label(text="Keeps: Active UV only", icon='INFO')
+    
+    def _get_target_uv_name(self, context, ps_ctx):
+        """Determine target UV name based on context"""
+        target_uv_name = ''
+        
+        # Priority: 1) Active layer's UV, 2) Scene transfer UV, 3) Active UV on object
+        if ps_ctx.active_layer and hasattr(ps_ctx.active_layer, 'uv_map_name') and ps_ctx.active_layer.uv_map_name:
+            target_uv_name = ps_ctx.active_layer.uv_map_name
+        
+        if not target_uv_name:
+            target_uv_name = getattr(context.scene, 'ps_transfer_uv_map', '')
+        
+        if not target_uv_name and ps_ctx.ps_object and hasattr(ps_ctx.ps_object.data, 'uv_layers'):
+            uv_layers = ps_ctx.ps_object.data.uv_layers
+            if uv_layers.active:
+                target_uv_name = uv_layers.active.name
+        
+        return target_uv_name
+    
+    def _get_objects_using_material(self, context, mat, all_objects):
+        """Get list of objects using the material"""
+        objects_using_mat = []
+        
+        if all_objects:
+            # Check all scenes
+            for scene in bpy.data.scenes:
+                for obj in scene.objects:
+                    if obj.type != 'MESH':
+                        continue
+                    if not hasattr(obj.data, 'uv_layers'):
+                        continue
+                    for slot in obj.material_slots:
+                        if slot.material and slot.material == mat:
+                            objects_using_mat.append(obj)
+                            break
+        else:
+            # Only selected objects
+            for obj in context.selected_objects:
+                if obj.type != 'MESH':
+                    continue
+                if not hasattr(obj.data, 'uv_layers'):
+                    continue
+                for slot in obj.material_slots:
+                    if slot.material and slot.material == mat:
+                        objects_using_mat.append(obj)
+                        break
+        
+        return objects_using_mat
+    
+    def _cleanup_uvs(self, obj, active_uv_name, cleanup_mode):
+        """Clean up UV maps based on cleanup mode"""
+        if cleanup_mode == 'NONE':
+            return 0
+        
+        uv_layers = obj.data.uv_layers
+        if len(uv_layers) <= 1:
+            return 0  # Nothing to clean up
+        
+        removed_count = 0
+        uvs_to_remove = []
+        
+        for uv in uv_layers:
+            if uv.name == active_uv_name:
+                continue  # Never remove active UV
+            
+            if cleanup_mode == 'NON_PS':
+                # Remove if it doesn't start with PS_
+                if not uv.name.startswith('PS_'):
+                    uvs_to_remove.append(uv)
+            elif cleanup_mode == 'ALL_NON_ACTIVE':
+                # Remove all except active
+                uvs_to_remove.append(uv)
+        
+        for uv in uvs_to_remove:
+            try:
+                uv_layers.remove(uv)
+                removed_count += 1
+            except Exception as e:
+                print(f"  [PaintSystem] Failed to remove UV '{uv.name}': {e}")
+        
+        return removed_count
     
     def execute(self, context):
         ps_ctx = self.parse_context(context)
@@ -423,29 +583,123 @@ class PAINTSYSTEM_OT_SyncUVMaps(PSContextMixin, Operator):
             self.report({'ERROR'}, "No active material")
             return {'CANCELLED'}
         
-        # Determine target UV name based on context
-        # Priority: 1) Active layer's UV, 2) Scene transfer UV, 3) First UV on object
-        target_uv_name = ''
-        
-        # Check if we're in layers panel context (active layer has UV)
-        if ps_ctx.active_layer and hasattr(ps_ctx.active_layer, 'uv_map_name') and ps_ctx.active_layer.uv_map_name:
-            target_uv_name = ps_ctx.active_layer.uv_map_name
-        
-        # Fall back to scene property (UV editor context)
-        if not target_uv_name:
-            target_uv_name = getattr(context.scene, 'ps_transfer_uv_map', '')
-        
-        # Final fallback to first UV on active object
-        if not target_uv_name and ps_ctx.ps_object and hasattr(ps_ctx.ps_object.data, 'uv_layers'):
-            uv_layers = ps_ctx.ps_object.data.uv_layers
-            if len(uv_layers) > 0:
-                target_uv_name = uv_layers[0].name
+        target_uv_name = self._get_target_uv_name(context, ps_ctx)
         
         if not target_uv_name:
             self.report({'ERROR'}, "No target UV map to sync to. Set a UV map first.")
             return {'CANCELLED'}
         
-        # Find all objects using this material (check all scenes)
+        # Get objects to sync
+        objects_using_mat = self._get_objects_using_material(context, mat, self.sync_all_material_objects)
+        
+        if not objects_using_mat:
+            self.report({'WARNING'}, f"No mesh objects found using material: {mat.name}")
+            return {'CANCELLED'}
+        
+        print(f"[PaintSystem] Syncing UV '{target_uv_name}' across {len(objects_using_mat)} object(s) using material '{mat.name}'")
+        
+        renamed_count = 0
+        already_correct = 0
+        skipped_count = 0
+        total_cleaned = 0
+        synced_objects = []
+        
+        for obj in objects_using_mat:
+            uv_layers = obj.data.uv_layers
+            if len(uv_layers) == 0:
+                print(f"  [PaintSystem] Skipping {obj.name}: No UV layers")
+                skipped_count += 1
+                continue
+            
+            # Get currently active UV to rename, or check if target already exists
+            current_active_uv = uv_layers.active
+            existing_target = uv_layers.get(target_uv_name)
+            
+            if not existing_target:
+                # Rename current active UV to target name
+                if current_active_uv:
+                    try:
+                        old_name = current_active_uv.name
+                        current_active_uv.name = target_uv_name
+                        existing_target = uv_layers.get(target_uv_name)
+                        print(f"  [PaintSystem] {obj.name}: Renamed '{old_name}' -> '{target_uv_name}'")
+                        renamed_count += 1
+                    except Exception as e:
+                        print(f"  [PaintSystem] {obj.name}: Failed to rename UV: {e}")
+                        skipped_count += 1
+                        continue
+                else:
+                    print(f"  [PaintSystem] Skipping {obj.name}: No active UV to rename")
+                    skipped_count += 1
+                    continue
+            else:
+                already_correct += 1
+            
+            # Set as active AND active_render UV
+            if existing_target:
+                uv_layers.active = existing_target
+                existing_target.active_render = True
+                synced_objects.append(obj.name)
+                print(f"  [PaintSystem] {obj.name}: Set '{target_uv_name}' as active and active_render")
+                
+                # Clean up extra UVs if requested
+                if self.cleanup_mode != 'NONE':
+                    cleaned = self._cleanup_uvs(obj, target_uv_name, self.cleanup_mode)
+                    if cleaned > 0:
+                        total_cleaned += cleaned
+                        print(f"  [PaintSystem] {obj.name}: Removed {cleaned} UV map(s)")
+        
+        print(f"[PaintSystem] Synced objects: {', '.join(synced_objects)}")
+        
+        # Build result message
+        total_synced = renamed_count + already_correct
+        msg_parts = [f"Synced UV '{target_uv_name}' on {total_synced} object(s)"]
+        
+        if renamed_count > 0 or already_correct > 0:
+            details = []
+            if renamed_count > 0:
+                details.append(f"{renamed_count} renamed")
+            if already_correct > 0:
+                details.append(f"{already_correct} already correct")
+            if skipped_count > 0:
+                details.append(f"{skipped_count} skipped")
+            msg_parts.append(f"({', '.join(details)})")
+        
+        if total_cleaned > 0:
+            msg_parts.append(f"Removed {total_cleaned} extra UV map(s)")
+        
+        if total_synced > 0:
+            self.report({'INFO'}, ' | '.join(msg_parts))
+        else:
+            self.report({'WARNING'}, f"Could not sync UV on any objects ({skipped_count} skipped)")
+        
+        return {'FINISHED'}
+
+
+class PAINTSYSTEM_OT_ClearNonActiveUVs(PSContextMixin, Operator):
+    """Clear all UV maps except the active one"""
+    bl_idname = "paint_system.clear_non_active_uvs"
+    bl_label = "Clear Non-Active UVs"
+    bl_description = "Remove all UV maps except the active/render UV on all objects using this material"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_material and ps_ctx.ps_object
+    
+    def invoke(self, context, event):
+        return context.window_manager.invoke_confirm(self, event)
+    
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        mat = ps_ctx.active_material
+        
+        if not mat:
+            self.report({'ERROR'}, "No active material")
+            return {'CANCELLED'}
+        
+        # Find all objects using this material
         objects_using_mat = []
         for scene in bpy.data.scenes:
             for obj in scene.objects:
@@ -460,46 +714,49 @@ class PAINTSYSTEM_OT_SyncUVMaps(PSContextMixin, Operator):
             self.report({'WARNING'}, f"No objects found using material: {mat.name}")
             return {'CANCELLED'}
         
-        renamed_count = 0
-        already_correct = 0
-        skipped_count = 0
+        total_removed = 0
+        objects_processed = 0
         
         for obj in objects_using_mat:
             if not hasattr(obj.data, 'uv_layers'):
-                skipped_count += 1
                 continue
             
             uv_layers = obj.data.uv_layers
-            if len(uv_layers) == 0:
-                skipped_count += 1
+            if len(uv_layers) <= 1:
+                continue  # Nothing to remove
+            
+            # Get the active render UV (this is what baking uses)
+            active_uv = None
+            for uv in uv_layers:
+                if uv.active_render:
+                    active_uv = uv
+                    break
+            
+            # Fallback to regular active if no active_render
+            if not active_uv:
+                active_uv = uv_layers.active
+            
+            if not active_uv:
                 continue
             
-            # Check if target UV already exists
-            existing_uv = uv_layers.get(target_uv_name)
+            # Remove all UVs except the active one
+            uvs_to_remove = [uv for uv in uv_layers if uv != active_uv]
             
-            if not existing_uv:
-                # Rename first UV layer to target name
+            for uv in uvs_to_remove:
                 try:
-                    uv_layers[0].name = target_uv_name
-                    renamed_count += 1
+                    uv_layers.remove(uv)
+                    total_removed += 1
                 except:
-                    skipped_count += 1
-                    continue
-            else:
-                already_correct += 1
+                    pass
             
-            # Set as active render UV
-            target_layer = uv_layers.get(target_uv_name)
-            if target_layer:
-                uv_layers.active = target_layer
+            if uvs_to_remove:
+                objects_processed += 1
         
-        total_objects = len(objects_using_mat)
-        if renamed_count > 0:
-            self.report({'INFO'}, f"Renamed UV on {renamed_count} object(s) to '{target_uv_name}' ({already_correct} already correct, {skipped_count} skipped)")
-        elif already_correct > 0:
-            self.report({'INFO'}, f"All {already_correct} object(s) already have UV named '{target_uv_name}'")
+        if total_removed > 0:
+            self.report({'INFO'}, f"Removed {total_removed} UV map(s) from {objects_processed} object(s)")
         else:
-            self.report({'WARNING'}, f"Could not sync UV on any objects ({skipped_count} skipped)")
+            self.report({'INFO'}, "No extra UV maps to remove")
+        
         return {'FINISHED'}
 
 
@@ -1007,6 +1264,7 @@ classes = (
     PAINTSYSTEM_OT_BakeChannel,
     PAINTSYSTEM_OT_BakeAllChannels,
     PAINTSYSTEM_OT_SyncUVMaps,
+    PAINTSYSTEM_OT_ClearNonActiveUVs,
     PAINTSYSTEM_OT_SetActiveUVFromLayer,
     PAINTSYSTEM_OT_TransferImageLayerUVDirect,
     PAINTSYSTEM_OT_TransferImageLayerUV,

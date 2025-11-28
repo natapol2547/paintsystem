@@ -705,6 +705,7 @@ class MAT_PT_LayerTransformSettings(PSContextMixin, Panel):
             uv_row.prop_search(active_layer, "uv_map_name", text="UV Map",
                                 search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
             uv_row.operator("paint_system.sync_uv_maps", text="", icon='UV_SYNC_SELECT')
+            uv_row.popover("PAINTSYSTEM_PT_uv_tools_popover", text="", icon='DOWNARROW_HLT')
         elif active_layer.coord_type == 'DECAL':
             decal_clip = active_layer.find_node("decal_depth_clip")
             if decal_clip:
@@ -1031,6 +1032,42 @@ class MAT_PT_Actions(PSContextMixin, Panel):
         actions_col.prop(active_action, "action_type", text="Action")
 
 
+class PAINTSYSTEM_PT_uv_tools_popover(PSContextMixin, Panel):
+    """UV Tools popover panel"""
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'WINDOW'
+    bl_label = "UV Tools"
+    bl_options = {'DEFAULT_CLOSED', 'INSTANCED'}
+    
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = False
+        layout.use_property_decorate = False
+        
+        col = layout.column(align=True)
+        col.label(text="UV Management", icon='UV')
+        col.separator()
+        
+        # Sync UV button
+        box = col.box()
+        box_col = box.column(align=True)
+        box_col.label(text="Sync UV Names", icon='UV_SYNC_SELECT')
+        box_col.operator("paint_system.sync_uv_maps", text="Sync Across All Objects", icon='CHECKMARK')
+        box_col.separator(factor=0.5)
+        box_col.label(text="Sets active & active_render", icon='INFO')
+        
+        col.separator()
+        
+        # Clear non-active UVs button
+        box = col.box()
+        box.alert = True
+        box_col = box.column(align=True)
+        box_col.label(text="Clear Extra UVs", icon='TRASH')
+        box_col.operator("paint_system.clear_non_active_uvs", text="Delete Non-Active UVs", icon='X')
+        box_col.separator(factor=0.5)
+        box_col.label(text="⚠ Removes all except active", icon='ERROR')
+
+
 classes = (
     MAT_PT_UL_LayerList,
     MAT_MT_AddLayerMenu,
@@ -1045,6 +1082,7 @@ classes = (
     MAT_PT_Layers,
     MAT_MT_ImageMenu,
     MAT_PT_LayerSettings,
+    PAINTSYSTEM_PT_uv_tools_popover,
     MAT_PT_GreasePencilMaskSettings,
     MAT_PT_GreasePencilOnionSkinningSettings,
     MAT_PT_ImageLayerSettings,

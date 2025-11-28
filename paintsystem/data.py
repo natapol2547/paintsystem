@@ -126,7 +126,6 @@ TEXTURE_TYPE_ENUM = [
 ]
 
 COORDINATE_TYPE_ENUM = [
-    ('AUTO', "Auto UV", "Automatically create a new UV Map"),
     ('UV', "UV", "Open an existing UV Map"),
     ('OBJECT', "Object", "Use a object output of Texture Coordinate node"),
     ('CAMERA', "Camera", "Use a camera output of Texture Coordinate node"),
@@ -241,8 +240,6 @@ def update_active_image(self=None, context: bpy.types.Context = None):
     if active_layer.coord_type == 'UV':
         if active_layer.uv_map_name and obj.data.uv_layers.get(active_layer.uv_map_name):
             obj.data.uv_layers[active_layer.uv_map_name].active = True
-    elif active_layer.coord_type == 'AUTO' and obj.data.uv_layers.get(DEFAULT_PS_UV_MAP_NAME):
-        obj.data.uv_layers[DEFAULT_PS_UV_MAP_NAME].active = True
 
 def update_active_layer(self, context):
     ps_ctx = parse_context(context)
@@ -493,17 +490,55 @@ def ensure_udim_tiles(image: bpy.types.Image, uv_layer: bpy.types.MeshUVLoopLaye
             bpy.ops.image.tile_add(number=tile, color=(0, 0, 0, 0), width=width, height=height)
     return udim_tiles
 
-def create_ps_image(name: str, width: int = 2048, height: int = 2048, use_udim_tiles: bool = False, uv_layer: bpy.types.MeshUVLoopLayer = None):
+def create_ps_image(name: str, width: int = 2048, height: int = 2048, use_udim_tiles: bool = False, uv_layer: bpy.types.MeshUVLoopLayer = None, udim_tiles: set = None):
+    """
+    Create a Paint System image.
+    
+    Args:
+        udim_tiles: Optional set of UDIM tile numbers to create. If provided, overrides uv_layer detection.
+    """
     img = bpy.data.images.new(
         name=name, width=width, height=height, alpha=True)
     img.generated_color = (0, 0, 0, 0)
-    img.pack()
+    
     if use_udim_tiles:
         img.source = "TILED"
-        if uv_layer:
+        
+        # CRITICAL: Clear filepath before packing to prevent Blender from trying to load external UDIM files
+        img.filepath = ""
+        img.filepath_raw = ""
+        
+        # Ensure tile 1001 (which exists by default) has the correct size
+        # This is necessary because setting source to TILED might create it with default size
+        if img.tiles and len(img.tiles) > 0:
+            base_tile = img.tiles[0]  # tile 1001
+            if base_tile.size[0] != width or base_tile.size[1] != height:
+                # Need to scale the image to resize the base tile
+                img.scale(width, height)
+                print(f"  Resized base UDIM tile 1001 to {width}x{height}")
+        
+        if udim_tiles:
+            # Use pre-computed tile set (preferred for multi-object baking)
+            # Note: tile 1001 already exists by default when source is set to TILED
+            existing_tiles = {tile.number for tile in img.tiles}
+            tiles_to_add = udim_tiles - existing_tiles
+            
+            for tile in tiles_to_add:
+                try:
+                    with bpy.context.temp_override(edit_image=img):
+                        bpy.ops.image.tile_add(number=tile, color=(0, 0, 0, 0), width=width, height=height)
+                except Exception as e:
+                    print(f"  Warning: Failed to add tile {tile}: {e}")
+            
+            print(f"  Created UDIM image with tiles: {sorted(udim_tiles)} (added {len(tiles_to_add)} new tiles)")
+        elif uv_layer:
+            # Fall back to single UV layer detection
             ensure_udim_tiles(img, uv_layer)
         else:
-            raise ValueError("UV layer is required for UDIM tiles")
+            raise ValueError("UV layer or udim_tiles required for UDIM tiles")
+    
+    # Pack the image (do this AFTER setting up UDIM tiles to ensure all tiles are packed)
+    img.pack()
     return img
 
 def ensure_paint_system_uv_map(context: bpy.types.Context):
@@ -529,6 +564,7 @@ def ensure_paint_system_uv_map(context: bpy.types.Context):
     uv_layers = ps_object.data.uv_layers
     uvmap = uv_layers.new(name=DEFAULT_PS_UV_MAP_NAME)
     ps_object.data.uv_layers.active = uvmap
+    uvmap.active_render = True  # Ensure this UV is used for baking/rendering
     bpy.ops.uv.smart_project(angle_limit=30/180*math.pi, island_margin=0.005)
     bpy.ops.object.mode_set(mode=original_mode)
     # Deselect the object
@@ -852,7 +888,8 @@ class Layer(BaseNestedListItem):
         if self.layer_name:
             self.node_tree.name = f"PS {self.layer_name} ({self.uid[:8]})"
         
-        if self.coord_type == 'AUTO':
+        # Ensure PS UV map exists when using UV mode with PS_map1
+        if self.coord_type == 'UV' and self.uv_map_name == DEFAULT_PS_UV_MAP_NAME:
             ensure_paint_system_uv_map(context)
         
         if self.coord_type == "DECAL":
@@ -1358,7 +1395,14 @@ def restore_cycles_settings(settings):
     scene.cycles.use_denoising = settings['use_denoising']
     scene.cycles.use_adaptive_sampling = settings['use_adaptive_sampling']
 
-def ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu=True):
+def ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu=True, bake_objects=None):
+    """
+    Bake material to image.
+    
+    Args:
+        bake_objects: Optional list of objects to bake. If None, only bakes obj.
+                     For UDIM baking, pass all objects that use the material.
+    """
     node_tree = mat.node_tree
     
     image_node = node_tree.nodes.new(type='ShaderNodeTexImage')
@@ -1367,7 +1411,10 @@ def ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu=True):
     cycles_settings = save_cycles_settings()
     # Switch to Cycles if needed
     
-    with context.temp_override(active_object=obj, selected_objects=[obj]):
+    # Use provided bake_objects list or fall back to single object
+    selected_objs = bake_objects if bake_objects else [obj]
+    
+    with context.temp_override(active_object=obj, selected_objects=selected_objs):
         bake_params = {
             "type": 'EMIT',
         }
@@ -1631,7 +1678,7 @@ class Channel(BaseNestedListManager):
         for layer in layers:
             self.delete_layer(context, layer)
     
-    def bake(self, context: Context, mat: Material, bake_image: Image, uv_layer: str, use_gpu: bool = True, use_group_tree: bool = True, force_alpha: bool = False, as_tangent_normal: bool = False):
+    def bake(self, context: Context, mat: Material, bake_image: Image, uv_layer: str, use_gpu: bool = True, use_group_tree: bool = True, force_alpha: bool = False, as_tangent_normal: bool = False, bake_objects=None):
         """Bake the channel
 
         Args:
@@ -1641,6 +1688,7 @@ class Channel(BaseNestedListManager):
             uv_layer (str): The UV layer
             use_gpu (bool, optional): Whether to use the GPU. Defaults to True.
             use_group_tree (bool, optional): Whether to use the group tree if found. Defaults to True.
+            bake_objects: Optional list of objects to bake. If None, uses only ps_object.
 
         Raises:
             ValueError: If the node tree is not found
@@ -1655,10 +1703,15 @@ class Channel(BaseNestedListManager):
             orig_use_alpha = bool(self.use_alpha)
             self.use_alpha = True
         
-        # Ensure ps_object is the only object selected
+        # Get list of objects to bake (either provided or just the active object)
+        if bake_objects is None:
+            bake_objects = [obj]
+        
+        # Select all objects that will be baked
         bpy.ops.object.mode_set(mode="OBJECT")
         bpy.ops.object.select_all(action='DESELECT')
-        obj.select_set(True)
+        for bake_obj in bake_objects:
+            bake_obj.select_set(True)
         bpy.context.view_layer.objects.active = obj
         
         material_output = get_material_output(node_tree)
@@ -1709,14 +1762,31 @@ class Channel(BaseNestedListManager):
             connect_sockets(tangent_group.inputs['Tangent'], tangent_node.outputs['Tangent'])
             color_output = tangent_group.outputs['Tangent Normal']
         
-        # Bake image
+        # Bake image (connect color to surface)
         connect_sockets(surface_socket, color_output)
-        temp_alpha_image = bake_image.copy()
-        bake_image = ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu)
+        
+        # Create a proper temporary alpha image that mirrors UDIM tiles when needed
+        if getattr(bake_image, "source", "") == "TILED":
+            temp_alpha_image = bpy.data.images.new(name=f"{bake_image.name}_Alpha", width=bake_image.size[0], height=bake_image.size[1], alpha=True)
+            temp_alpha_image.generated_color = (0, 0, 0, 0)
+            temp_alpha_image.source = "TILED"
+            # Match UDIM tiles
+            existing_tiles = {tile.number for tile in temp_alpha_image.tiles}
+            for tile in bake_image.tiles:
+                if tile.number not in existing_tiles:
+                    try:
+                        with context.temp_override(edit_image=temp_alpha_image):
+                            bpy.ops.image.tile_add(number=tile.number, color=(0, 0, 0, 0), width=tile.size[0], height=tile.size[1])
+                    except Exception:
+                        pass
+        else:
+            temp_alpha_image = bake_image.copy()
+        
+        bake_image = ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu, bake_objects=bake_objects)
         
         temp_alpha_image.colorspace_settings.name = 'Non-Color'
         connect_sockets(surface_socket, alpha_output)
-        temp_alpha_image = ps_bake(context, obj, mat, uv_layer, temp_alpha_image, use_gpu)
+        temp_alpha_image = ps_bake(context, obj, mat, uv_layer, temp_alpha_image, use_gpu, bake_objects=bake_objects)
 
         if bake_image and temp_alpha_image:
             pixels_bake = np.empty(len(bake_image.pixels), dtype=np.float32)

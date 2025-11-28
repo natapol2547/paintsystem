@@ -23,11 +23,119 @@ from bl_ui.properties_paint_common import (
     UnifiedPaintPanel,
 )
 
+class PAINTSYSTEM_OT_PrintLoadedPath(Operator):
+    bl_idname = "paint_system.print_loaded_path"
+    bl_label = "Paint System: Print Loaded Path"
+    bl_description = "Print the file path of the loaded Paint System module"
+
+    def execute(self, context):
+        try:
+            # Find the actual module name (could be paintsystem or bl_ext.vscode_development.paintsystem)
+            import sys
+            module = None
+            module_name = None
+            for name, mod in sys.modules.items():
+                if hasattr(mod, '__file__') and mod.__file__ and 'paintsystem' in mod.__file__:
+                    if name.endswith('paintsystem') or 'paintsystem.__init__' in name:
+                        module = mod
+                        module_name = name.split('.')[0] if '.' in name else name
+                        break
+            
+            if module:
+                path = inspect.getfile(module)
+                self.report({'INFO'}, f"Paint System loaded from: {path}")
+                print(f"[PaintSystem] Module: {module_name}")
+                print(f"[PaintSystem] Path: {path}")
+            else:
+                self.report({'ERROR'}, "Could not find Paint System module")
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to get module path: {e}")
+        return {'FINISHED'}
+
+
+class PAINTSYSTEM_OT_ReloadAddon(Operator):
+    bl_idname = "paint_system.reload_addon"
+    bl_label = "Paint System: Reload Add-on"
+    bl_description = "Unregister and reload Paint System from the current workspace"
+
+    def execute(self, context):
+        try:
+            import sys
+            # Find the actual root module (could be paintsystem or bl_ext.vscode_development.paintsystem)
+            root_module_name = None
+            
+            # First, try to find the module by looking for the operators submodule (this file)
+            for name in sys.modules.keys():
+                if 'paintsystem' in name.lower() and 'operators' in name:
+                    # Extract root module name (everything before .operators)
+                    parts = name.split('.operators')[0].split('.')
+                    # Get the full root path (e.g., bl_ext.vscode_development.paintsystem)
+                    if len(parts) >= 1:
+                        # Try increasingly longer prefixes to find the actual root
+                        for i in range(len(parts), 0, -1):
+                            potential_root = '.'.join(parts[:i])
+                            if potential_root in sys.modules:
+                                root_module_name = potential_root
+                                break
+                    if root_module_name:
+                        break
+            
+            if not root_module_name:
+                # Fallback: search for any module containing paintsystem
+                for name in sys.modules.keys():
+                    if name.endswith('paintsystem'):
+                        root_module_name = name
+                        break
+            
+            if not root_module_name:
+                self.report({'ERROR'}, "Could not find paintsystem module in sys.modules")
+                return {'CANCELLED'}
+            
+            root_module = sys.modules.get(root_module_name)
+            if not root_module:
+                self.report({'ERROR'}, f"Could not find module: {root_module_name}")
+                return {'CANCELLED'}
+            
+            # Unregister
+            if hasattr(root_module, "unregister"):
+                try:
+                    root_module.unregister()
+                    print(f"[PaintSystem] Unregistered {root_module_name}")
+                except Exception as e:
+                    print(f"[PaintSystem] Unregister failed: {e}")
+            
+            # Reload all paintsystem submodules
+            importlib.invalidate_caches()
+            modules_to_reload = [name for name in sys.modules.keys() if 'paintsystem' in name]
+            for module_name in modules_to_reload:
+                try:
+                    importlib.reload(sys.modules[module_name])
+                except Exception as e:
+                    print(f"[PaintSystem] Failed to reload {module_name}: {e}")
+            
+            # Register
+            if hasattr(root_module, "register"):
+                root_module.register()
+                print(f"[PaintSystem] Registered {root_module_name}")
+            
+            print("[PaintSystem] Reload complete")
+            return {'FINISHED'}
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print(f"[PaintSystem] Failed to reload add-on: {e}")
+            return {'CANCELLED'}
+
+import importlib
+import inspect
+
+
 class PAINTSYSTEM_OT_TogglePaintMode(PSContextMixin, Operator):
     bl_idname = "paint_system.toggle_paint_mode"
     bl_label = "Toggle Paint Mode"
     bl_options = {'REGISTER', 'UNDO'}
     bl_description = "Toggle between texture paint and object mode"
+    
     
     @classmethod
     def poll(cls, context):
@@ -344,6 +452,9 @@ class PAINTSYSTEM_OT_DuplicatePaintSystemData(PSContextMixin, MultiMaterialOpera
 
 classes = (
     PAINTSYSTEM_OT_TogglePaintMode,
+    # Debug utility operators
+    PAINTSYSTEM_OT_PrintLoadedPath,
+    PAINTSYSTEM_OT_ReloadAddon,
     PAINTSYSTEM_OT_AddPresetBrushes,
     PAINTSYSTEM_OT_SelectMaterialIndex,
     PAINTSYSTEM_OT_NewMaterial,

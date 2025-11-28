@@ -275,6 +275,24 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
         # layout.operator("paint_system.new_image_layer", text="Create New Image Layer")
 
 
+class MAT_PT_PaintSystemDeveloper(PSContextMixin, Panel):
+    bl_idname = "MAT_PT_PaintSystemDeveloper"
+    bl_label = "Developer Tools"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_parent_id = "MAT_PT_PaintSystemMainPanel"
+    bl_category = 'Paint System'
+    bl_options = {'DEFAULT_CLOSED'}
+    
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = False
+        
+        col = layout.column(align=True)
+        col.operator("paint_system.reload_addon", text="Reload Add-on", icon="FILE_REFRESH")
+        col.operator("paint_system.print_loaded_path", text="Print Module Path", icon="CONSOLE")
+
+
 classes = (
     MAT_PT_Support,
     MAT_PT_PaintSystemMaterialSettings,
@@ -282,6 +300,7 @@ classes = (
     MAT_MT_PaintSystemMaterialSelectMenu,
     MAT_PT_PaintSystemMainPanel,
     MAT_PT_PaintSystemGroups,
+    MAT_PT_PaintSystemDeveloper,
 )
 
 register, unregister = register_classes_factory(classes)

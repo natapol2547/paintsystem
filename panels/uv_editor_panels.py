@@ -55,6 +55,7 @@ class IMAGE_PT_PaintSystemUV(PSContextMixin, Panel):
                 row.prop_search(context.scene, 'ps_active_uv_map', ps_ctx.ps_object.data, "uv_layers", text="")
                 row.operator("paint_system.set_active_uv_from_layer", text="", icon='EYEDROPPER')
                 row.operator("paint_system.sync_uv_maps", text="", icon='UV_SYNC_SELECT')
+                row.popover("PAINTSYSTEM_PT_uv_tools_popover", text="", icon='DOWNARROW_HLT')
                 
                 # UV Mode selector with chunky box
                 mode_box = box.box()

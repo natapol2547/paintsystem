@@ -124,6 +124,13 @@ class PaintSystemPreferences(AddonPreferences):
         if kmi:
             self.draw_shortcut(box, kmi, "Toggle Eraser")
 
+        # Debug tools (not saved; for developer troubleshooting)
+        debug_box = layout.box()
+        debug_box.label(text="Debug Tools")
+        row = debug_box.row(align=True)
+        row.operator("paint_system.print_loaded_path", text="Print Loaded Path")
+        row.operator("paint_system.reload_addon", text="Reload Add-on")
+
 classes = (
     PaintSystemPreferences,
 )

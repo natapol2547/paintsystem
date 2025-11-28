@@ -90,10 +90,10 @@ class MultiMaterialOperator(Operator):
 class PSUVOptionsMixin():
     
     def update_use_paint_system_uv(self, context):
-        if self.use_paint_system_uv and self.coord_type != 'AUTO':
-            self.coord_type = 'AUTO'
-        elif not self.use_paint_system_uv and self.coord_type == 'AUTO':
+        # When AUTO UV is enabled, set to UV mode with PS UV map
+        if self.use_paint_system_uv:
             self.coord_type = 'UV'
+            self.uv_map_name = DEFAULT_PS_UV_MAP_NAME
     
     use_paint_system_uv: BoolProperty(
         name="Use Paint System UV",
@@ -103,8 +103,9 @@ class PSUVOptionsMixin():
         options={'SKIP_SAVE'}
     )
     def update_coord_type(self, context):
-        if self.coord_type == 'AUTO' and not self.use_paint_system_uv:
-            self.use_paint_system_uv = True
+        # If switching away from UV, disable AUTO UV flag
+        if self.coord_type != 'UV':
+            self.use_paint_system_uv = False
     
     coord_type: EnumProperty(
         name="Coordinate Type",
@@ -138,7 +139,7 @@ class PSUVOptionsMixin():
         if not self.checked_coord_type:
             self.get_coord_type(context)
         if self.use_paint_system_uv:
-            self.coord_type = 'AUTO'
+            self.coord_type = 'UV'
             self.uv_map_name = DEFAULT_PS_UV_MAP_NAME
         if ps_ctx.active_group:
             ps_ctx.active_group.coord_type = self.coord_type
@@ -150,12 +151,13 @@ class PSUVOptionsMixin():
         self.checked_coord_type = True
         if ps_ctx.active_channel:
             past_coord_type = ps_ctx.active_group.coord_type
-            if past_coord_type == 'AUTO':
+            past_uv_map_name = ps_ctx.active_group.uv_map_name
+            # Detect AUTO UV mode: UV coord_type + PS_map1
+            if past_coord_type == 'UV' and past_uv_map_name == DEFAULT_PS_UV_MAP_NAME:
                 self.use_paint_system_uv = True
             else:
                 self.use_paint_system_uv = False
-                self.coord_type = past_coord_type
-            past_uv_map_name = ps_ctx.active_group.uv_map_name
+            self.coord_type = past_coord_type
             self.uv_map_name = past_uv_map_name if past_uv_map_name else self.get_default_uv_map_name(context)
         else:
             self.uv_map_name = self.get_default_uv_map_name(context)
@@ -223,6 +225,33 @@ class PSImageCreateMixin(PSUVOptionsMixin):
         default=False
     )
     
+    def _get_mesh_objects(self, context, ps_ctx):
+        """Get mesh objects based on bake_all_material_objects setting"""
+        # Check if operator has the property (BakeOperator has it, others may not)
+        bake_all = getattr(self, 'bake_all_material_objects', False)
+        
+        if bake_all and ps_ctx.active_material:
+            # Get ALL objects using this material from all scenes
+            mat = ps_ctx.active_material
+            mesh_objects = []
+            for scene in bpy.data.scenes:
+                for obj in scene.objects:
+                    if obj.type == 'MESH':
+                        for slot in obj.material_slots:
+                            if slot.material and slot.material == mat:
+                                mesh_objects.append(obj)
+                                break
+            return mesh_objects
+        else:
+            # Use only selected objects (original behavior)
+            mesh_objects = [obj for obj in context.selected_objects if obj.type == 'MESH']
+            
+            # Fallback to active object if no selection
+            if not mesh_objects and ps_ctx.ps_object and ps_ctx.ps_object.type == 'MESH':
+                mesh_objects = [ps_ctx.ps_object]
+            
+            return mesh_objects
+    
     def image_create_ui(self, layout, context, show_name=True):
         if show_name:
             row = layout.row(align=True)
@@ -238,11 +267,25 @@ class PSImageCreateMixin(PSUVOptionsMixin):
             col.prop(self, "image_height", text="Height")
         if self.coord_type == 'UV':
             ps_ctx = PSContextMixin.parse_context(context)
-            uv_layer = ps_ctx.ps_object.data.uv_layers.get(self.uv_map_name)
-            udim_tiles = get_udim_tiles(uv_layer)
-            use_udim_tiles = udim_tiles != {1001}
-            if udim_tiles and use_udim_tiles:
+            
+            # Get mesh objects based on bake_all_material_objects setting
+            mesh_objects = self._get_mesh_objects(context, ps_ctx)
+            
+            # Collect UDIM tiles from mesh objects
+            all_udim_tiles = set()
+            for obj in mesh_objects:
+                if hasattr(obj.data, 'uv_layers') and self.uv_map_name in obj.data.uv_layers:
+                    uv_layer = obj.data.uv_layers.get(self.uv_map_name)
+                    if uv_layer:
+                        tiles = get_udim_tiles(uv_layer)
+                        all_udim_tiles.update(tiles)
+            
+            use_udim_tiles = all_udim_tiles and all_udim_tiles != {1001}
+            if use_udim_tiles:
                 box.prop(self, "use_udim_tiles")
+                if all_udim_tiles:
+                    box.label(text=f"Tiles: {sorted(all_udim_tiles)}", icon='UV')
+                    box.label(text=f"From {len(mesh_objects)} object(s)", icon='OBJECT_DATA')
             
     def create_image(self, context):
         if self.image_resolution != 'CUSTOM':
@@ -250,9 +293,28 @@ class PSImageCreateMixin(PSUVOptionsMixin):
             self.image_height = int(self.image_resolution)
         if self.coord_type == 'UV':
             ps_ctx = PSContextMixin.parse_context(context)
-            uv_layer = ps_ctx.ps_object.data.uv_layers.get(self.uv_map_name)
-            use_udim_tiles = get_udim_tiles(uv_layer) != {1001} and self.use_udim_tiles
-            img = create_ps_image(self.image_name, self.image_width, self.image_height, use_udim_tiles=use_udim_tiles, uv_layer=uv_layer)
+            
+            # Get mesh objects based on settings
+            mesh_objects = self._get_mesh_objects(context, ps_ctx)
+            
+            # Collect UDIM tiles from mesh objects
+            all_udim_tiles = set()
+            for obj in mesh_objects:
+                if hasattr(obj.data, 'uv_layers') and self.uv_map_name in obj.data.uv_layers:
+                    uv_layer = obj.data.uv_layers.get(self.uv_map_name)
+                    if uv_layer:
+                        tiles = get_udim_tiles(uv_layer)
+                        all_udim_tiles.update(tiles)
+            
+            use_udim_tiles = all_udim_tiles and all_udim_tiles != {1001} and self.use_udim_tiles
+            
+            if use_udim_tiles:
+                # Create UDIM image with all collected tiles
+                img = create_ps_image(self.image_name, self.image_width, self.image_height, 
+                                     use_udim_tiles=True, udim_tiles=all_udim_tiles)
+            else:
+                # Create regular single-tile image
+                img = create_ps_image(self.image_name, self.image_width, self.image_height)
         else:
             img = create_ps_image(self.image_name, self.image_width, self.image_height)
         return img
@@ -261,13 +323,22 @@ class PSImageCreateMixin(PSUVOptionsMixin):
         """Get the coord_type from the active channel and set it on the operator"""
         super().get_coord_type(context)
         ps_ctx = PSContextMixin.parse_context(context)
-        if ps_ctx.ps_object.mode == 'EDIT':
+        if ps_ctx.ps_object and ps_ctx.ps_object.mode == 'EDIT':
             bpy.ops.object.mode_set(mode="OBJECT")
-        uv_layer = ps_ctx.ps_object.data.uv_layers.get(self.uv_map_name)
-        if uv_layer:
-            self.use_udim_tiles = get_udim_tiles(uv_layer) != {1001}
-        else:
-            self.use_udim_tiles = False
+        
+        # Get mesh objects based on settings
+        mesh_objects = self._get_mesh_objects(context, ps_ctx)
+        
+        # Check for UDIM tiles across mesh objects
+        all_udim_tiles = set()
+        for obj in mesh_objects:
+            if hasattr(obj.data, 'uv_layers') and self.uv_map_name in obj.data.uv_layers:
+                uv_layer = obj.data.uv_layers.get(self.uv_map_name)
+                if uv_layer:
+                    tiles = get_udim_tiles(uv_layer)
+                    all_udim_tiles.update(tiles)
+        
+        self.use_udim_tiles = all_udim_tiles and all_udim_tiles != {1001}
 
 
 class PSImageFilterMixin():
