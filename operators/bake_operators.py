@@ -381,7 +381,7 @@ class PAINTSYSTEM_OT_DeleteBakedImage(PSContextMixin, Operator):
             text="Click OK to delete the baked image.")
 
 
-class PAINTSYSTEM_OT_TransferImageLayerUV(PSContextMixin, PSUVOptionsMixin, Operator):
+class PAINTSYSTEM_OT_ConvertToImageLayer(PSContextMixin, PSImageCreateMixin, Operator):
     bl_idname = "paint_system.transfer_image_layer_uv"
     bl_label = "Bake to Different UV Layout"
     bl_description = "Re-bake this layer's texture using a different UV map layout"
@@ -802,12 +802,6 @@ class PAINTSYSTEM_OT_TransferImageLayerUV(PSContextMixin, PSUVOptionsMixin, Oper
         layer.image = new_image
         
         # Re-enable other layers
-        for other_layer in to_be_enabled_layers:
-            other_layer.enabled = True
-
-        return True
-
-
 class PAINTSYSTEM_OT_ConvertToImageLayer(PSContextMixin, PSImageCreateMixin, Operator):
     bl_idname = "paint_system.convert_to_image_layer"
     bl_label = "Transfer Image Layer UV"
@@ -1160,7 +1154,6 @@ class PAINTSYSTEM_OT_MergeUp(PSContextMixin, PSImageCreateMixin, Operator):
 classes = (
     PAINTSYSTEM_OT_BakeChannel,
     PAINTSYSTEM_OT_BakeAllChannels,
-    PAINTSYSTEM_OT_TransferImageLayerUV,
     PAINTSYSTEM_OT_ExportImage,
     PAINTSYSTEM_OT_ExportAllImages,
     PAINTSYSTEM_OT_DeleteBakedImage,

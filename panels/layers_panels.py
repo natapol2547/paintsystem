@@ -559,29 +559,16 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
             # Image selector for IMAGE layers
             if active_layer.type == 'IMAGE':
                 image_node = active_layer.find_node("image")
-                # Single row: Coordinate type (icon + dropdown) BEFORE custom image selector (without unpack button)
-                coord_image_row = layout.row(align=True)
-                coord_icon_row = coord_image_row.row(align=True)
-                coord_icon_row.label(icon='EMPTY_ARROWS')
-                coord_dropdown = coord_icon_row.row(align=True)
-                coord_dropdown.scale_x = 0.7
-                coord_dropdown.prop(active_layer, "coord_type", text="")
-                # Custom image selector (pointer only) + manual user count (no unpack button)
-                if image_node:
-                    image_row = coord_image_row.row(align=True)
-                    # Minimal image selector (no fake user, no user count)
-                    image_row.prop_search(image_node, "image", bpy.data, "images", text="")
-                # Transfer UV button at end (only AUTO/UV)
-                # Separate UV Map row when UV mode; move transfer button here
+                # First row: Coordinate type and UV Map (when UV mode)
+                coord_row = layout.row(align=True)
+                coord_row.prop(active_layer, "coord_type", text="")
                 if active_layer.coord_type == 'UV':
-                    uv_row = layout.row(align=True)
-                    uv_row.prop_search(active_layer, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="UV Map", icon='GROUP_UVS')
-                    uv_row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
-                    uv_row.operator("paint_system.fix_uv_maps_start", text="", icon='LOOP_FORWARDS')
-                elif active_layer.coord_type == 'AUTO':
-                    # For AUTO keep transfer button on coordinate/image row
-                    coord_image_row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
-                    coord_image_row.operator("paint_system.fix_uv_maps_start", text="", icon='LOOP_FORWARDS')
+                    coord_row.prop_search(active_layer, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="", icon='GROUP_UVS')
+                    coord_row.operator("paint_system.sync_uv_to_layer", text="", icon='UV_SYNC_SELECT')
+                # Second row: Image selector
+                if image_node:
+                    image_row = layout.row(align=True)
+                    image_row.prop_search(image_node, "image", bpy.data, "images", text="", icon='IMAGE_DATA')
 
 # Grease Pencil Layer Settings
 
@@ -701,9 +688,6 @@ class MAT_PT_LayerTransformSettings(PSContextMixin, Panel):
         col = layout.column()
         row = col.row(align=True)
         row.prop(active_layer, "coord_type", text="Coord Type")
-        if active_layer.coord_type in ['AUTO', 'UV'] and active_layer.type == 'IMAGE':
-            row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
-            row.operator("paint_system.fix_uv_maps_start", text="", icon='LOOP_FORWARDS')
         if active_layer.coord_type == 'UV':
             row_uv = col.row(align=True)
             row_uv.prop_search(active_layer, "uv_map_name", text="UV Map",
@@ -829,15 +813,6 @@ class MAT_MT_LayerMenu(PSContextMixin, Menu):
                 "paint_system.convert_to_image_layer",
                 text="Convert to Image Layer",
                 icon_value=get_icon('image')
-            )
-        
-        # Fix UV Maps (for IMAGE layers with UV)
-        if ps_ctx.active_layer and ps_ctx.active_layer.type == 'IMAGE' and ps_ctx.active_layer.uses_coord_type:
-            special_actions = True
-            layout.operator(
-                "paint_system.fix_uv_maps_start",
-                text="Fix UV Maps",
-                icon='LOOP_FORWARDS'
             )
         
         if ps_ctx.unlinked_layer and is_layer_linked(ps_ctx.unlinked_layer):

@@ -4,29 +4,31 @@ Guidance for AI agents working in this Blender (4.2+) NPR painting add-on. Focus
 
 ## Big Picture
 - **Material-centric system** with three synchronized hierarchies:
-    - **UI list**: `nested_list_manager.py` flattens parent-child layers for UI display. Generic base classes (`BaseNestedListManager`, `BaseNestedListItem`) provide hierarchical list operations.
-    - **Nodes**: shader graphs in `material.node_tree` built by `graph/*.py`. NodeTreeBuilder creates versioned graphs with named nodes.
-    - **Data**: `paintsystem/data.py` PropertyGroups for PaintSystemGlobalData → MaterialData → Group → Channel → Layer (4-level hierarchy).
-- **Update flow**: Property changes trigger `update_node_tree()` callbacks which rebuild shader nodes. Never call graph builders directly from UI/operators.
-- **Registration order matters**: `paintsystem` module (contains PropertyGroups) must register first, then operators/panels that reference them.
+    - **UI list**: `nested_list_manager.py` flattens parent-child layers for UI display. Generic base classes (`BaseNestedListManager`, `BaseNestedListItem`) provide hierarchical folder/item operations with parent-child tracking.
+    - **Nodes**: shader graphs in `material.node_tree` built by `graph/*.py`. `NodeTreeBuilder` creates versioned graphs with named nodes for consistent lookups.
+    - **Data**: `paintsystem/data.py` PropertyGroups for `PaintSystemGlobalData` → `MaterialData` → `Group` → `Channel` → `Layer` (4-level hierarchy).
+- **Update flow**: Property changes trigger `update_node_tree()` callbacks which rebuild shader nodes. **Never call graph builders directly** from UI/operators; mutate properties and let callbacks handle compilation.
+- **Registration order matters**: `paintsystem` module (contains PropertyGroups) must register first via `paintsystem.register()`, then operators/panels via `register_submodule_factory()`. Icons load early for `EnumProperty` resolution.
 
 ## Key Files & Modules
-- `paintsystem/data.py` (3466 lines): Core PropertyGroups, `parse_context()`, `LAYER_TYPE_ENUM`, all update callbacks, linked layer system.
-- `paintsystem/graph/basic_layers.py`: Per-layer graph builders (`create_<type>_graph`) + `get_layer_version_for_type()` for migration.
-- `paintsystem/graph/nodetree_builder.py`: `NodeTreeBuilder` class - creates/updates shader node graphs with versioning.
-- `paintsystem/nested_list_manager.py`: Base classes for hierarchical UI lists (folder/item structure).
-- `paintsystem/handlers.py`: Load-time migration via `@persistent` handlers, layer versioning, frame-based layer actions.
-- `operators/common.py`: Essential mixins - `PSContextMixin` (context parsing), `MultiMaterialOperator` (batch ops), `PSUVOptionsMixin`, `PSImageCreateMixin`.
-- `operators/layers_operators.py`: All layer CRUD operations; demonstrates proper mixin usage.
-- `utils/nodes.py`: Node tree traversal (`traverse_connected_nodes`), lookups (`find_node`, `get_material_output`).
-- `utils/udim.py`: UDIM detection/creation utilities using NumPy for UV analysis.
+- `paintsystem/data.py` (3466 lines): Core PropertyGroups, `PSContext` dataclass, `parse_context()`, `LAYER_TYPE_ENUM`, all update callbacks, linked layer system with `linked_layer_uid` + `linked_material`.
+- `paintsystem/graph/basic_layers.py`: Per-layer graph builders (`create_<type>_graph`), version constants (`IMAGE_LAYER_VERSION = 3`, etc.), `get_layer_version_for_type()` for migration dispatch.
+- `paintsystem/graph/nodetree_builder.py`: `NodeTreeBuilder` class - creates/updates shader node graphs with versioning; stores metadata in node tree custom properties.
+- `paintsystem/nested_list_manager.py`: Generic base classes `BaseNestedListManager` and `BaseNestedListItem` for hierarchical UI lists with `parent_id`, `order`, and `type` (FOLDER/ITEM).
+- `paintsystem/handlers.py`: `@persistent` load-post handlers for migration (compares stored version to current), frame-based layer enable/disable actions, global→local layer migration.
+- `operators/common.py`: Essential mixins - `PSContextMixin` (context parsing), `MultiMaterialOperator` (batch ops with `context.temp_override()`), `PSUVOptionsMixin`, `PSImageCreateMixin` (UDIM-aware), `PSImageFilterMixin`.
+- `operators/layers_operators.py`: All layer CRUD operations; canonical examples of mixin usage.
+- `operators/image_filters/`: Pillow-based filters with NumPy arrays; `common.py` has `blender_image_to_numpy()` / `numpy_to_blender_image()` converters using `foreach_get/set`.
+- `utils/nodes.py`: Node tree traversal (`traverse_connected_nodes`), lookups (`find_node`, `get_material_output`), socket connection helpers.
+- `utils/udim.py`: UDIM detection/creation with NumPy (`detect_udim_from_uv`, `create_udim_image`, `copy_udim_tiles`, `fill_udim_tile`); all UV analysis uses vectorized NumPy operations.
 
 ## Essential Patterns
 
 ### Context & Data Access
-- **Context parsing**: Operators inherit `PSContextMixin` and call `self.parse_context(context)` → returns `PSContext` dataclass with `ps_object`, `active_material`, `active_group`, `active_channel`, `active_layer`.
+- **Context parsing**: Operators inherit `PSContextMixin` and call `self.parse_context(context)` → returns `PSContext` dataclass with `ps_settings`, `ps_scene_data`, `active_object`, `ps_object`, `active_material`, `ps_mat_data`, `active_group`, `active_channel`, `active_layer`, `unlinked_layer`, `active_global_layer`.
 - Non-operators use `from paintsystem.data import parse_context; ps_ctx = parse_context(context)`.
-- **Safe parsing**: `PSContextMixin.safe_parse_context(context)` returns None instead of raising on missing data.
+- **Safe parsing**: `PSContextMixin.safe_parse_context(context)` returns `None` instead of raising on missing data; validates critical components (object, scene_data) before returning.
+- **Object type support**: Context parsing handles MESH, EMPTY (parent check), GREASEPENCIL (Blender 4.3+ v3), and filters out "PS Camera Plane" utility objects.
 
 ### Property Updates & Node Graphs
 - **Update callbacks**: Define properties with `update=update_node_tree` (module-level dispatcher). The PropertyGroup's `update_node_tree()` method rebuilds nodes.
@@ -69,10 +71,11 @@ Guidance for AI agents working in this Blender (4.2+) NPR painting add-on. Focus
 - UDIM baking: System detects multi-tile UVs, prompts user, creates tiled images with all required tiles.
 
 ### Batch Operations
-- **MultiMaterialOperator pattern**: Override `process_material(context)` method.
-- Use `context.temp_override()` inside `process_material` - never mutate context directly in loops.
+- **MultiMaterialOperator pattern**: Override `process_material(context)` method; base class handles loops and context overrides.
+- Use `context.temp_override(object=obj, active_object=obj, selected_objects=[obj], active_material=mat)` inside loops - **never mutate Blender context directly**.
 - Set `multiple_objects=True` / `multiple_materials=True` in operator properties for scope.
-- Example: `PAINTSYSTEM_OT_NewImage` processes each selected object's materials in isolation.
+- Deduplication: Uses `seen_materials` set to avoid processing same material twice across objects.
+- Example: `PAINTSYSTEM_OT_NewImage` processes each selected object's materials in isolation; errors accumulate and report at end.
 
 ### UI Panels
 - Inherit from `panels.common` base classes; call `parse_context(context)` in `draw()`.
@@ -80,10 +83,12 @@ Guidance for AI agents working in this Blender (4.2+) NPR painting add-on. Focus
 - Use `scale_content(context, layout)` for consistent spacing (respects compact mode preference).
 
 ## Conventions & Gotchas
-- Do not mutate Blender context directly in batch ops; use `context.temp_override()` inside `MultiMaterialOperator.process_material()`.
-- Auto-UV: layers may create `DEFAULT_PS_UV_MAP_NAME` when `coord_type` requires it.
-- Brush sync: `utils/unified_brushes.py` updates brush color/size/alpha based on active layer.
-- Runtime API detection: prefer `getattr()` over version checks for Blender 5+/Bforartists.
+- **Never mutate Blender context directly** in batch ops; always use `context.temp_override()` inside `MultiMaterialOperator.process_material()`.
+- **Auto-UV creation**: Layers automatically create `DEFAULT_PS_UV_MAP_NAME` when `coord_type` requires UV mapping; `update_uv_map_name_and_sync()` syncs UV across all material users.
+- **Brush sync**: `utils/unified_brushes.py` updates brush color/size/alpha based on active layer properties.
+- **Runtime API detection**: Prefer `getattr()`/`hasattr()` over version checks for Blender 5+/Bforartists compatibility.
+- **Image operations**: Use `foreach_get()`/`foreach_set()` for pixel data - orders of magnitude faster than pixel-by-pixel access.
+- **NumPy conventions**: UV analysis and image filters use vectorized NumPy arrays; flip arrays vertically when converting between Blender (bottom-left origin) and NumPy (top-left origin).
 
 ## Build/Run/Test
 
@@ -104,10 +109,10 @@ python -m py_compile __init__.py; python -m py_compile paintsystem/__init__.py; 
 - Addon ID: `paint_system` (defined in `blender_manifest.toml`).
 
 ### Dependencies & Packaging
-- **Pillow** (12.0.0): Vendored wheels for all platforms in `wheels/` (used for image filters).
-- **NumPy**: Required for UDIM UV analysis (`utils/udim.py`) and baking math - use array operations, not loops.
-- **Extension manifest**: `blender_manifest.toml` v2.1.1 - defines permissions (files, network), supported platforms, and metadata.
-- No max Blender version - forward compatible via runtime API detection (`getattr`/`hasattr`).
+- **Pillow** (12.0.0): Vendored wheels for all platforms (linux-x64, windows-x64/arm64, macos-x64/arm64) in `wheels/`; used by image filters in `operators/image_filters/`.
+- **NumPy**: Required by Blender; used for UDIM UV analysis (`utils/udim.py`), image filters (`operators/image_filters/common.py`), and baking math - **always use vectorized array operations, not loops**.
+- **Extension manifest**: `blender_manifest.toml` v2.1.1 - defines addon ID (`paint_system`), permissions (files, network), supported platforms, and Pillow wheel paths.
+- **No max Blender version** - forward compatible by design via runtime API detection (`getattr`/`hasattr`) instead of hard version checks.
 
 ### Registration Architecture
 ```

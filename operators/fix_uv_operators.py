@@ -32,7 +32,7 @@ class PAINTSYSTEM_OT_FixUVSetScope(Operator):
         return {'FINISHED'}
 
 
-class PAINTSYSTEM_OT_FixUVMapsStart(PSContextMixin, PSImageCreateMixin, Operator):
+class PAINTSYSTEM_OT_FixUVMapsApply(PSContextMixin, Operator):
     """Start Fix UV Maps session - retarget layers to new UV layout"""
     bl_idname = "paint_system.fix_uv_maps_start"
     bl_label = "Fix UV Maps"
@@ -562,14 +562,6 @@ class PAINTSYSTEM_OT_FixUVMapsStart(PSContextMixin, PSImageCreateMixin, Operator
         
         self.report({'INFO'}, f"UV Fix mode active. '{target_uv_name}' created on {created_count} object(s). Edit UVs, then click Apply in N-panel.")
         
-        # Trigger UI redraw
-        for area in context.screen.areas:
-            if area.type == 'VIEW_3D':
-                area.tag_redraw()
-        
-        return {'FINISHED'}
-
-
 class PAINTSYSTEM_OT_FixUVMapsApply(PSContextMixin, Operator):
     """Apply UV fixes - bake all affected layers to new UV layout"""
     bl_idname = "paint_system.fix_uv_maps_apply"
@@ -945,7 +937,6 @@ class PAINTSYSTEM_OT_FixUVMapsCancel(PSContextMixin, Operator):
 
 classes = (
     PAINTSYSTEM_OT_FixUVSetScope,
-    PAINTSYSTEM_OT_FixUVMapsStart,
     PAINTSYSTEM_OT_FixUVMapsApply,
     PAINTSYSTEM_OT_FixUVMapsCancel,
 )

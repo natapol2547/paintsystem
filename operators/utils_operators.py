@@ -1039,6 +1039,57 @@ class PAINTSYSTEM_OT_SyncUVMaps(PSContextMixin, PSImageCreateMixin, Operator):
         return new_image  # Return baked image object for propagation
 
 
+class PAINTSYSTEM_OT_SyncUVToLayer(PSContextMixin, Operator):
+    """Sync the active layer's UV map across all objects using this material"""
+    bl_idname = "paint_system.sync_uv_to_layer"
+    bl_label = "Sync UV to All Objects"
+    bl_description = "Ensure all objects using this material have the layer's UV map"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.safe_parse_context(context)
+        if not ps_ctx or not ps_ctx.active_layer:
+            return False
+        layer = ps_ctx.active_layer
+        return layer.type == 'IMAGE' and layer.coord_type == 'UV' and layer.uv_map_name
+    
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        mat = ps_ctx.active_material
+        layer = ps_ctx.active_layer
+        target_uv = layer.uv_map_name
+        
+        if not target_uv:
+            self.report({'WARNING'}, "No UV map selected")
+            return {'CANCELLED'}
+        
+        # Get all objects using this material
+        mat_users = [
+            o for o in context.scene.objects
+            if o.type == 'MESH' and any(ms.material == mat for ms in o.material_slots if ms.material)
+        ]
+        
+        if not mat_users:
+            self.report({'INFO'}, "No objects found with this material")
+            return {'FINISHED'}
+        
+        # Sync UV to each object
+        from ..paintsystem.data import _sync_uv_map_to_name
+        synced_count = 0
+        for obj in mat_users:
+            try:
+                _sync_uv_map_to_name(obj, target_uv)
+                synced_count += 1
+            except Exception as e:
+                import logging
+                logger = logging.getLogger("PaintSystem")
+                logger.warning(f"Failed to sync UV on {obj.name}: {e}")
+        
+        self.report({'INFO'}, f"Synced UV '{target_uv}' to {synced_count} object(s)")
+        return {'FINISHED'}
+
+
 class PAINTSYSTEM_OT_CleanupAllUVs(PSContextMixin, Operator):
     """Sync or rebuild UV maps across all objects"""
     bl_idname = "paint_system.cleanup_all_uvs"
@@ -2101,6 +2152,7 @@ classes = (
     PAINTSYSTEM_OT_ExitUVEditingMode,
     PAINTSYSTEM_OT_SelectByUDIMTile,
     PAINTSYSTEM_OT_CleanupUVMaps,
+    PAINTSYSTEM_OT_SyncUVToLayer,
     PAINTSYSTEM_OT_AddCameraPlane,
     PAINTSYSTEM_OT_HidePaintingTips,
     PAINTSYSTEM_OT_DuplicatePaintSystemData,
