@@ -197,16 +197,38 @@ def paint_system_object_update(scene: bpy.types.Scene, depsgraph: bpy.types.Deps
     if last_obj != current_obj or last_mat != current_mat:
         # Schedule update via timer instead of writing directly
         def update_tracking():
+            """Deferred write of last selected object/material.
+
+            Guard against cases where the Scene or its custom data has been
+            removed (e.g. file reload, undo, or closing file) between the
+            depsgraph handler firing and this timer executing. Prevents
+            'StructRNA of type Scene has been removed' errors.
+            """
             try:
-                scene.ps_scene_data.last_selected_object = current_obj
-                scene.ps_scene_data.last_selected_material = current_mat
-                
-                if obj and obj.type == 'MESH' and mat and hasattr(mat, 'ps_mat_data'):
+                scn = bpy.context.scene
+                if scn is None or not hasattr(scn, 'ps_scene_data'):
+                    return None
+                psd = scn.ps_scene_data
+                # Ensure referenced object/material still exist
+                if current_obj and current_obj.name in bpy.data.objects:
+                    psd.last_selected_object = current_obj
+                else:
+                    psd.last_selected_object = None
+                if current_mat and current_mat.name in bpy.data.materials:
+                    psd.last_selected_material = current_mat
+                else:
+                    psd.last_selected_material = None
+
+                if (current_obj and current_obj.type == 'MESH' and
+                        current_mat and hasattr(current_mat, 'ps_mat_data')):
                     from .data import update_active_image
                     try:
-                        update_active_image(None, bpy.context) 
+                        update_active_image(None, bpy.context)
                     except Exception as e:
                         logger.error(f"Failed to update active image: {e}")
+            except ReferenceError:
+                # RNA reference became invalid; safe to ignore
+                return None
             except Exception as e:
                 logger.error(f"Error in material tracking timer: {e}")
             return None  # Run once
