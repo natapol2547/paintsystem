@@ -316,12 +316,122 @@ def toggle_paint_mode_ui(layout: bpy.types.UILayout, context: bpy.types.Context)
         row.menu("MAT_MT_PaintSystemMergeAndExport",
                     text="Bake and Export")
 
+def _draw_layer_type_settings(layout: bpy.types.UILayout, context: bpy.types.Context, active_layer, ps_ctx):
+    """Draw layer-type-specific settings (gradient, solid color, texture, etc.)"""
+    layer_type = active_layer.type
+    
+    # Skip for IMAGE and FOLDER types - they have their own specialized panels
+    if layer_type in ('IMAGE', 'FOLDER', 'ADJUSTMENT'):
+        return
+    
+    # Create a collapsible box for layer-specific settings
+    box = layout.box()
+    
+    match layer_type:
+        case 'SOLID_COLOR':
+            box.label(text="Solid Color Settings:", icon='IMAGE_RGB_ALPHA')
+            rgb_node = active_layer.find_node("rgb")
+            if rgb_node:
+                box.prop(rgb_node.outputs[0], "default_value", text="Color")
+        
+        case 'GRADIENT':
+            box.label(text="Gradient Settings:", icon='SHADERFX')
+            col = box.column(align=True)
+            
+            # Gradient type selector
+            col.prop(active_layer, "gradient_type", text="Type")
+            
+            # Color ramp
+            gradient_node = active_layer.find_node("gradient")
+            if gradient_node:
+                col.template_color_ramp(gradient_node, "color_ramp", expand=True)
+            
+            # Interpolation settings
+            map_range = active_layer.find_node("map_range")
+            if map_range:
+                col.separator()
+                col.label(text="Interpolation", icon='IPO_LINEAR')
+                col.prop(map_range.inputs[1], "default_value", text="Start Distance")
+                col.prop(map_range.inputs[2], "default_value", text="End Distance")
+            
+            # Empty object for positional gradients
+            if active_layer.gradient_type in ('LINEAR', 'RADIAL'):
+                col.separator()
+                col.label(text="Position", icon='EMPTY_ARROWS')
+                col.prop(active_layer, "empty_object", text="Empty")
+                col.operator("paint_system.select_empty", text="Select Empty", icon='RESTRICT_SELECT_OFF')
+        
+        case 'RANDOM':
+            box.label(text="Random Color Settings:", icon='SEQ_HISTOGRAM')
+            col = box.column(align=True)
+            
+            # Find the HSV adjustment nodes
+            hue_node = active_layer.find_node("hue_multiply_add")
+            saturation_node = active_layer.find_node("saturation_multiply_add")
+            value_node = active_layer.find_node("value_multiply_add")
+            
+            if hue_node:
+                col.prop(hue_node.inputs[1], "default_value", text="Hue Multiply")
+                col.prop(hue_node.inputs[2], "default_value", text="Hue Offset")
+            if saturation_node:
+                col.prop(saturation_node.inputs[1], "default_value", text="Saturation Multiply")
+                col.prop(saturation_node.inputs[2], "default_value", text="Saturation Offset")
+            if value_node:
+                col.prop(value_node.inputs[1], "default_value", text="Value Multiply")
+                col.prop(value_node.inputs[2], "default_value", text="Value Offset")
+        
+        case 'TEXTURE':
+            box.label(text="Texture Settings:", icon='TEXTURE')
+            col = box.column(align=True)
+            
+            # Coordinate type
+            col.prop(active_layer, "coord_type", text="Coordinates")
+            if active_layer.coord_type == 'UV':
+                col.prop_search(active_layer, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="UV Map", icon='GROUP_UVS')
+                col.operator("paint_system.sync_uv_to_layer", text="Sync UV", icon='UV_SYNC_SELECT')
+            
+            # Texture node properties
+            texture_node = active_layer.find_node("texture")
+            if texture_node:
+                col.separator()
+                col.template_node_inputs(texture_node)
+        
+        case 'ATTRIBUTE':
+            box.label(text="Attribute Settings:", icon='MESH_DATA')
+            col = box.column(align=True)
+            
+            attribute_node = active_layer.find_node("attribute")
+            if attribute_node:
+                col.prop_search(attribute_node, "attribute_name", ps_ctx.active_object, "color_attributes", text="Attribute")
+        
+        case 'GEOMETRY':
+            box.label(text="Geometry Settings:", icon='MESH_DATA')
+            col = box.column(align=True)
+            
+            geometry_node = active_layer.find_node("geometry")
+            if geometry_node:
+                col.label(text="Geometry output type:")
+                col.prop(active_layer, "geometry_output", text="Output")
+        
+        case 'NODE_GROUP':
+            box.label(text="Node Group Settings:", icon='NODETREE')
+            col = box.column(align=True)
+            
+            group_node = active_layer.find_node("group")
+            if group_node and group_node.node_tree:
+                col.prop(group_node, "node_tree", text="Node Group")
+                col.separator()
+                col.template_node_inputs(group_node)
+
 def layer_settings_ui(layout: bpy.types.UILayout, context: bpy.types.Context):
     ps_ctx = PSContextMixin.parse_context(context)
     active_layer = ps_ctx.active_layer
     if not active_layer or not active_layer.node_tree:
         return
     color_mix_node = active_layer.mix_node
+    
+    # Show layer-type-specific settings before common settings
+    _draw_layer_type_settings(layout, context, active_layer, ps_ctx)
     
     if ps_ctx.ps_settings.use_legacy_ui:
         col = layout.column(align=True)
