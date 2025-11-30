@@ -178,6 +178,7 @@ COORDINATE_TYPE_ENUM = [
     ('POSITION', "Position", "Use a position output of Geometry node"),
     ('GENERATED', "Generated", "Use a generated output of Texture Coordinate node"),
     ('DECAL', "Decal", "Use a decal output of Geometry node"),
+    ('PROJECT', "Projection", "Define a projection coordinate"),
 ]
 
 ATTRIBUTE_TYPE_ENUM = [
@@ -376,6 +377,8 @@ def find_channels_containing_layer(check_layer: "Layer") -> list["Channel"]:
     return channels
 
 def get_node_from_nodetree(node_tree: NodeTree, identifier: str) -> Node | None:
+    if not node_tree or not node_tree.nodes:
+        return None
     for node in node_tree.nodes:
         if node.label == identifier:
             return node
@@ -566,6 +569,8 @@ def ensure_sockets(node_tree: NodeTree, expected_sockets: List[ExpectedSocket], 
                 socket.max_value = 1e39
 
 def get_udim_tiles(uv_layer: bpy.types.MeshUVLoopLayer):
+    if not uv_layer:
+        return {1001}
     udim_tiles = set()
     uv_data = np.empty((len(uv_layer.uv), 2), dtype=np.float32)
     for idx, uv_loop in enumerate(uv_layer.uv):
@@ -580,9 +585,11 @@ def ensure_udim_tiles(image: bpy.types.Image, uv_layer: bpy.types.MeshUVLoopLaye
     # Check position the data in uv_layer, create a list of number for UDIM tiles
     udim_tiles = get_udim_tiles(uv_layer)
     width, height = image.size
-    for tile in udim_tiles:
+    for tile_number in udim_tiles:
+        if any(tile_number == tile.number for tile in image.tiles):
+            continue
         with bpy.context.temp_override(edit_image=image):
-            bpy.ops.image.tile_add(number=tile, color=(0, 0, 0, 0), width=width, height=height)
+            bpy.ops.image.tile_add(number=tile_number, color=(0, 0, 0, 0), width=width, height=height)
     return udim_tiles
 
 def ensure_udim_tiles_for_objects(
@@ -646,7 +653,7 @@ def ensure_udim_tiles_for_objects(
 
 def create_ps_image(name: str, width: int = 2048, height: int = 2048, use_udim_tiles: bool = False, uv_layer: bpy.types.MeshUVLoopLayer = None):
     img = bpy.data.images.new(
-        name=name, width=width, height=height, alpha=True)
+        name=name, width=width, height=height, alpha=True, float_buffer=use_float)
     img.generated_color = (0, 0, 0, 0)
     img.pack()
     if use_udim_tiles:
@@ -1211,12 +1218,44 @@ class Layer(BaseNestedListItem):
         default=-1,
         update=update_node_tree
     )
+    def set_projection_view(self, context: Context):
+        active_space = context.area.spaces.active
+        if active_space.type == 'VIEW_3D':
+            region_3d = active_space.region_3d
+            if region_3d:
+                match region_3d.view_perspective:
+                    case 'PERSP':
+                        view_mat = region_3d.view_matrix.copy()
+                        view_mat.invert()
+                        loc, rot, sca = view_mat.decompose()
+                        self.projection_position = loc
+                        self.projection_rotation = rot.to_euler()
+                        self.projection_fov = 2*math.atan(0.5*72/active_space.lens)
+                    case 'ORTHO':
+                        # TODO: Implement orthographic projection
+                        pass
+                    case "CAMERA":
+                        active_camera = bpy.context.scene.camera
+                        self.projection_position = active_camera.location
+                        self.projection_rotation = active_camera.rotation_euler
+                        self.projection_fov = active_camera.data.angle
+                    case _:
+                        pass
+    def update_coord_type(self, context: Context):
+        if self.coord_type in ['DECAL', 'PROJECT']:
+            image_node = self.find_node("image")
+            if image_node:
+                image_node.extension = "CLIP"
+        if self.coord_type == "PROJECT" and not self.find_node("proj_node"):
+            # Capture the camera position
+            self.set_projection_view(context)
+        self.update_node_tree(context)
     coord_type: EnumProperty(
         items=COORDINATE_TYPE_ENUM,
         name="Coordinate Type",
         description="Coordinate type",
         default='UV',
-        update=update_node_tree,
+        update=update_coord_type,
     )
     uv_map_name: StringProperty(
         name="UV Map",
@@ -1309,6 +1348,38 @@ class Layer(BaseNestedListItem):
         default=False,
         update=update_brush_settings
     )
+    
+    # Decal properties
+    use_decal_depth_clip: BoolProperty(
+        name="Use Decal Depth Clip",
+        description="Use the decal depth clip",
+        default=True,
+        update=update_node_tree
+    )
+    
+    # Projection properties
+    projection_position: FloatVectorProperty(
+        name="Projection Position",
+        description="Projection position",
+        default=(0, 0, 0),
+        update=update_node_tree,
+        subtype='TRANSLATION'
+    )
+    projection_rotation: FloatVectorProperty(
+        name="Projection Rotation",
+        description="Projection rotation",
+        default=(0, 0, 0),
+        update=update_node_tree,
+        subtype='EULER'
+    )
+    projection_fov: FloatProperty(
+        name="Projection FOV",
+        description="Projection FOV",
+        default=40/180*math.pi,
+        update=update_node_tree,
+        subtype='ANGLE'
+    )
+    
     
     # UDIM support
     is_udim: BoolProperty(
@@ -1577,15 +1648,22 @@ def restore_cycles_settings(settings):
     scene.cycles.use_denoising = settings['use_denoising']
     scene.cycles.use_adaptive_sampling = settings['use_adaptive_sampling']
 
-def ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu=True, other_objects=None):
+def ps_bake(context, objects: list[Object], mat: Material, uv_layer, bake_image, use_gpu=True, other_objects=None, use_clear=True, margin=8, margin_type='ADJACENT_FACES'):
+    bake_objects = []
+    
+    for obj in objects:
+        if mat.name in obj.data.materials:
+            bake_objects.append(obj)
+    
+    cycles_settings = save_cycles_settings()
+    # Switch to Cycles if needed
+    
     node_tree = mat.node_tree
     
     image_node = node_tree.nodes.new(type='ShaderNodeTexImage')
     image_node.image = bake_image
     
-    cycles_settings = save_cycles_settings()
-    # Switch to Cycles if needed
-    
+    with context.temp_override(active_object=bake_objects[0], selected_objects=bake_objects):
     selected = [obj]
     if other_objects:
         # Filter out duplicates and non-mesh types defensively
@@ -1593,6 +1671,8 @@ def ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu=True, other_objects
     with context.temp_override(active_object=obj, selected_objects=selected):
         bake_params = {
             "type": 'EMIT',
+            "margin": margin,
+            "margin_type": margin_type,
         }
         if context.scene.render.engine != 'CYCLES':
             context.scene.render.engine = 'CYCLES'
@@ -1607,12 +1687,12 @@ def ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu=True, other_objects
         image_node.select = True
         node_tree.nodes.active = image_node
         try:
-            bpy.ops.object.bake(**bake_params, uv_layer=uv_layer, use_clear=True)
+            bpy.ops.object.bake(**bake_params, uv_layer=uv_layer, use_clear=use_clear)
         except Exception as e:
             # Try baking with CPU if GPU fails
             print(f"GPU baking failed, trying CPU")
             cycles.device = 'CPU'
-            bpy.ops.object.bake(**bake_params, uv_layer=uv_layer, use_clear=True)
+            bpy.ops.object.bake(**bake_params, uv_layer=uv_layer, use_clear=use_clear)
 
     # Delete bake nodes
     node_tree.nodes.remove(image_node)
@@ -1903,17 +1983,18 @@ class Channel(BaseNestedListManager):
             self.delete_layer(context, layer)
     
     def bake(
-        self,
-        context: Context,
-        mat: Material,
-        bake_image: Image,
-        uv_layer: str,
-        use_gpu: bool = True,
-        use_group_tree: bool = True,
-        force_alpha: bool = False,
-        as_tangent_normal: bool = False,
-        multi_object: bool = False,
-    ):
+            self,
+            context: Context,
+            mat: Material,
+            bake_image: Image,
+            uv_layer: str,
+            use_gpu: bool = True,
+            use_group_tree: bool = True,
+            force_alpha: bool = False, # Force to use alpha
+            as_tangent_normal: bool = False, # Bake as tangent normal
+            margin: int = 8, # Margin
+            margin_type: Literal['ADJACENT_FACES', 'EXTEND'] = "ADJACENT_FACES" # Margin type
+            ):
         """Bake the channel
 
         Args:
@@ -1938,7 +2019,13 @@ class Channel(BaseNestedListManager):
         if not node_tree:
             raise ValueError("Node tree not found")
         ps_context = parse_context(context)
-        obj = ps_context.ps_object
+        
+        if context.active_object and ps_context.active_object.type != "MESH" and ps_context.ps_object.type == "MESH":
+            # Change the active object to the ps_object
+            ps_context.active_object.select_set(False)
+            ps_context.ps_object.select_set(True)
+        
+        ps_context = parse_context(context)
         if not obj:
             raise ValueError("Paint System object not found for baking")
         other_objects: list[Object] = []
@@ -2048,11 +2135,11 @@ class Channel(BaseNestedListManager):
         # Bake image
         connect_sockets(surface_socket, color_output)
         temp_alpha_image = bake_image.copy()
-        bake_image = ps_bake(context, obj, mat, uv_layer, bake_image, use_gpu, other_objects)
+        bake_image = ps_bake(context, ps_objects, mat, uv_layer, bake_image, use_gpu, margin=margin, margin_type=margin_type, other_objects)
         
         temp_alpha_image.colorspace_settings.name = 'Non-Color'
         connect_sockets(surface_socket, alpha_output)
-        temp_alpha_image = ps_bake(context, obj, mat, uv_layer, temp_alpha_image, use_gpu, other_objects)
+        temp_alpha_image = ps_bake(context, ps_objects, mat, uv_layer, temp_alpha_image, use_gpu, margin=margin, margin_type=margin_type, other_objects)
 
         if bake_image and temp_alpha_image:
             pixels_bake = np.empty(len(bake_image.pixels), dtype=np.float32)
@@ -2433,6 +2520,18 @@ class ClipboardLayer(PropertyGroup):
         type=Material
     )
 
+
+class TempMaterial(PropertyGroup):
+    material: PointerProperty(
+        name="Material",
+        type=Material
+    )
+    enabled: BoolProperty(
+        name="Enabled",
+        description="Enabled",
+        default=False
+    )
+
 class PaintSystemGlobalData(PropertyGroup):
     """Custom data for the Paint System"""
     
@@ -2544,6 +2643,12 @@ class PaintSystemGlobalData(PropertyGroup):
         description="Hex color of the brush",
         default="#000000",
         update=update_hex_color,
+    )
+    temp_materials: CollectionProperty(
+        type=TempMaterial,
+        name="Temp Materials",
+        description="Collection of materials in the temporary collection",
+        options={'SKIP_SAVE'}
     )
     
     # Fix UV Maps Session State (runtime only)
@@ -3058,6 +3163,7 @@ class PSContext:
     ps_scene_data: PaintSystemGlobalData | None = None
     active_object: bpy.types.Object | None = None
     ps_object: bpy.types.Object | None = None
+    ps_objects: list[bpy.types.Object] | None = None
     active_material: bpy.types.Material | None = None
     ps_mat_data: MaterialData | None = None
     active_group: Group | None = None
@@ -3066,19 +3172,8 @@ class PSContext:
     unlinked_layer: Layer | None = None
     active_global_layer: GlobalLayer | None = None
 
-def parse_context(context: bpy.types.Context) -> PSContext:
-    """Parse the context and return a PSContext object."""
-    if not context:
-        raise ValueError("Context cannot be None")
-    if not isinstance(context, bpy.types.Context):
-        raise TypeError("context must be of type bpy.types.Context")
-    
-    ps_settings = get_preferences(context)
-
-    ps_scene_data = getattr(context.scene, 'ps_scene_data', None)
-    
+def get_ps_object(obj) -> bpy.types.Object:
     ps_object = None
-    obj = hasattr(context, 'active_object') and context.active_object
     if obj:
         match obj.type:
             case 'EMPTY':
@@ -3092,12 +3187,9 @@ def parse_context(context: bpy.types.Context) -> PSContext:
             case _:
                 obj = None
                 ps_object = None
-        if obj and obj.name == "PS Camera Plane" and ps_scene_data:
-            obj = ps_scene_data.last_selected_ps_object
-            ps_object = obj
+    return ps_object
 
-    mat = ps_object.active_material if ps_object else None
-    
+def parse_material(mat: Material) -> tuple[MaterialData, Group, Channel, Layer]:
     mat_data = None
     groups = None
     active_group = None
@@ -3123,11 +3215,35 @@ def parse_context(context: bpy.types.Context) -> PSContext:
             if unlinked_layer:
                 unlinked_layer = unlinked_layer
     
+    return mat_data, active_group, active_channel, unlinked_layer
+
+def parse_context(context: bpy.types.Context) -> PSContext:
+    """Parse the context and return a PSContext object."""
+    if not context:
+        raise ValueError("Context cannot be None")
+    if not isinstance(context, bpy.types.Context):
+        raise TypeError("context must be of type bpy.types.Context")
+    
+    ps_settings = get_preferences(context)
+    ps_scene_data = context.scene.ps_scene_data
+    obj = hasattr(context, 'active_object') and context.active_object
+    ps_object = get_ps_object(obj)
+    
+    ps_objects = []
+    if hasattr(context, 'selected_objects'):
+        for obj in [*context.selected_objects, context.active_object]:
+            ps_obj = get_ps_object(obj)
+            if ps_obj and ps_obj not in ps_objects:
+                ps_objects.append(ps_obj)
+    mat = ps_object.active_material if ps_object else None
+    mat_data, active_group, active_channel, unlinked_layer = parse_material(mat)
+    
     return PSContext(
         ps_settings=ps_settings,
         ps_scene_data=ps_scene_data,
         active_object=obj,
         ps_object=ps_object,
+        ps_objects=ps_objects,
         active_material=mat,
         ps_mat_data=mat_data,
         active_group=active_group,
@@ -3417,6 +3533,7 @@ classes = (
     Channel,
     Group,
     ClipboardLayer,
+    TempMaterial,
     PaintSystemGlobalData,
     MaterialData,
     LegacyPaintSystemLayer,

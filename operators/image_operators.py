@@ -349,7 +349,15 @@ if PIL_AVAILABLE:
                 else:
                     self.report({'WARNING'}, f"Brush texture not found: {self.brush_texture_path}")
             
-            new_image = painter.apply_brush_painting(image, brush_folder_path=brush_folder_path, brush_texture_path=brush_texture_path, custom_image_gradient=custom_image_gradient)
+            wm = bpy.context.window_manager 
+            def callback(total_brush, brush_applied):
+                if brush_applied <= 1:
+                    wm.progress_begin(0, total_brush)
+                wm.progress_update(brush_applied)
+            
+            new_image = painter.apply_brush_painting(image, brush_folder_path=brush_folder_path, brush_texture_path=brush_texture_path, custom_image_gradient=custom_image_gradient, brush_callback=callback)
+            
+            wm.progress_end()
             if ps_ctx.active_channel.use_bake_image:
                 ps_ctx.active_channel.bake_image = new_image
             else:

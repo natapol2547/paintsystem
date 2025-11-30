@@ -9,6 +9,7 @@ from ..paintsystem.donations import get_donation_info
 from .common import (
     PSContextMixin,
     get_icon,
+    line_separator,
     scale_content,
     check_group_multiuser,
     toggle_paint_mode_ui
@@ -59,10 +60,7 @@ class MAT_PT_Support(PSContextMixin, Panel):
             if donation_info:
                 align_center(col).label(text=f"*~~   ${str(donation_info['totalSales'])}   ~~*")
                 if donation_info['recentDonations'] and len(donation_info['recentDonations']) > 0:
-                    if is_newer_than(4, 2):
-                        col.separator(type = 'LINE')
-                    else:
-                        col.separator()
+                    line_separator(col)
                     date_format = '%d-%m-%y %H:%M'
                     # year is current year
                     current_year = datetime.now().year
@@ -196,7 +194,6 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
         ps_ctx = self.parse_context(context)
         row = layout.row(align=True)
         if ps_ctx.ps_object and ps_ctx.ps_object.material_slots and len(ps_ctx.ps_object.material_slots) > 1:
-            row.operator("w,.call")
             row.popover("MAT_PT_PaintSystemMaterialSettings", text="Material", icon="MATERIAL")
         else:
             row.popover("MAT_PT_Support", icon="FUND", text="Wah!")

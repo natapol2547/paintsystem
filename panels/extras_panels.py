@@ -88,7 +88,6 @@ class MAT_PT_Brush(PSContextMixin, Panel, UnifiedPaintPanel):
         ps_ctx = self.parse_context(context)
         settings = self.paint_settings(context)
         brush = settings.brush
-        mode = self.get_brush_mode(context)
         # Check blender version
         if not is_newer_than(4, 3):
             layout.template_ID_preview(settings, "brush",
@@ -114,33 +113,19 @@ class MAT_PT_Brush(PSContextMixin, Panel, UnifiedPaintPanel):
         if not brush_imported:
             layout.operator("paint_system.add_preset_brushes",
                             text="Add Preset Brushes", icon="IMPORT")
-
-class MAT_PT_BrushAdvanced(PSContextMixin, Panel):
-    bl_idname = 'MAT_PT_BrushAdvanced'
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_label = "Advacnced Settings"
-    bl_category = 'Paint System'
-    bl_parent_id = 'MAT_PT_Brush'
-    bl_options = {'DEFAULT_CLOSED'}
-    
-    @classmethod
-    def poll(cls, context):
-        ps_ctx = cls.parse_context(context)
-        return ps_ctx.ps_object.type == 'MESH'
-
-    def draw(self, context):
-        layout = self.layout
-        ps_ctx = self.parse_context(context)
-        image_paint = context.tool_settings.image_paint
-        layout.prop(image_paint, "use_occlude", text="Occlude Faces")
-        layout.prop(image_paint, "use_backface_culling", text="Backface Culling")
         
-        layout.prop(image_paint, "use_normal_falloff", text="Normal Falloff")
-        col = layout.column(align=True)
-        col.use_property_split = True
-        col.use_property_decorate = False
-        col.prop(image_paint, "normal_angle", text="Angle")
+        header, panel = layout.panel("advanced_brush_settings_panel", default_closed=True)
+        header.label(text="Advanced Settings", icon="BRUSH_DATA")
+        if panel:
+            image_paint = context.tool_settings.image_paint
+            panel.prop(image_paint, "use_occlude", text="Occlude Faces")
+            panel.prop(image_paint, "use_backface_culling", text="Backface Culling")
+            
+            panel.prop(image_paint, "use_normal_falloff", text="Normal Falloff")
+            col = panel.column(align=True)
+            col.use_property_split = True
+            col.use_property_decorate = False
+            col.prop(image_paint, "normal_angle", text="Angle")
 
 
 class MAT_PT_BrushColorSettings(PSContextMixin, Panel):
@@ -378,7 +363,6 @@ def draw_paint_system_material(self, context):
 classes = (
     MAT_PT_BrushTooltips,
     MAT_PT_Brush,
-    MAT_PT_BrushAdvanced,
     MAT_PT_BrushColorSettings,
     MAT_PT_BrushColor,
 )

@@ -9,6 +9,7 @@ from ..utils.version import is_newer_than
 logger = logging.getLogger("PaintSystem")
 from .common import (
     PSContextMixin,
+    line_separator,
     scale_content,
     icon_parser,
     get_icon,
@@ -269,6 +270,7 @@ class MAT_PT_Layers(PSContextMixin, Panel):
     bl_region_type = "UI"
     bl_label = "Layers"
     bl_category = 'Paint System'
+    # bl_parent_id = 'MAT_PT_PaintSystemMainPanel'
 
     @classmethod
     def poll(cls, context):
@@ -294,16 +296,16 @@ class MAT_PT_Layers(PSContextMixin, Panel):
     def draw_header_preset(self, context):
         layout = self.layout
         ps_ctx = self.parse_context(context)
-        if context.mode == 'PAINT_TEXTURE' and ps_ctx.active_channel:
-            layout.popover(
-                panel="MAT_PT_ChannelsSelect",
-                text=ps_ctx.active_channel.name if ps_ctx.active_channel else "No Channel",
-                icon_value=get_icon_from_channel(ps_ctx.active_channel)
-            )
-        else:
-            if ps_ctx.ps_object.type == 'MESH' and ps_ctx.active_channel.bake_image:
-                layout.prop(ps_ctx.active_channel, "use_bake_image",
-                        text="Use Baked", icon="TEXTURE_DATA")
+        # if context.mode == 'PAINT_TEXTURE' and ps_ctx.active_channel:
+        #     layout.popover(
+        #         panel="MAT_PT_ChannelsSelect",
+        #         text=ps_ctx.active_channel.name if ps_ctx.active_channel else "No Channel",
+        #         icon_value=get_icon_from_channel(ps_ctx.active_channel)
+        #     )
+        # else:
+        if ps_ctx.ps_object.type == 'MESH' and ps_ctx.active_channel.bake_image:
+            layout.prop(ps_ctx.active_channel, "use_bake_image",
+                    text="Use Baked", icon="TEXTURE_DATA")
 
     def draw(self, context):
         ps_ctx = self.parse_context(context)
@@ -427,16 +429,10 @@ class MAT_PT_Layers(PSContextMixin, Panel):
                      icon_value=get_icon('folder'), text="")
                 col.menu("MAT_MT_LayerMenu",
                         text="", icon='COLLAPSEMENU')
-                if is_newer_than(4, 2):
-                    col.separator(type = 'LINE')
-                else:
-                    col.separator()
+                line_separator(col)
                 col.operator("paint_system.delete_item",
                                 text="", icon="TRASH")
-                if is_newer_than(4, 2):
-                    col.separator(type = 'LINE')
-                else:
-                    col.separator()
+                line_separator(col)
                 col.operator("paint_system.move_up", icon="TRIA_UP", text="")
                 col.operator("paint_system.move_down", icon="TRIA_DOWN", text="")
 
@@ -688,36 +684,57 @@ class MAT_PT_LayerTransformSettings(PSContextMixin, Panel):
         ps_ctx = self.parse_context(context)
         active_layer = ps_ctx.active_layer
         layout.enabled = not active_layer.lock_layer
-        col = layout.column()
+        box = layout.box()
+        col = box.column()
+        if active_layer.type == 'IMAGE':
+            if active_layer.coord_type not in ['UV', 'AUTO']:
+                info_box = col.box()
+                info_box.alert = True
+                info_col = info_box.column(align=True)
+                info_col.label(text="Painting may not work", icon='ERROR')
         row = col.row(align=True)
         row.prop(active_layer, "coord_type", text="Coord Type")
+        if active_layer.coord_type in ['UV', 'AUTO']:
+                row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
         if active_layer.coord_type == 'UV':
             row_uv = col.row(align=True)
             row_uv.prop_search(active_layer, "uv_map_name", text="UV Map",
                                 search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
             row_uv.operator("paint_system.set_active_uv_for_selected", text="", icon='RADIOBUT_ON')
         elif active_layer.coord_type == 'DECAL':
+            empty_col = col.column(align=True)
+            empty_col.prop(active_layer, "empty_object", text="Empty")
+            split = empty_col.split(factor=0.4)
+            split.label(text="")
+            split.operator("paint_system.select_empty", text="Select Empty", icon='OBJECT_ORIGIN')
+            col.prop(active_layer, "use_decal_depth_clip", text="Use Clip")
             decal_clip = active_layer.find_node("decal_depth_clip")
             if decal_clip:
                 decal_clip_col = col.column(align=True)
                 decal_clip_col.prop(decal_clip.inputs[2], "default_value", text="Depth Clip")
-            empty_col = col.column(align=True)
-            empty_col.operator("paint_system.select_empty", text="Select Empty", icon='OBJECT_ORIGIN')
-            empty_col.prop(active_layer, "empty_object", text="")
-        if active_layer.coord_type not in ['UV', 'AUTO'] and active_layer.type == 'IMAGE':
-            info_box = col.box()
-            info_box.alert = True
-            info_col = info_box.column(align=True)
-            info_col.label(text="Painting may not work", icon='ERROR')
-            info_col.label(text="as expected.", icon='BLANK1')
+        elif active_layer.coord_type == 'PROJECT':
+            proj_col = col.column(align=True)
+            proj_col.scale_y = 2
+            proj_col.operator("paint_system.projection_view_reset", text="View Current Projection", icon='CAMERA_DATA')
+            col.operator("paint_system.set_projection_view", text="Set New Projection View", icon='FILE_REFRESH')
+            proj_node = active_layer.find_node("proj_node")
+            if proj_node:
+                col.prop(proj_node.inputs["Scale"], "default_value", text="Scale")
+                col.use_property_split = False
+                header, panel = col.panel("proj_node_panel", default_closed=True)
+                header.prop(proj_node.inputs["Enable"], "default_value", text="Normal Falloff")
+                if panel:
+                    panel.prop(proj_node.inputs["Falloff"], "default_value", text="Degree")
         
         mapping_node = active_layer.find_node("mapping")
         if mapping_node:
-            box = col.box()
-            box.use_property_split = False
-            col = box.column()
-            col.label(text="Mapping Settings:", icon="EMPTY_ARROWS")
-            col.template_node_inputs(mapping_node)
+            box = layout.box()
+            header, panel = box.panel("mapping_panel")
+            header.label(text="Mapping Settings:")
+            if panel:
+                panel.use_property_split = False
+                col = panel.column()
+                col.template_node_inputs(mapping_node)
 
 
 
@@ -793,9 +810,10 @@ class MAT_PT_ImageLayerSettings(PSContextMixin, Panel):
         row.prop(active_layer, "correct_image_aspect", text="Correct Aspect")
         edit_row = layout.row(align=True)
         if not active_layer.external_image:
-            edit_row.operator("paint_system.quick_edit", text="Edit Externally (View Capture)")
+            layout.operator("paint_system.quick_edit", text="Edit Externally (View Capture)")
         else:
-            edit_row.operator("paint_system.project_apply", text="Apply")
+            layout.operator("paint_system.project_apply",
+                        text="Apply")
         layout.enabled = not active_layer.lock_layer
 
         image_node = active_layer.find_node("image")

@@ -121,17 +121,9 @@ class MAT_PT_ChannelsPanel(PSContextMixin, Panel):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        ob = context.object
         if ps_ctx.active_group and check_group_multiuser(ps_ctx.active_group.node_tree):
             return False
-        # Hide when no active channel or channel collection empty to avoid empty space
-        if not (ps_ctx.ps_mat_data and ps_ctx.active_group is not None and ob and ob.mode == 'OBJECT'):
-            return False
-        if not ps_ctx.active_channel:
-            return False
-        if len(ps_ctx.active_group.channels) == 0:
-            return False
-        return True
+        return ps_ctx.ps_mat_data and ps_ctx.active_group is not None
     
     def draw_header(self, context):
         layout = self.layout

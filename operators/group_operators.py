@@ -5,6 +5,8 @@ from bpy.utils import register_classes_factory
 from bpy_extras.node_utils import connect_sockets, find_base_socket_type
 from mathutils import Vector
 
+from ..paintsystem.graph.common import get_library_nodetree
+
 from ..paintsystem.data import TEMPLATE_ENUM
 from ..utils.nodes import (
     find_node,
@@ -256,10 +258,10 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
                         shader_to_rgb.location = from_node.location + Vector((from_node.width + 50, 0))
                         connect_sockets(shader_to_rgb.inputs[0], link.from_socket)
                         connect_sockets(node_group.inputs['Color'], shader_to_rgb.outputs[0])
-                        connect_sockets(node_group.inputs['Color Alpha'], shader_to_rgb.outputs[1])
+                        # connect_sockets(node_group.inputs['Color Alpha'], shader_to_rgb.outputs[1])
                     else:
                         connect_sockets(node_group.inputs['Color'], from_node.outputs[0])
-                        node_group.inputs['Color Alpha'].default_value = 1.0
+                    node_group.inputs['Color Alpha'].default_value = 1.0
                     mat_output.location = mix_shader.location + Vector((200, 0))
                     mat_output.is_active_output = True
                     connect_sockets(mix_shader.outputs[0], mat_output.inputs[0])

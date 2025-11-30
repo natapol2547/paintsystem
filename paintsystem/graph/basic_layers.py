@@ -1,35 +1,335 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import bpy
-from .common import create_mixing_graph, NodeTreeBuilder, create_coord_graph, get_library_nodetree
+from .common import create_mixing_graph, NodeTreeBuilder, create_coord_graph, get_library_nodetree, get_layer_blend_type, set_layer_blend_type, DEFAULT_PS_UV_MAP_NAME
 
 if TYPE_CHECKING:
     from ..data import Layer
 
-IMAGE_LAYER_VERSION = 3
-FOLDER_LAYER_VERSION = 1
-SOLID_COLOR_LAYER_VERSION = 1
-ATTRIBUTE_LAYER_VERSION = 1
-ADJUSTMENT_LAYER_VERSION = 1
-GRADIENT_LAYER_VERSION = 1
-RANDOM_LAYER_VERSION = 2
-CUSTOM_LAYER_VERSION = 1
-TEXTURE_LAYER_VERSION = 1
-GEOMETRY_LAYER_VERSION = 1
+
+class PSNodeTreeBuilder:
+    """
+    A wrapper around NodeTreeBuilder that automatically creates the mixing graph.
+    This makes it easier to create layer graphs by handling the common mixing graph setup.
+    
+    The mixing graph is created automatically during initialization, and nodes can be
+    linked to it even if they don't exist yet (errors will be caught at compile time).
+    
+    Supports adding color and alpha modifiers that will be chained together automatically.
+    """
+    
+    def __init__(
+        self,
+        layer: "Layer",
+        version: int,
+        color_node_name: Optional[str] = None,
+        color_socket: Optional[str] = None,
+        alpha_node_name: Optional[str] = None,
+        alpha_socket: Optional[str] = None,
+        **kwargs
+    ):
+        """
+        Initialize PSNodeTreeBuilder with automatic mixing graph creation.
+        
+        Args:
+            layer: The layer object (must have a node_tree attribute)
+            version: Version number for the layer graph
+            color_node_name: Name of the node providing color (can be added later)
+            color_socket: Socket name/index on the color node
+            alpha_node_name: Name of the node providing alpha (can be added later)
+            alpha_socket: Socket name/index on the alpha node
+            **kwargs: Additional arguments passed to NodeTreeBuilder
+        """
+        node_tree = layer.node_tree
+        self._builder = NodeTreeBuilder(node_tree, "Layer", version=version, **kwargs)
+        self._layer = layer
+        
+        # Store original source nodes for modifier chaining
+        self._color_source_node = color_node_name
+        self._color_source_socket = color_socket
+        self._alpha_source_node = alpha_node_name
+        self._alpha_source_socket = alpha_socket
+        
+        # Track modifier chains: list of (node_name, input_socket, output_socket) tuples
+        self._color_modifiers: list[tuple[str, str, str]] = []
+        self._alpha_modifiers: list[tuple[str, str, str]] = []
+        
+        # Create the mixing graph automatically, but don't link color/alpha yet
+        # We'll link them after modifiers are added (or at compile time)
+        create_mixing_graph(
+            self._builder,
+            layer,
+            None,  # Don't link color yet - will be done after modifiers
+            None,
+            None,  # Don't link alpha yet - will be done after modifiers
+            None
+        )
+        
+        # Now link the sources (or final modifier outputs) to the mixing graph
+        self._update_mixing_graph_links()
+    
+    def _remove_final_color_link(self):
+        """Remove any existing link to mix_rgb.B input."""
+        # Find and remove any edge that targets mix_rgb with target_socket "B"
+        edges_to_remove = [
+            edge for edge in self._builder.edges
+            if edge.target == "mix_rgb" and edge.target_socket == "B"
+        ]
+        for edge in edges_to_remove:
+            self._builder.edges.remove(edge)
+    
+    def _remove_final_alpha_link(self):
+        """Remove any existing link to pre_mix.Over Alpha input."""
+        # Find and remove any edge that targets pre_mix with target_socket "Over Alpha"
+        edges_to_remove = [
+            edge for edge in self._builder.edges
+            if edge.target == "pre_mix" and edge.target_socket == "Over Alpha"
+        ]
+        for edge in edges_to_remove:
+            self._builder.edges.remove(edge)
+    
+    def _update_mixing_graph_links(self):
+        """Update the links from color/alpha sources (through modifiers) to the mixing graph."""
+        # Determine final color source (last modifier or original source)
+        if self._color_modifiers:
+            final_color_node, _, final_color_socket = self._color_modifiers[-1]
+        else:
+            final_color_node = self._color_source_node
+            final_color_socket = self._color_source_socket
+        
+        # Remove old color link and create new one
+        if final_color_node is not None and final_color_socket is not None:
+            self._remove_final_color_link()
+            self._builder.link(final_color_node, "mix_rgb", final_color_socket, "B")
+        
+        # Determine final alpha source (last modifier or original source)
+        if self._alpha_modifiers:
+            final_alpha_node, _, final_alpha_socket = self._alpha_modifiers[-1]
+        else:
+            final_alpha_node = self._alpha_source_node
+            final_alpha_socket = self._alpha_source_socket
+        
+        # Remove old alpha link and create new one
+        if final_alpha_node is not None and final_alpha_socket is not None:
+            self._remove_final_alpha_link()
+            self._builder.link(final_alpha_node, "pre_mix", final_alpha_socket, "Over Alpha")
+    
+    def create_coord_graph(self, node_name: str, socket_name: str) -> NodeTreeBuilder:
+        """Create the coordinate graph for the layer.
+
+        Args:
+            node_name (str): The name of the node to link the coordinate graph to.
+            socket_name (str): The socket name to link the coordinate graph to.
+        """
+        coord_type = self._layer.coord_type
+        if coord_type == "AUTO":
+            self._builder.add_node("uvmap", "ShaderNodeUVMap", {"uv_map": DEFAULT_PS_UV_MAP_NAME}, force_properties=True)
+            output_node_name, output_socket_name = self._create_mapping_setup("uvmap", "UV")
+            self._builder.link(output_node_name, node_name, output_socket_name, socket_name)
+        elif coord_type == "UV":
+            uv_map_name = self._layer.uv_map_name
+            self._builder.add_node("uvmap", "ShaderNodeUVMap", {"uv_map": uv_map_name}, force_properties=True)
+            output_node_name, output_socket_name = self._create_mapping_setup("uvmap", "UV")
+            self._builder.link(output_node_name, node_name, output_socket_name, socket_name)
+        elif coord_type in ["OBJECT", "CAMERA", "WINDOW", "REFLECTION", "GENERATED"]:
+            empty_object = self._layer.empty_object
+            self._builder.add_node("tex_coord", "ShaderNodeTexCoord", {"object": empty_object})
+            output_node_name, output_socket_name = self._create_mapping_setup("tex_coord", coord_type.title())
+            self._builder.link(output_node_name, node_name, output_socket_name, socket_name)
+        elif coord_type == "POSITION":
+            self._builder.add_node("geometry", "ShaderNodeNewGeometry")
+            output_node_name, output_socket_name = self._create_mapping_setup("geometry", "Position")
+            self._builder.link(output_node_name, node_name, output_socket_name, socket_name)
+        elif coord_type == "DECAL":
+            empty_object = self._layer.empty_object
+            use_decal_depth_clip = self._layer.use_decal_depth_clip
+            self._builder.add_node("tex_coord", "ShaderNodeTexCoord", {"object": empty_object}, force_properties=True)
+            output_node_name, output_socket_name = self._create_mapping_setup("tex_coord", "Object")
+            self._builder.link(output_node_name, node_name, output_socket_name, socket_name)
+            if use_decal_depth_clip:
+                self._builder.add_node("decal_depth_separate_xyz", "ShaderNodeSeparateXYZ")
+                self._builder.add_node("decal_depth_clip", "ShaderNodeMath", {"operation": "COMPARE"}, default_values={1: 0, 2: 0.5}, force_default_values=True)
+                self._builder.link("mapping", "decal_depth_separate_xyz", "Vector", 0)
+                self._builder.link("decal_depth_separate_xyz", "decal_depth_clip", "Z", 0)
+                if self._alpha_source_node is not None and self._alpha_source_socket is not None:
+                    self._builder.add_node("decal_alpha_multiply", "ShaderNodeMath", {"operation": "MULTIPLY"}, default_values={0: 1, 1: 1} , force_default_values=True)
+                    self._builder.link("decal_depth_clip", "decal_alpha_multiply", "Value", 0)
+                    self.add_alpha_modifier("decal_alpha_multiply", 1, 0)
+                else:
+                    self._alpha_source_node = "decal_depth_clip"
+                    self._alpha_source_socket = 0
+        elif coord_type == "PROJECT":
+            proj_nt = get_library_nodetree(".PS Projection")
+            self._builder.add_node(
+                "proj_node",
+                "ShaderNodeGroup",
+                {"node_tree": proj_nt, "hide": True},
+                {"Vector": self._layer.projection_position, "Rotation": self._layer.projection_rotation, "FOV": self._layer.projection_fov},
+                force_properties=True,
+                force_default_values=True
+            )
+            output_node_name, output_socket_name = self._create_mapping_setup("proj_node", "Vector")
+            self._builder.link(output_node_name, node_name, output_socket_name, socket_name)
+            if self._alpha_source_node is not None and self._alpha_source_socket is not None:
+                self._builder.add_node("projcetion_alpha_multiply", "ShaderNodeMath", {"operation": "MULTIPLY"}, default_values={0: 1, 1: 1} , force_default_values=True)
+                self._builder.link("proj_node", "projcetion_alpha_multiply", "Mask", 0)
+                self.add_alpha_modifier("projcetion_alpha_multiply", 1, 0)
+            else:
+                self._alpha_source_node = "proj_node"
+                self._alpha_source_socket = "Mask"
+    
+    def _create_mapping_setup(self, node_name: str, socket_name: str):
+        self._builder.add_node("mapping", "ShaderNodeMapping")
+        output_node_name = "mapping"
+        output_socket_name = "Vector"
+        if self._layer.correct_image_aspect and self._layer.type == "IMAGE":
+            resolution_x = 0
+            resolution_y = 0
+            img = self._layer.image
+            if img:
+                resolution_x = img.size[0]
+                resolution_y = img.size[1]
+            aspect_correct = get_library_nodetree(".PS Correct Aspect")
+            self._builder.add_node("multiply_vector", "ShaderNodeVectorMath", {"operation": "MULTIPLY"})
+            self._builder.add_node("aspect_correct", "ShaderNodeGroup", {"node_tree": aspect_correct}, default_values={0: resolution_x, 1: resolution_y}, force_default_values=True)
+            self._builder.link("aspect_correct", "multiply_vector", "Vector", 0)
+            self._builder.link(node_name, "multiply_vector", socket_name, 1)
+            self._builder.link("multiply_vector", "mapping", 0, "Vector")
+        else:
+            self._builder.link(node_name, "mapping", socket_name, "Vector")
+        if self._layer.coord_type in {"PROJECT", "DECAL"}:
+            self._builder.add_node("center_image", "ShaderNodeVectorMath", {"operation": "ADD"}, default_values={1: (0.5, 0.5, 0)}, force_default_values=True)
+            self._builder.link("mapping", "center_image", "Vector", 0)
+            output_node_name = "center_image"
+            output_socket_name = 0
+        return output_node_name, output_socket_name
+    
+    def add_color_modifier(self, node_name: str, input_socket: str, output_socket: str):
+        """
+        Add a color modifier node to the color processing chain.
+        
+        Modifiers are chained together automatically. The first modifier receives input
+        from the original color source, and each subsequent modifier receives input from
+        the previous modifier's output. The final modifier's output connects to the mix node.
+        
+        Args:
+            node_name: Name/identifier of the modifier node (must be added with add_node first)
+            input_socket: Input socket name/index on the modifier node to receive color
+            output_socket: Output socket name/index on the modifier node that outputs color
+            
+        Example:
+            builder.add_node("brightness", "ShaderNodeBrightContrast")
+            builder.add_color_modifier("brightness", "Color", "Color")
+            builder.add_node("gamma", "ShaderNodeGamma")
+            builder.add_color_modifier("gamma", "Color", "Color")
+            # Results in: color_source -> brightness -> gamma -> mix_rgb
+        """
+        if self._color_source_node is None or self._color_source_socket is None:
+            raise ValueError(
+                "Cannot add color modifier: color_node_name and color_socket must be provided "
+                "when initializing PSNodeTreeBuilder."
+            )
+        
+        # Determine the input source for this modifier
+        if self._color_modifiers:
+            # Link from the previous modifier's output
+            prev_node, _, prev_output_socket = self._color_modifiers[-1]
+            self._builder.link(prev_node, node_name, prev_output_socket, input_socket)
+        else:
+            # Remove the direct link from source to mix_rgb (if it exists)
+            self._remove_final_color_link()
+            # Link from the original color source to the first modifier
+            self._builder.link(self._color_source_node, node_name, self._color_source_socket, input_socket)
+        
+        # Add to modifier chain
+        self._color_modifiers.append((node_name, input_socket, output_socket))
+        
+        # Update the final link to point to this modifier's output
+        self._update_mixing_graph_links()
+    
+    def add_alpha_modifier(self, node_name: str, input_socket: str, output_socket: str):
+        """
+        Add an alpha modifier node to the alpha processing chain.
+        
+        Modifiers are chained together automatically. The first modifier receives input
+        from the original alpha source, and each subsequent modifier receives input from
+        the previous modifier's output. The final modifier's output connects to the pre_mix node.
+        
+        Args:
+            node_name: Name/identifier of the modifier node (must be added with add_node first)
+            input_socket: Input socket name/index on the modifier node to receive alpha
+            output_socket: Output socket name/index on the modifier node that outputs alpha
+            
+        Example:
+            builder.add_node("multiply", "ShaderNodeMath", {"operation": "MULTIPLY"})
+            builder.add_alpha_modifier("multiply", "Value", "Value")
+            builder.add_node("clamp", "ShaderNodeMath", {"operation": "CLAMP"})
+            builder.add_alpha_modifier("clamp", "Value", "Value")
+            # Results in: alpha_source -> multiply -> clamp -> pre_mix
+            
+        Raises:
+            ValueError: If alpha_node_name and alpha_socket were not provided during initialization
+        """
+        if self._alpha_source_node is None or self._alpha_source_socket is None:
+            raise ValueError(
+                "Cannot add alpha modifier: alpha_node_name and alpha_socket must be provided "
+                "when initializing PSNodeTreeBuilder."
+            )
+        
+        # Determine the input source for this modifier
+        if self._alpha_modifiers:
+            # Link from the previous modifier's output
+            prev_node, _, prev_output_socket = self._alpha_modifiers[-1]
+            self._builder.link(prev_node, node_name, prev_output_socket, input_socket)
+        else:
+            # Remove the direct link from source to pre_mix (if it exists)
+            self._remove_final_alpha_link()
+            # Link from the original alpha source to the first modifier
+            self._builder.link(self._alpha_source_node, node_name, self._alpha_source_socket, input_socket)
+        
+        # Add to modifier chain
+        self._alpha_modifiers.append((node_name, input_socket, output_socket))
+        
+        # Update the final link to point to this modifier's output
+        self._update_mixing_graph_links()
+    
+    def __getattr__(self, name):
+        """Delegate all other method calls to the underlying NodeTreeBuilder"""
+        return getattr(self._builder, name)
+    
+    def add_node(self, *args, **kwargs):
+        """Add a node to the graph"""
+        return self._builder.add_node(*args, **kwargs)
+    
+    def link(self, *args, **kwargs):
+        """Link nodes in the graph"""
+        return self._builder.link(*args, **kwargs)
+    
+    def compile(self, *args, **kwargs):
+        """Compile the graph, ensuring modifier chains are properly linked"""
+        # Update mixing graph links before compiling to ensure modifiers are connected
+        self._update_mixing_graph_links()
+        return self._builder.compile(*args, **kwargs)
+    
+    @property
+    def builder(self):
+        """Access the underlying NodeTreeBuilder if needed"""
+        return self._builder
+
+
+IMAGE_LAYER_VERSION = 4
+FOLDER_LAYER_VERSION = 2
+SOLID_COLOR_LAYER_VERSION = 2
+ATTRIBUTE_LAYER_VERSION = 2
+ADJUSTMENT_LAYER_VERSION = 2
+GRADIENT_LAYER_VERSION = 2
+RANDOM_LAYER_VERSION = 3
+CUSTOM_LAYER_VERSION = 2
+TEXTURE_LAYER_VERSION = 2
+GEOMETRY_LAYER_VERSION = 2
 
 ALPHA_OVER_LAYER_VERSION = 1
-
-def get_layer_blend_type(layer: Layer) -> str:
-    """Get the blend mode of the global layer"""
-    blend_mode = layer.blend_mode
-    if blend_mode == "PASSTHROUGH":
-        return "MIX"
-    return blend_mode
-
-def set_layer_blend_type(layer: Layer, blend_type: str) -> None:
-    """Set the blend mode of the global layer"""
-    layer.blend_mode = blend_type
 
 def get_layer_version_for_type(type: str) -> int:
     match type:
@@ -82,95 +382,56 @@ def get_adjustment_identifier(adjustment_type: str) -> str:
     return identifier_mapping.get(adjustment_type, "")
 
 def create_image_graph(layer: "Layer"):
-    node_tree = layer.node_tree
     img = layer.image
-    correct_image_aspect = layer.correct_image_aspect
-    resolution_x = 0
-    resolution_y = 0
-    if img:
-        resolution_x = img.size[0]
-        resolution_y = img.size[1]
-    coord_type = layer.coord_type
-    empty_object = layer.empty_object
-    uv_map_name = layer.uv_map_name
-    blend_mode = get_layer_blend_type(layer)
-    builder = NodeTreeBuilder(node_tree, "Layer", version=IMAGE_LAYER_VERSION)
-    if coord_type == "DECAL":
-        builder.add_node("decal_depth_separate_xyz", "ShaderNodeSeparateXYZ")
-        builder.add_node("decal_depth_clip", "ShaderNodeMath", {"operation": "COMPARE"}, default_values={1: 0, 2: 0.5}, force_default_values=True)
-        builder.add_node("decal_alpha_multiply", "ShaderNodeMath", {"operation": "MULTIPLY"})
-        builder.link("multiply_vector", "decal_depth_separate_xyz", "Vector", 0)
-        builder.link("decal_depth_separate_xyz", "decal_depth_clip", "Z", 0)
-        builder.link("decal_depth_clip", "decal_alpha_multiply", "Value", 0)
-        builder.link("image", "decal_alpha_multiply", "Alpha", 1)
-        create_mixing_graph(builder, "image", "Color", "decal_alpha_multiply", "Value", blend_mode=blend_mode)
-    else:
-        create_mixing_graph(builder, "image", "Color", "image", "Alpha", blend_mode=blend_mode)
+    # Create builder with mixing graph - alpha will be determined later
+    builder = PSNodeTreeBuilder(layer, IMAGE_LAYER_VERSION, "image", "Color", "image", "Alpha")
     builder.add_node("image", "ShaderNodeTexImage", {"image": img, "interpolation": "Closest"})
-    if correct_image_aspect:
-        aspect_correct = get_library_nodetree(".PS Correct Aspect")
-        builder.add_node("multiply_vector", "ShaderNodeVectorMath", {"operation": "MULTIPLY_ADD"}, default_values={2: (0.5, 0.5, 0) if coord_type == "DECAL" else (0, 0, 0)})
-        builder.add_node("aspect_correct", "ShaderNodeGroup", {"node_tree": aspect_correct}, default_values={0: resolution_x, 1: resolution_y}, force_default_values=True)
-        builder.link("aspect_correct", "multiply_vector", "Vector", 1)
-        builder.link("multiply_vector", "image", "Vector", "Vector")
-        create_coord_graph(builder, coord_type, uv_map_name, "multiply_vector", 0, empty_object=empty_object)
-    else:
-        create_coord_graph(builder, coord_type, uv_map_name, "image", "Vector", empty_object=empty_object)
+    builder.create_coord_graph("image", "Vector")
     return builder
 
 def create_folder_graph(layer: "Layer"):
-    node_tree = layer.node_tree
-    blend_mode = get_layer_blend_type(layer)
-    builder = NodeTreeBuilder(node_tree, "Layer", version=FOLDER_LAYER_VERSION)
-    create_mixing_graph(builder, "group_input", "Over Color", "group_input", "Over Alpha", blend_mode=blend_mode)
+    builder = PSNodeTreeBuilder(layer, FOLDER_LAYER_VERSION, "group_input", "Over Color", "group_input", "Over Alpha")
     return builder
 
 def create_solid_graph(layer: "Layer"):
-    node_tree = layer.node_tree
-    blend_mode = get_layer_blend_type(layer)
-    builder = NodeTreeBuilder(node_tree, "Layer", version=SOLID_COLOR_LAYER_VERSION)
-    create_mixing_graph(builder, "rgb", "Color", blend_mode=blend_mode)
+    builder = PSNodeTreeBuilder(layer, SOLID_COLOR_LAYER_VERSION, "rgb", "Color")
     builder.add_node("rgb", "ShaderNodeRGB", default_outputs={0: (1, 1, 1, 1)})
     return builder
 
 def create_attribute_graph(layer: "Layer"):
-    node_tree = layer.node_tree
-    blend_mode = get_layer_blend_type(layer)
-    builder = NodeTreeBuilder(node_tree, "Layer", version=ATTRIBUTE_LAYER_VERSION)
-    create_mixing_graph(builder, "attribute", "Color", blend_mode=blend_mode)
+    builder = PSNodeTreeBuilder(layer, ATTRIBUTE_LAYER_VERSION, "attribute", "Color")
     builder.add_node("attribute", "ShaderNodeAttribute")
     return builder
 
 def create_adjustment_graph(layer: "Layer"):
-    node_tree = layer.node_tree
     adjustment_type = get_adjustment_identifier(layer.adjustment_type)
-    blend_mode = get_layer_blend_type(layer)
-    builder = NodeTreeBuilder(node_tree, "Layer", version=ADJUSTMENT_LAYER_VERSION)
     input_socket_name = "Color"
     output_socket_name = "Color"
-    builder.add_node("adjustment", adjustment_type)
     match adjustment_type:
         case "ShaderNodeRGBToBW":
             output_socket_name = "Val"
         case "ShaderNodeMapRange":
             input_socket_name = "Value"
             output_socket_name = "Result"
+    builder = PSNodeTreeBuilder(layer, ADJUSTMENT_LAYER_VERSION, "adjustment", output_socket_name)
+    builder.add_node("adjustment", adjustment_type)
+    match adjustment_type:
+        case "ShaderNodeRGBToBW":
+            pass  # Already handled above
+        case "ShaderNodeMapRange":
+            pass  # Already handled above
         case _:
             if adjustment_type in {"ShaderNodeHueSaturation", "ShaderNodeInvert", "ShaderNodeRGBCurve"}:
                 # Remove factor input if it exists
                 builder.add_node("value", "ShaderNodeValue", default_outputs={0:1})
                 builder.link("value", "adjustment", "Value", "Fac")
-    create_mixing_graph(builder, "adjustment", output_socket_name, blend_mode=blend_mode)
     builder.link("group_input", "adjustment", "Color", input_socket_name)
     return builder
 
 def create_gradient_graph(layer: "Layer"):
-    node_tree = layer.node_tree
     gradient_type = layer.gradient_type
     empty_object = layer.empty_object
-    blend_mode = get_layer_blend_type(layer)
-    builder = NodeTreeBuilder(node_tree, "Layer", version=GRADIENT_LAYER_VERSION)
-    create_mixing_graph(builder, "gradient", "Color", "gradient", "Alpha", blend_mode=blend_mode)
+    builder = PSNodeTreeBuilder(layer, GRADIENT_LAYER_VERSION, "gradient", "Color", "gradient", "Alpha")
     builder.add_node("gradient", "ShaderNodeValToRGB")
     match gradient_type:
         case "LINEAR":
@@ -198,10 +459,7 @@ def create_gradient_graph(layer: "Layer"):
     return builder
 
 def create_random_graph(layer: "Layer"):
-    node_tree = layer.node_tree
-    blend_mode = get_layer_blend_type(layer)
-    builder = NodeTreeBuilder(node_tree, "Layer", version=RANDOM_LAYER_VERSION)
-    create_mixing_graph(builder, "hue_saturation_value", "Color", blend_mode=blend_mode)
+    builder = PSNodeTreeBuilder(layer, RANDOM_LAYER_VERSION, "hue_saturation_value", "Color")
     builder.add_node("object_info", "ShaderNodeObjectInfo")
     builder.add_node("white_noise", "ShaderNodeTexWhiteNoise", {"noise_dimensions": "1D"})
     builder.add_node("add", "ShaderNodeMath", {"operation": "ADD"})
@@ -227,19 +485,16 @@ def create_random_graph(layer: "Layer"):
     return builder
 
 def create_custom_graph(layer: "Layer"):
-    node_tree = layer.node_tree
     custom_node_tree = layer.custom_node_tree
     color_input = layer.custom_color_input
     alpha_input = layer.custom_alpha_input
     color_output = layer.custom_color_output
     alpha_output = layer.custom_alpha_output
-    blend_mode = get_layer_blend_type(layer)
-    builder = NodeTreeBuilder(node_tree, "Layer", version=CUSTOM_LAYER_VERSION)
     if alpha_output != -1:
-        create_mixing_graph(builder, "custom_node_tree", color_output, "custom_node_tree", alpha_output, blend_mode=blend_mode)
+        builder = PSNodeTreeBuilder(layer, CUSTOM_LAYER_VERSION, "custom_node_tree", color_output, "custom_node_tree", alpha_output)
         builder.link("group_input", "custom_node_tree", "Alpha", alpha_input)
     else:
-        create_mixing_graph(builder, "custom_node_tree", color_output, blend_mode=blend_mode)
+        builder = PSNodeTreeBuilder(layer, CUSTOM_LAYER_VERSION, "custom_node_tree", color_output)
     builder.add_node("custom_node_tree", "ShaderNodeGroup", {"node_tree": custom_node_tree})
     if color_input != -1:
         builder.link("group_input", "custom_node_tree", "Color", color_input)
@@ -248,16 +503,10 @@ def create_custom_graph(layer: "Layer"):
     return builder
 
 def create_texture_graph(layer: "Layer"):
-    node_tree = layer.node_tree
     texture_type = get_texture_identifier(layer.texture_type)
-    coord_type = layer.coord_type
-    uv_map_name = layer.uv_map_name
-    empty_object = layer.empty_object
-    blend_mode = get_layer_blend_type(layer)
-    builder = NodeTreeBuilder(node_tree, "Layer", version=TEXTURE_LAYER_VERSION)
-    create_mixing_graph(builder, "texture", "Color", blend_mode=blend_mode)
+    builder = PSNodeTreeBuilder(layer, TEXTURE_LAYER_VERSION, "texture", "Color", None, None)
     builder.add_node("texture", texture_type)
-    create_coord_graph(builder, coord_type, uv_map_name, 'texture', 'Vector', empty_object=empty_object)
+    builder.create_coord_graph('texture', 'Vector')
     return builder
 
 def create_geometry_graph(layer: "Layer"):
@@ -280,18 +529,20 @@ def create_geometry_graph(layer: "Layer"):
         'VECTOR_TRANSFORM': 'Vector',
     }
     normalize_normals = layer.normalize_normal
-    node_tree = layer.node_tree
     geometry_type = layer.geometry_type
-    blend_mode = get_layer_blend_type(layer)
-    builder = NodeTreeBuilder(node_tree, "Layer", version=GEOMETRY_LAYER_VERSION)
+    # Determine which node and socket to use for mixing graph
+    if geometry_type in ['WORLD_NORMAL', 'WORLD_TRUE_NORMAL', 'OBJECT_NORMAL'] and normalize_normals:
+        color_node_name = "normalize"
+        color_socket = "Vector"
+    else:
+        color_node_name = "geometry"
+        color_socket = output_name_map[geometry_type]
+    builder = PSNodeTreeBuilder(layer, GEOMETRY_LAYER_VERSION, color_node_name, color_socket)
     if geometry_type == 'VECTOR_TRANSFORM':
         builder.link("group_input", "geometry", "Color", "Vector")
     if geometry_type in ['WORLD_NORMAL', 'WORLD_TRUE_NORMAL', 'OBJECT_NORMAL'] and normalize_normals:
         builder.add_node("normalize", "ShaderNodeVectorMath", {"operation": "MULTIPLY_ADD", "hide": True}, {1: (0.5, 0.5, 0.5), 2: (0.5, 0.5, 0.5)})
         builder.link("geometry", "normalize", output_name_map[geometry_type], "Vector")
-        create_mixing_graph(builder, "normalize", "Vector", blend_mode=blend_mode)
-    else:
-        create_mixing_graph(builder, "geometry", output_name_map[geometry_type], blend_mode=blend_mode)
     builder.add_node("geometry", node_map[geometry_type])
     return builder
 
@@ -307,6 +558,6 @@ def get_alpha_over_nodetree():
     node_tree.interface.new_socket("Color", in_out="OUTPUT", socket_type="NodeSocketColor")
     node_tree.interface.new_socket("Alpha", in_out="OUTPUT", socket_type="NodeSocketFloat")
     builder = NodeTreeBuilder(node_tree, "Layer", version=ALPHA_OVER_LAYER_VERSION)
-    create_mixing_graph(builder, "group_input", "Over Color", "group_input", "Over Alpha")
+    create_mixing_graph(builder, None, "group_input", "Over Color", "group_input", "Over Alpha")
     builder.compile()
     return node_tree

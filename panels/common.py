@@ -488,3 +488,9 @@ def layer_settings_ui(layout: bpy.types.UILayout, context: bpy.types.Context):
             opacity_row.scale_y = 0.8
         opacity_row.prop(active_layer.pre_mix_node.inputs['Opacity'], "default_value",
                 text="" if use_wide_ui else "Opacity", slider=True)
+
+def line_separator(layout: bpy.types.UILayout):
+    if is_newer_than(4, 2):
+        layout.separator(type = 'LINE')
+    else:
+        layout.separator()

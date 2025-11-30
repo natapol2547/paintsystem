@@ -1,4 +1,8 @@
 from __future__ import annotations
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..data import Layer
 
 from pathlib import Path
 from typing import Optional
@@ -9,6 +13,16 @@ import bpy
 LIBRARY_FILENAME = "library2.blend"
 DEFAULT_PS_UV_MAP_NAME = "PS_UVMap"
 
+def get_layer_blend_type(layer: Layer) -> str:
+    """Get the blend mode of the global layer"""
+    blend_mode = layer.blend_mode
+    if blend_mode == "PASSTHROUGH":
+        return "MIX"
+    return blend_mode
+
+def set_layer_blend_type(layer: Layer, blend_type: str) -> None:
+    """Set the blend mode of the global layer"""
+    layer.blend_mode = blend_type
 
 def _resolve_library_path(filename: str = LIBRARY_FILENAME) -> Path:
     """
@@ -85,7 +99,8 @@ def get_library_object(object_name: str, library_filename: str = LIBRARY_FILENAM
         data_to.objects = [object_name]
     return bpy.data.objects.get(object_name)
 
-def create_mixing_graph(builder: NodeTreeBuilder, color_node_name: str = None, color_socket: str = None, alpha_node_name: str = None, alpha_socket: str = None, blend_mode: str = "MIX") -> NodeTreeBuilder:
+def create_mixing_graph(builder: NodeTreeBuilder, layer: "Layer", color_node_name: str = None, color_socket: str = None, alpha_node_name: str = None, alpha_socket: str = None) -> NodeTreeBuilder:
+    blend_mode = get_layer_blend_type(layer) if layer is not None else "MIX"
     pre_mix = get_library_nodetree(".PS Pre Mix")
     post_mix = get_library_nodetree(".PS Post Mix")
     builder.add_node("group_input", "NodeGroupInput")
@@ -110,7 +125,7 @@ def create_mixing_graph(builder: NodeTreeBuilder, color_node_name: str = None, c
     return builder
 
 
-def create_coord_graph(builder: NodeTreeBuilder, coord_type: str, uv_map_name: str, node_name: str, socket_name: str, empty_object: bpy.types.Object = None) -> NodeTreeBuilder:
+def create_coord_graph(builder: NodeTreeBuilder, layer: "Layer", coord_type: str, uv_map_name: str, node_name: str, socket_name: str, alpha_node_name: str = None, alpha_socket: str = None) -> NodeTreeBuilder:
     builder.add_node("mapping", "ShaderNodeMapping")
     if coord_type == "AUTO":
         builder.add_node("uvmap", "ShaderNodeUVMap", {"uv_map": DEFAULT_PS_UV_MAP_NAME}, force_properties=True)
@@ -121,15 +136,44 @@ def create_coord_graph(builder: NodeTreeBuilder, coord_type: str, uv_map_name: s
         builder.link("uvmap", "mapping", "UV", "Vector")
         builder.link("mapping", node_name, "Vector", socket_name)
     elif coord_type in ["OBJECT", "CAMERA", "WINDOW", "REFLECTION", "GENERATED"]:
+        empty_object = layer.empty_object
         builder.add_node("tex_coord", "ShaderNodeTexCoord", {"object": empty_object})
         builder.link("tex_coord", "mapping", coord_type.title(), "Vector")
         builder.link("mapping", node_name, "Vector", socket_name)
     elif coord_type == "POSITION":
-        builder.add_node("geometry", "ShaderNodeGeometry")
+        builder.add_node("geometry", "ShaderNodeNewGeometry")
         builder.link("geometry", "mapping", "Position", "Vector")
         builder.link("mapping", node_name, "Vector", socket_name)
     elif coord_type == "DECAL":
+        empty_object = layer.empty_object
+        use_decal_depth_clip = layer.use_decal_depth_clip
         builder.add_node("tex_coord", "ShaderNodeTexCoord", {"object": empty_object}, force_properties=True)
         builder.link("tex_coord", "mapping", "Object", "Vector")
         builder.link("mapping", node_name, "Vector", socket_name)
-    return builder
+        if use_decal_depth_clip:
+            builder.add_node("decal_depth_separate_xyz", "ShaderNodeSeparateXYZ")
+            builder.add_node("decal_depth_clip", "ShaderNodeMath", {"operation": "COMPARE"}, default_values={1: 0, 2: 0.5}, force_default_values=True)
+            builder.link("mapping", "decal_depth_separate_xyz", "Vector", 0)
+            builder.link("decal_depth_separate_xyz", "decal_depth_clip", "Z", 0)
+            if alpha_node_name is not None and alpha_socket is not None:
+                builder.add_node("decal_alpha_multiply", "ShaderNodeMath", {"operation": "MULTIPLY"}, default_values={0: 1, 1: 1} , force_default_values=True)
+                builder.link("decal_depth_clip", "decal_alpha_multiply", "Value", 0)
+                builder.link(alpha_node_name, "decal_alpha_multiply", alpha_socket, 1)
+                alpha_node_name = "decal_alpha_multiply"
+                alpha_socket = 0
+            else:
+                alpha_node_name = "decal_depth_clip"
+                alpha_socket = 0
+    elif coord_type == "PROJECT":
+        proj_nt = get_library_nodetree(".PS Projection")
+        builder.add_node(
+            "proj_node",
+            "ShaderNodeGroup",
+            {"node_tree": proj_nt},
+            {"Vector": layer.projection_position, "Rotation": layer.projection_rotation, "FOV": layer.projection_fov},
+            force_properties=True,
+            force_default_values=True
+        )
+        builder.link("proj_node", "mapping", "Vector", "Vector")
+        builder.link("mapping", node_name, "Vector", socket_name)
+    return alpha_node_name, alpha_socket

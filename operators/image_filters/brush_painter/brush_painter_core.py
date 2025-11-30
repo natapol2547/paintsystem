@@ -9,7 +9,20 @@ except ImportError:
     ImageFilter = None
 import os
 import glob
+from dataclasses import dataclass
 from ..common import blender_image_to_numpy, numpy_to_blender_image
+
+@dataclass
+class StepData:
+    """Data structure for pre-calculated step information."""
+    step: int
+    scale: float
+    opacity: float
+    actual_brush_size: int
+    scaled_brush_list: list
+    num_samples: int
+    random_y: np.ndarray
+    random_x: np.ndarray
 
 class BrushPainterCore:
     """Core functionality for applying brush strokes to Blender images."""
@@ -400,7 +413,43 @@ class BrushPainterCore:
         
         return True
     
-    def apply_brush_painting(self, image, brush_folder_path=None, brush_texture_path=None, custom_image_gradient=None):
+    def precalculate_step_data(self, brush_list, H, W):
+        """Pre-calculates all step data for brush painting."""
+        steps_data = []
+        
+        for step in range(self.steps):
+            if self.steps == 1:
+                scale = self.min_brush_scale
+                opacity = self.end_opacity
+            else:
+                scale = self.max_brush_scale + (self.min_brush_scale - self.max_brush_scale) * step / (self.steps - 1)
+                opacity = self.start_opacity + (self.end_opacity - self.start_opacity) * step / (self.steps - 1)
+            
+            actual_brush_size = int(scale * min(H, W))
+            scaled_brush_list = self.resize_brushes(brush_list, actual_brush_size)
+            num_samples = self.calculate_brush_area_density(scaled_brush_list, H, W, actual_brush_size)
+            
+            # Generate random coordinates
+            if self.use_random_seed:
+                np.random.seed(self.random_seed + step)
+            random_y = np.random.randint(0, H, num_samples)
+            random_x = np.random.randint(0, W, num_samples)
+            
+            step_data = StepData(
+                step=step,
+                scale=scale,
+                opacity=opacity,
+                actual_brush_size=actual_brush_size,
+                scaled_brush_list=scaled_brush_list,
+                num_samples=num_samples,
+                random_y=random_y,
+                random_x=random_x
+            )
+            steps_data.append(step_data)
+        
+        return steps_data
+    
+    def apply_brush_painting(self, image, brush_folder_path=None, brush_texture_path=None, custom_image_gradient=None, brush_callback=None):
         """Main function to apply brush painting to a Blender image."""
         if not PIL_AVAILABLE:
             raise ImportError("PIL (Pillow) is not available. Please install Pillow to use this feature.")
@@ -440,38 +489,24 @@ class BrushPainterCore:
             img_float, H, W, overlay_on_input=True
         )
         
+        # Pre-calculate all step data
+        steps_data = self.precalculate_step_data(brush_list, H, W)
+        
         # Apply brushes at multiple scales
+        total_strokes = sum(step_data.num_samples for step_data in steps_data)
         total_strokes_applied = 0
         
-        for step in range(self.steps):
-            if self.steps == 1:
-                scale = self.min_brush_scale
-                opacity = self.end_opacity
-            else:
-                scale = self.max_brush_scale + (self.min_brush_scale - self.max_brush_scale) * step / (self.steps - 1)
-                opacity = self.start_opacity + (self.end_opacity - self.start_opacity) * step / (self.steps - 1)
-            
-            actual_brush_size = int(scale * min(H, W))
-            scaled_brush_list = self.resize_brushes(brush_list, actual_brush_size)
-            num_samples = self.calculate_brush_area_density(scaled_brush_list, H, W, actual_brush_size)
-            
-            # Generate random coordinates
-            if self.use_random_seed:
-                np.random.seed(self.random_seed + step)
-            random_y = np.random.randint(0, H, num_samples)
-            random_x = np.random.randint(0, W, num_samples)
-            
-            strokes_applied = 0
-            for i in range(num_samples):
-                y, x = random_y[i], random_x[i]
+        for step_data in steps_data:
+            for i in range(step_data.num_samples):
+                y, x = step_data.random_y[i], step_data.random_x[i]
                 canvas_y = y + offset_y
                 canvas_x = x + offset_x
                 
-                if self.apply_brush_stroke(canvas, y, x, img_float, img_blurred, has_alpha, G_normalized, theta, opacity,
-                                         scaled_brush_list, canvas_y, canvas_x, extended_H, extended_W):
-                    strokes_applied += 1
-            
-            total_strokes_applied += strokes_applied
+                if self.apply_brush_stroke(canvas, y, x, img_float, img_blurred, has_alpha, G_normalized, theta, step_data.opacity,
+                                         step_data.scaled_brush_list, canvas_y, canvas_x, extended_H, extended_W):
+                    total_strokes_applied += 1
+                    if brush_callback:
+                        brush_callback(total_strokes, total_strokes_applied)
         
         # Crop back to original dimensions
         final_canvas = canvas[offset_y:offset_y + H, offset_x:offset_x + W]

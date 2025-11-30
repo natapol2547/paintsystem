@@ -259,8 +259,14 @@ class PSImageCreateMixin(PSUVOptionsMixin):
         description="Use UDIM tiles for the image layer",
         default=False
     )
+    use_float: BoolProperty(
+        name="Use Float",
+        description="Use float to bake the image",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
     
-    def image_create_ui(self, layout, context, show_name=True):
+    def image_create_ui(self, layout, context, show_name=True, show_float=False):
         main_col = layout.column()
 
         if show_name:
@@ -329,44 +335,14 @@ class PSImageCreateMixin(PSUVOptionsMixin):
         if self.image_resolution != 'CUSTOM':
             self.image_width = int(self.image_resolution)
             self.image_height = int(self.image_resolution)
-
-        if not context:
-            context = bpy.context
-
-        if self.use_udim and context:
-            from ..utils.udim import create_udim_image, detect_udim_from_uv
-            ps_ctx = PSContextMixin.safe_parse_context(context)
-
-            tiles = []
-            if ps_ctx and ps_ctx.ps_object and self.udim_auto_detect:
-                tiles = detect_udim_from_uv(ps_ctx.ps_object)
-            if not tiles:
-                tiles = [1001]
-
-            img = create_udim_image(
-                name=self.image_name,
-                tiles=tiles,
-                width=self.image_width,
-                height=self.image_height,
-                alpha=True
-            )
-            if img:
-                return img
-
-        if self.coord_type == 'UV' and context:
-            ps_ctx = PSContextMixin.safe_parse_context(context)
-            uv_layer = ps_ctx.ps_object.data.uv_layers.get(self.uv_map_name) if ps_ctx and ps_ctx.ps_object else None
-            if uv_layer:
-                use_udim_tiles = get_udim_tiles(uv_layer) != {1001} and (self.use_udim_tiles or self.use_udim)
-                return create_ps_image(
-                    self.image_name,
-                    self.image_width,
-                    self.image_height,
-                    use_udim_tiles=use_udim_tiles,
-                    uv_layer=uv_layer,
-                )
-
-        return create_ps_image(self.image_name, self.image_width, self.image_height)
+        if self.coord_type == 'UV':
+            ps_ctx = PSContextMixin.parse_context(context)
+            uv_layer = ps_ctx.ps_object.data.uv_layers.get(self.uv_map_name)
+            use_udim_tiles = get_udim_tiles(uv_layer) != {1001} and self.use_udim_tiles
+            img = create_ps_image(self.image_name, self.image_width, self.image_height, use_udim_tiles=use_udim_tiles, uv_layer=uv_layer, use_float=self.use_float)
+        else:
+            img = create_ps_image(self.image_name, self.image_width, self.image_height, use_float=self.use_float)
+        return img
     
     def get_coord_type(self, context):
         """Get the coord_type from the active channel and set it on the operator"""
