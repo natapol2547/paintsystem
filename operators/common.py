@@ -134,6 +134,9 @@ class PSUVOptionsMixin():
         ps_ctx = PSContextMixin.parse_context(context)
         ob = ps_ctx.ps_object
         if ob and ob.type == 'MESH' and ob.data.uv_layers:
+            active_layer = ob.data.uv_layers.active
+            if active_layer:
+                return active_layer.name
             return ob.data.uv_layers[0].name
         return ""
     
@@ -161,7 +164,12 @@ class PSUVOptionsMixin():
                 self.use_paint_system_uv = False
                 self.coord_type = past_coord_type
             past_uv_map_name = ps_ctx.active_group.uv_map_name
-            self.uv_map_name = past_uv_map_name if past_uv_map_name else self.get_default_uv_map_name(context)
+            candidate_uv = past_uv_map_name if past_uv_map_name else self.get_default_uv_map_name(context)
+            ps_object = ps_ctx.ps_object
+            uv_layers = getattr(getattr(ps_object, 'data', None), 'uv_layers', None)
+            if not candidate_uv or not uv_layers or candidate_uv not in uv_layers.keys():
+                candidate_uv = self.get_default_uv_map_name(context)
+            self.uv_map_name = candidate_uv
         else:
             self.uv_map_name = self.get_default_uv_map_name(context)
             

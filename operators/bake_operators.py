@@ -6,11 +6,11 @@ from bpy.props import StringProperty, BoolProperty, IntProperty, EnumProperty, F
 
 from .common import PSContextMixin, PSImageCreateMixin, PSUVOptionsMixin, DEFAULT_PS_UV_MAP_NAME
 
-from ..paintsystem.data import set_layer_blend_type, get_layer_blend_type
+from ..paintsystem.data import set_layer_blend_type, get_layer_blend_type, _sync_uv_map_to_name
 from ..panels.common import get_icon_from_channel
 
 
-class BakeOperator(PSContextMixin, PSImageCreateMixin, Operator):
+class BakeOperator(PSContextMixin, PSImageCreateMixin, PSUVOptionsMixin, Operator):
     """Bake the active channel"""
     bl_options = {'REGISTER', 'UNDO'}
     multi_object: BoolProperty(
@@ -36,6 +36,13 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
     bl_description = "Bake the active channel"
     bl_options = {'REGISTER', 'UNDO'}
 
+    show_advanced: BoolProperty(
+        name="Advanced Settings",
+        description="Show additional bake settings",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+
     as_layer: BoolProperty(
         name="As Layer",
         description="Bake the channel as a layer",
@@ -58,14 +65,43 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
     def draw(self, context):
         layout = self.layout
         ps_ctx = self.parse_context(context)
+        
+        # Bake mode selection
+        layout.prop(self, "as_layer", text="Bake as New Layer")
+        layout.separator()
+        
         self.image_create_ui(layout, context)
+
+        # UV Map selector (always visible)
         box = layout.box()
         box.label(text="UV Map", icon='UV')
-        box.prop_search(self, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="")
-        if ps_ctx.active_channel.type == "VECTOR":
-            tangent_box = layout.box()
-            tangent_box.prop(self, "as_tangent_normal")
-        layout.prop(self, "multi_object")
+        if ps_ctx.ps_object and ps_ctx.ps_object.data and hasattr(ps_ctx.ps_object.data, "uv_layers"):
+            box.prop_search(self, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="")
+            if self.multi_object and self.uv_map_name:
+                row = box.row()
+                row.operator("paint_system.sync_uv_for_bake", text="Sync UV to All Objects").uv_map_name = self.uv_map_name
+        else:
+            box.label(text="No UV layers available", icon='ERROR')
+
+        # Advanced settings toggle
+        adv_box = layout.box()
+        row = adv_box.row()
+        row.prop(self, "show_advanced", icon='TRIA_DOWN' if self.show_advanced else 'TRIA_RIGHT', emboss=False)
+        
+        # Advanced settings content
+        if self.show_advanced:
+            # Tangent space normal option when applicable
+            if ps_ctx.active_channel.type == "VECTOR":
+                tangent_box = adv_box.box()
+                tangent_box.prop(self, "as_tangent_normal")
+
+            adv_box.prop(self, "multi_object")
+        else:
+            # Minimal essentials always visible
+            if ps_ctx.active_channel.type == "VECTOR":
+                tangent_box = layout.box()
+                tangent_box.prop(self, "as_tangent_normal")
+            layout.prop(self, "multi_object")
 
     def invoke(self, context, event):
         ps_ctx = self.parse_context(context)
@@ -77,6 +113,14 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
         mat = ps_ctx.active_material
+
+        # Sync UV map on all material users if multi-object baking
+        if self.multi_object and mat:
+            mat_users = [o for o in context.scene.objects 
+                        if o.type == 'MESH' and any(ms.material == mat for ms in o.material_slots if ms.material)]
+            for o in mat_users:
+                if o.data.uv_layers and self.uv_map_name not in o.data.uv_layers:
+                    _sync_uv_map_to_name(o, self.uv_map_name)
 
         # Build bake image name: "MaterialName_ChannelName"
         mat_name = mat.name if mat else "Material"
@@ -156,6 +200,9 @@ class PAINTSYSTEM_OT_BakeAllChannels(BakeOperator):
         box = layout.box()
         box.label(text="UV Map", icon='UV')
         box.prop_search(self, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="")
+        if self.multi_object and self.uv_map_name:
+            row = box.row()
+            row.operator("paint_system.sync_uv_for_bake", text="Sync UV to All Objects").uv_map_name = self.uv_map_name
         layout.prop(self, "multi_object")
     
     def execute(self, context):
@@ -163,6 +210,16 @@ class PAINTSYSTEM_OT_BakeAllChannels(BakeOperator):
         context.window.cursor_set('WAIT')
         ps_ctx = self.parse_context(context)
         active_group = ps_ctx.active_group
+        
+        # Sync UV map on all material users if multi-object baking
+        if self.multi_object:
+            mat = ps_ctx.active_material
+            if mat:
+                mat_users = [o for o in context.scene.objects 
+                            if o.type == 'MESH' and any(ms.material == mat for ms in o.material_slots if ms.material)]
+                for o in mat_users:
+                    if o.data.uv_layers and self.uv_map_name not in o.data.uv_layers:
+                        _sync_uv_map_to_name(o, self.uv_map_name)
         
         self.image_width = int(self.image_resolution)
         self.image_height = int(self.image_resolution)
@@ -890,7 +947,7 @@ class PAINTSYSTEM_OT_MergeDown(PSContextMixin, PSImageCreateMixin, Operator):
     multi_object: BoolProperty(
         name="All Material Users",
         description="Include all mesh objects using the active material (shared UV space) in the bake",
-        default=False,
+        default=True,
         options={'SKIP_SAVE'}
     )
     
@@ -926,6 +983,16 @@ class PAINTSYSTEM_OT_MergeDown(PSContextMixin, PSImageCreateMixin, Operator):
         context.window.cursor_set('WAIT')
         self.get_coord_type(context)
         below_layer = self.get_below_layer(context)
+        ps_ctx = self.parse_context(context)
+        
+        # Validate UV map exists on the object
+        ps_object = ps_ctx.ps_object
+        if ps_object and ps_object.data and ps_object.data.uv_layers:
+            if self.uv_map_name and self.uv_map_name not in ps_object.data.uv_layers:
+                # Stored UV no longer exists, fall back to active UV
+                active_uv = ps_object.data.uv_layers.active
+                self.uv_map_name = active_uv.name if active_uv else (ps_object.data.uv_layers[0].name if ps_object.data.uv_layers else "")
+        
         if below_layer:
             if below_layer.uses_coord_type:
                 if getattr(below_layer, 'coord_type', 'UV') == 'AUTO':
@@ -933,7 +1000,13 @@ class PAINTSYSTEM_OT_MergeDown(PSContextMixin, PSImageCreateMixin, Operator):
             else:
                 print("Using paint system UV")
                 self.uv_map_name = DEFAULT_PS_UV_MAP_NAME if self.use_paint_system_uv else self.uv_map_name
-        if below_layer.type == "IMAGE":
+        
+        # Check if we have a valid UV map before auto-executing
+        has_valid_uv = False
+        if ps_object and ps_object.data and ps_object.data.uv_layers:
+            has_valid_uv = bool(self.uv_map_name and self.uv_map_name in ps_object.data.uv_layers)
+        
+        if below_layer.type == "IMAGE" and has_valid_uv:
             self.image_width = below_layer.image.size[0]
             self.image_height = below_layer.image.size[1]
             return self.execute(context)
@@ -953,6 +1026,9 @@ class PAINTSYSTEM_OT_MergeDown(PSContextMixin, PSImageCreateMixin, Operator):
         box = layout.box()
         box.label(text="UV Map", icon='UV')
         box.prop_search(self, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="")
+        if self.multi_object and self.uv_map_name:
+            row = box.row()
+            row.operator("paint_system.sync_uv_for_bake", text="Sync UV to All Objects").uv_map_name = self.uv_map_name
         layout.prop(self, "multi_object")
 
     def execute(self, context):
@@ -967,6 +1043,16 @@ class PAINTSYSTEM_OT_MergeDown(PSContextMixin, PSImageCreateMixin, Operator):
         
         if not active_channel:
             return {'CANCELLED'}
+        
+        # Sync UV map on all material users if multi-object merging
+        if self.multi_object:
+            mat = ps_ctx.active_material
+            if mat:
+                mat_users = [o for o in context.scene.objects 
+                            if o.type == 'MESH' and any(ms.material == mat for ms in o.material_slots if ms.material)]
+                for o in mat_users:
+                    if o.data.uv_layers and self.uv_map_name not in o.data.uv_layers:
+                        _sync_uv_map_to_name(o, self.uv_map_name)
         
         image = self.create_image(context)
         
@@ -1008,10 +1094,15 @@ class PAINTSYSTEM_OT_MergeDown(PSContextMixin, PSImageCreateMixin, Operator):
         for layer in to_be_enabled_layers:
             layer.enabled = True
         
-        # Remove the current layer since it's been merged
-        active_channel.delete_layers(context, [unlinked_layer, below_unlinked_layer])
+        # Update the below layer with the merged result and delete the active layer
+        below_layer.type = 'IMAGE'
+        below_layer.image = image
+        below_layer.coord_type = 'UV'
+        below_layer.uv_map_name = self.uv_map_name
         
-        active_channel.create_layer(context, "Merged Layer", "IMAGE", coord_type="UV", uv_map_name=self.uv_map_name, image=image)
+        # Delete only the active layer (merged into below)
+        active_channel.delete_layers(context, [unlinked_layer])
+        
         # Set cursor back to default
         context.window.cursor_set('DEFAULT')
         return {'FINISHED'}
@@ -1025,7 +1116,7 @@ class PAINTSYSTEM_OT_MergeUp(PSContextMixin, PSImageCreateMixin, Operator):
     multi_object: BoolProperty(
         name="All Material Users",
         description="Include all mesh objects using the active material (shared UV space) in the bake",
-        default=False,
+        default=True,
         options={'SKIP_SAVE'}
     )
 
@@ -1063,6 +1154,16 @@ class PAINTSYSTEM_OT_MergeUp(PSContextMixin, PSImageCreateMixin, Operator):
     def invoke(self, context, event):
         self.get_coord_type(context)
         above_layer = self.get_above_layer(context)
+        ps_ctx = self.parse_context(context)
+        
+        # Validate UV map exists on the object
+        ps_object = ps_ctx.ps_object
+        if ps_object and ps_object.data and ps_object.data.uv_layers:
+            if self.uv_map_name and self.uv_map_name not in ps_object.data.uv_layers:
+                # Stored UV no longer exists, fall back to active UV
+                active_uv = ps_object.data.uv_layers.active
+                self.uv_map_name = active_uv.name if active_uv else (ps_object.data.uv_layers[0].name if ps_object.data.uv_layers else "")
+        
         # Choose UV based on the layer above
         if above_layer:
             if above_layer.uses_coord_type:
@@ -1070,7 +1171,13 @@ class PAINTSYSTEM_OT_MergeUp(PSContextMixin, PSImageCreateMixin, Operator):
                     self.uv_map_name = DEFAULT_PS_UV_MAP_NAME
             else:
                 self.uv_map_name = DEFAULT_PS_UV_MAP_NAME if self.use_paint_system_uv else self.uv_map_name
-        if above_layer.type == "IMAGE":
+        
+        # Check if we have a valid UV map before auto-executing
+        has_valid_uv = False
+        if ps_object and ps_object.data and ps_object.data.uv_layers:
+            has_valid_uv = bool(self.uv_map_name and self.uv_map_name in ps_object.data.uv_layers)
+        
+        if above_layer.type == "IMAGE" and has_valid_uv:
             self.image_width = above_layer.image.size[0]
             self.image_height = above_layer.image.size[1]
             return self.execute(context)
@@ -1088,6 +1195,9 @@ class PAINTSYSTEM_OT_MergeUp(PSContextMixin, PSImageCreateMixin, Operator):
         box = layout.box()
         box.label(text="UV Map", icon='UV')
         box.prop_search(self, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="")
+        if self.multi_object and self.uv_map_name:
+            row = box.row()
+            row.operator("paint_system.sync_uv_for_bake", text="Sync UV to All Objects").uv_map_name = self.uv_map_name
         layout.prop(self, "multi_object")
 
     def execute(self, context):
@@ -1102,6 +1212,16 @@ class PAINTSYSTEM_OT_MergeUp(PSContextMixin, PSImageCreateMixin, Operator):
 
         if not active_channel:
             return {'CANCELLED'}
+
+        # Sync UV map on all material users if multi-object merging
+        if self.multi_object:
+            mat = ps_ctx.active_material
+            if mat:
+                mat_users = [o for o in context.scene.objects 
+                            if o.type == 'MESH' and any(ms.material == mat for ms in o.material_slots if ms.material)]
+                for o in mat_users:
+                    if o.data.uv_layers and self.uv_map_name not in o.data.uv_layers:
+                        _sync_uv_map_to_name(o, self.uv_map_name)
 
         image = self.create_image(context)
 
@@ -1143,13 +1263,60 @@ class PAINTSYSTEM_OT_MergeUp(PSContextMixin, PSImageCreateMixin, Operator):
         for layer in to_be_enabled_layers:
             layer.enabled = True
 
-        # Remove the current layer since it's been merged into the layer above
-        active_channel.delete_layers(context, [unlinked_layer, above_unlinked_layer])
+        # Update the above layer with the merged result and delete the active layer
+        above_layer.type = 'IMAGE'
+        above_layer.image = image
+        above_layer.coord_type = 'UV'
+        above_layer.uv_map_name = self.uv_map_name
         
-        active_channel.create_layer(context, "Merged Layer", "IMAGE", coord_type="UV", uv_map_name=self.uv_map_name, image=image)
+        # Delete only the active layer (merged into above)
+        active_channel.delete_layers(context, [unlinked_layer])
+        
         # Set cursor back to default
         context.window.cursor_set('DEFAULT')
         return {'FINISHED'}
+
+
+class PAINTSYSTEM_OT_SyncUVForBake(PSContextMixin, Operator):
+    bl_idname = "paint_system.sync_uv_for_bake"
+    bl_label = "Sync UV for Bake"
+    bl_description = "Ensure the selected UV map exists on all material users"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    uv_map_name: StringProperty(
+        name="UV Map Name",
+        options={'SKIP_SAVE'}
+    )
+
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        mat = ps_ctx.active_material
+        if not mat or not self.uv_map_name:
+            return {'CANCELLED'}
+
+        mat_users = [o for o in context.scene.objects 
+                    if o.type == 'MESH' and any(ms.material == mat for ms in o.material_slots if ms.material)]
+        synced_count = 0
+        activated_count = 0
+        for o in mat_users:
+            if o.data.uv_layers:
+                had_uv = self.uv_map_name in o.data.uv_layers
+                _sync_uv_map_to_name(o, self.uv_map_name)
+                if not had_uv:
+                    synced_count += 1
+                else:
+                    activated_count += 1
+
+        if synced_count > 0 and activated_count > 0:
+            self.report({'INFO'}, f"Synced UV '{self.uv_map_name}' to {synced_count} objects, activated on {activated_count} objects")
+        elif synced_count > 0:
+            self.report({'INFO'}, f"Synced UV '{self.uv_map_name}' to {synced_count} objects")
+        elif activated_count > 0:
+            self.report({'INFO'}, f"Activated UV '{self.uv_map_name}' on {activated_count} objects")
+        else:
+            self.report({'INFO'}, f"UV '{self.uv_map_name}' already active on all objects")
+        return {'FINISHED'}
+
 
 classes = (
     PAINTSYSTEM_OT_BakeChannel,
@@ -1160,6 +1327,7 @@ classes = (
     PAINTSYSTEM_OT_ConvertToImageLayer,
     PAINTSYSTEM_OT_MergeDown,
     PAINTSYSTEM_OT_MergeUp,
+    PAINTSYSTEM_OT_SyncUVForBake,
 )
 
 register, unregister = register_classes_factory(classes)

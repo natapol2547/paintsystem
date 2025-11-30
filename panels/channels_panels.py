@@ -88,6 +88,27 @@ class MAT_PT_ChannelsSelect(PSContextMixin, Panel):
         col.operator("paint_system.move_channel_up", icon='TRIA_UP', text="")
         col.operator("paint_system.move_channel_down", icon='TRIA_DOWN', text="")
 
+        # Preset quick-add buttons similar to Layers panel
+        presets_box = layout.box()
+        presets_box.label(text="Channel Presets", icon='ADD')
+        presets_row1 = presets_box.row(align=True)
+        op = presets_row1.operator("paint_system.add_channel", text="Color", icon='COLOR')
+        op.template = 'COLOR'
+        op = presets_row1.operator("paint_system.add_channel", text="Roughness", icon='MOD_MASK')
+        op.template = 'ROUGHNESS'
+        op = presets_row1.operator("paint_system.add_channel", text="Metallic", icon='META_PLANE')
+        op.template = 'METALLIC'
+        presets_row2 = presets_box.row(align=True)
+        op = presets_row2.operator("paint_system.add_channel", text="Normal", icon='NORMALS_VERTEX')
+        op.template = 'NORMAL'
+        op = presets_row2.operator("paint_system.add_channel", text="Emission", icon='LIGHT')
+        op.template = 'EMISSION'
+        op = presets_row2.operator("paint_system.add_channel", text="AO", icon='SEQ_HISTOGRAM')
+        op.template = 'AO'
+        presets_row3 = presets_box.row(align=True)
+        op = presets_row3.operator("paint_system.add_channel", text="Displacement", icon='MOD_DISPLACE')
+        op.template = 'DISPLACEMENT'
+
 class MAT_PT_ChannelsPanel(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_ChannelsPanel'
     bl_space_type = "VIEW_3D"

@@ -1638,10 +1638,12 @@ def _sync_uv_map_to_name(obj: bpy.types.Object, target_uv_name: str) -> None:
             return
         uv_layers = obj.data.uv_layers
         if target_uv_name in uv_layers.keys():
+            uv_layers.active = uv_layers[target_uv_name]  # Set as active
             return  # Already present
         if len(uv_layers) == 1:
             # Safe rename (preserves UDIM layout)
             uv_layers[0].name = target_uv_name
+            uv_layers.active = uv_layers[0]  # Set as active
             print(f"UV sync: renamed -> '{target_uv_name}' on {obj.name}")
             return
         # Create new layer and copy data from active (maintains tile positions)
@@ -1943,6 +1945,13 @@ class Channel(BaseNestedListManager):
         all_targets: list[Object] = []
         if obj:
             all_targets.append(obj)
+            if uv_layer:
+                try:
+                    uv_layers = getattr(obj.data, 'uv_layers', None)
+                    if uv_layers and uv_layer not in uv_layers.keys():
+                        _sync_uv_map_to_name(obj, uv_layer)
+                except Exception as e:
+                    print(f"Active object UV sync failed: {e}")
 
         scene = getattr(context, 'scene', None)
         if multi_object and mat and scene:

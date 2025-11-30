@@ -114,11 +114,14 @@ def draw_layer_icon(layer: Layer, layout: bpy.types.UILayout):
             else:
                 # Check if preview exists and is valid before expensive operations
                 preview = layer.image.preview
-                if preview and hasattr(preview, 'icon_id') and preview.icon_id > 0:
-                    # Only check if painted when we actually have a preview
-                    if is_image_painted(preview):
-                        layout.label(icon_value=preview.icon_id)
-                        return
+                try:
+                    if preview and hasattr(preview, 'icon_id') and preview.icon_id > 0:
+                        # Only check if painted when we actually have a preview
+                        if is_image_painted(preview):
+                            layout.label(icon_value=preview.icon_id)
+                            return
+                except Exception:
+                    pass  # icon_id may be stale after reload
                 # Fallback to generic icon (don't regenerate preview every frame)
                 layout.label(icon_value=get_icon('image'))
         case 'FOLDER':

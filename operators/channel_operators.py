@@ -24,6 +24,28 @@ class PAINTSYSTEM_OT_AddChannel(PSContextMixin, MultiMaterialOperator):
         description="Name of the new channel",
         default="New Channel",
     )
+    # Template preset to simplify setup
+    template: bpy.props.EnumProperty(
+        name="Template",
+        description="Preset for common channel types",
+        items=[
+            ('GENERIC', 'Generic', 'No preset; use manual settings'),
+            ('COLOR', 'Color', 'sRGB color channel'),
+            ('ROUGHNESS', 'Roughness', 'Grayscale roughness channel'),
+            ('METALLIC', 'Metallic', 'Grayscale metallic channel'),
+            ('NORMAL', 'Normal (Tangent)', 'Vector normal map channel'),
+            ('EMISSION', 'Emission', 'sRGB emission channel'),
+            ('AO', 'Ambient Occlusion', 'Grayscale AO channel'),
+            ('DISPLACEMENT', 'Displacement', 'Grayscale displacement/height'),
+        ],
+        default='GENERIC'
+    )
+    create_starter_layer: bpy.props.BoolProperty(
+        name="Create Starter Image Layer",
+        description="Automatically add a paintable image layer",
+        default=True,
+        options={'SKIP_SAVE'}
+    )
     channel_type: bpy.props.EnumProperty(
         name="Channel Type",
         description="Type of the new channel",
@@ -75,19 +97,87 @@ class PAINTSYSTEM_OT_AddChannel(PSContextMixin, MultiMaterialOperator):
     
     def process_material(self, context):
         ps_ctx = self.parse_context(context)
-        ps_ctx.active_group.create_channel(
-            context, 
-            channel_name=self.channel_name, 
-            channel_type=self.channel_type, 
-            color_space=self.color_space, 
-            use_alpha=self.use_alpha, 
-            normalize_input=self.normalize_input, 
-            # world_to_object_normal=self.world_to_object_normal, 
-            use_max_min=self.use_max_min,
-            factor_min=self.factor_min,
-            factor_max=self.factor_max,
-            vector_space="OBJECT" if self.channel_type == "VECTOR" else "NONE"
+
+        # Apply template defaults
+        channel_type = self.channel_type
+        color_space = self.color_space
+        normalize_input = self.normalize_input
+        use_alpha = self.use_alpha
+        use_max_min = self.use_max_min
+        factor_min = self.factor_min
+        factor_max = self.factor_max
+
+        match self.template:
+            case 'COLOR':
+                channel_type = 'COLOR'
+                color_space = 'COLOR'
+                use_alpha = True
+            case 'ROUGHNESS':
+                channel_type = 'FLOAT'
+                color_space = 'NON_COLOR'
+                use_max_min = False
+            case 'METALLIC':
+                channel_type = 'FLOAT'
+                color_space = 'NON_COLOR'
+                use_max_min = False
+            case 'NORMAL':
+                channel_type = 'VECTOR'
+                color_space = 'NON_COLOR'
+                normalize_input = True
+            case 'EMISSION':
+                channel_type = 'COLOR'
+                color_space = 'COLOR'
+                use_alpha = False
+            case 'AO':
+                channel_type = 'FLOAT'
+                color_space = 'NON_COLOR'
+            case 'DISPLACEMENT':
+                channel_type = 'FLOAT'
+                color_space = 'NON_COLOR'
+            case _:
+                pass
+
+        new_channel = ps_ctx.active_group.create_channel(
+            context,
+            channel_name=self.channel_name,
+            channel_type=channel_type,
+            color_space=color_space,
+            use_alpha=use_alpha,
+            normalize_input=normalize_input,
+            use_max_min=use_max_min,
+            factor_min=factor_min,
+            factor_max=factor_max,
+            vector_space="OBJECT" if channel_type == "VECTOR" else "NONE"
+        )
+
+        # Optionally create a starter image layer
+        if self.create_starter_layer and new_channel:
+            # Derive UV defaults
+            coord_type = 'UV'
+            uv_name = ''
+            obj = ps_ctx.ps_object
+            if obj and getattr(obj.data, 'uv_layers', None):
+                uv_layers = obj.data.uv_layers
+                active_uv = next((uv for uv in uv_layers if getattr(uv, 'active', False)), None)
+                uv_name = active_uv.name if active_uv else ''
+
+            # Create an image suitable for painting
+            img_name = f"{new_channel.name}"
+            try:
+                image = bpy.data.images.new(img_name, width=2048, height=2048, alpha=True)
+                image.generated_color = (0, 0, 0, 0)
+            except Exception:
+                image = None
+
+            new_channel.create_layer(
+                context,
+                layer_name=f"{new_channel.name} Image",
+                layer_type="IMAGE",
+                coord_type=coord_type,
+                uv_map_name=uv_name,
+                image=image,
             )
+
         redraw_panel(context)
         return {'FINISHED'}
     
@@ -99,11 +189,13 @@ class PAINTSYSTEM_OT_AddChannel(PSContextMixin, MultiMaterialOperator):
     def draw(self, context):
         layout = self.layout
         layout.prop(self, "channel_name", text="Name")
+        layout.prop(self, "template", text="Template")
         layout.prop(self, "channel_type", text="Type")
         layout.prop(self, "color_space", text="Color Space")
         layout.prop(self, "use_alpha", text="Expose Alpha Socket")
         if self.channel_type == "VECTOR":
             layout.prop(self, "normalize_input", text="Normalize")
+        layout.prop(self, "create_starter_layer", text="Create Starter Image Layer")
         unique_name = self.get_unique_channel_name(context)
         if unique_name != self.channel_name:
             box = layout.box()

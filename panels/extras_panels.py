@@ -321,10 +321,14 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
                 icon_id = 0
                 txt_ma = ""
                 if ma:
-                    ma.id_data.preview_ensure()
-                    if ma.id_data.preview:
-                        icon_id = ma.id_data.preview.icon_id
-                        txt_ma = ma.name
+                    try:
+                        ma.id_data.preview_ensure()
+                        if ma.id_data.preview:
+                            icon_id = ma.id_data.preview.icon_id
+                            txt_ma = ma.name
+                    except Exception:
+                        pass  # icon_id may be stale after reload
+                    if txt_ma:
                         maxw = 25
                         if len(txt_ma) > maxw:
                             txt_ma = txt_ma[:maxw - 5] + '..' + txt_ma[-3:]
