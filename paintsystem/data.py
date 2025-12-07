@@ -52,6 +52,8 @@ from .graph import (
     get_alpha_over_nodetree,
     get_layer_blend_type,
     set_layer_blend_type,
+    get_paint_system_collection,
+    add_empty_to_collection,
 )
 from .graph.common import get_library_nodetree, get_library_object, DEFAULT_PS_UV_MAP_NAME
 from .nested_list_manager import BaseNestedListManager, BaseNestedListItem
@@ -105,6 +107,15 @@ LAYER_TYPE_ENUM = [
     ('TEXTURE', "Texture", "Texture layer"),
     ('GEOMETRY', "Geometry", "Geometry layer"),
     ('BLANK', "Blank", "Blank layer"),
+]
+
+MASK_TYPE_ENUM = [
+    ('IMAGE', "Image", "Image layer"),
+    ('SOLID_COLOR', "Solid Color", "Solid Color layer"),
+    ('ATTRIBUTE', "Attribute", "Attribute layer"),
+    ('GRADIENT', "Gradient", "Gradient layer"),
+    ('RANDOM', "Random", "Random Color layer"),
+    ('TEXTURE', "Texture", "Texture layer"),
 ]
 
 CHANNEL_TYPE_ENUM = [
@@ -336,15 +347,6 @@ def is_valid_ps_nodetree(node_tree: NodeTree) -> bool:
                         has_alpha_output = True
         return has_color_input and has_alpha_input and has_color_output and has_alpha_output
 
-
-def get_paint_system_collection(context: bpy.types.Context) -> bpy.types.Collection:
-    view_layer = context.view_layer
-    if "Paint System Collection" not in view_layer.layer_collection.collection.children:
-        collection = bpy.data.collections.new("Paint System Collection")
-        view_layer.layer_collection.collection.children.link(collection)
-    else:
-        collection = view_layer.layer_collection.collection.children["Paint System Collection"]
-    return collection
 
 def blender_color_to_srgb_hex(color: Color):
     """
@@ -622,6 +624,24 @@ class MarkerAction(PropertyGroup):
 
 class GlobalLayer(PropertyGroup):
     """DEPRECATED -- Legacy global layer data.
+
+    uid: StringProperty()
+
+    def ensure_empty_object(self):
+        context = bpy.context
+        ps_ctx = parse_context(context)
+        empty_name = f"{self.layer_name} ({self.uid[:8]}) Empty"
+        if empty_name in bpy.data.objects:
+            empty_object = bpy.data.objects[empty_name]
+            empty_object.parent = ps_ctx.ps_object
+            add_empty_to_collection(context, empty_object)
+        else:
+            with bpy.context.temp_override():
+                empty_object = bpy.data.objects.new(empty_name, None)
+                empty_object.parent = ps_ctx.ps_object
+                add_empty_to_collection(context, empty_object)
+        self.empty_object = empty_object
+        return empty_object
     
     This class is kept only for backward-compatible migration (see ``versioning.py``).
     Global layer entries are cleared on file load after migration. Do not use for new code.
@@ -806,11 +826,42 @@ class LayerMask(PropertyGroup):
         description="Mask UV map",
         default="",
     )
+    empty_object: PointerProperty(
+        name="Empty Object",
+        type=Object,
+    )
+    gradient_type: EnumProperty(
+        items=GRADIENT_TYPE_ENUM,
+        name="Gradient Type",
+        description="Gradient type",
+        default='LINEAR',
+    )
+    texture_type: EnumProperty(
+        items=TEXTURE_TYPE_ENUM,
+        name="Texture Type",
+        description="Texture type",
+    )
+    node_tree: PointerProperty(
+        name="Node Tree",
+        type=NodeTree
+    )
+    
+    def ensure_empty_object(self):
+        context = bpy.context
+        ps_ctx = parse_context(context)
+        empty_name = f"{self.name} ({self.uid[:8]}) Empty"
+        if empty_name in bpy.data.objects:
+            empty_object = bpy.data.objects[empty_name]
+            empty_object.parent = ps_ctx.ps_object
+            add_empty_to_collection(context, empty_object)
+        else:
+            with bpy.context.temp_override():
+                empty_object = bpy.data.objects.new(empty_name, None)
+                empty_object.parent = ps_ctx.ps_object
+                add_empty_to_collection(context, empty_object)
+        self.empty_object = empty_object
+        return empty_object
 
-def add_empty_to_collection(context: bpy.types.Context, empty_object: bpy.types.Object):
-    collection = get_paint_system_collection(context)
-    if empty_object.name not in collection.objects:
-        collection.objects.link(empty_object)
 
 class Layer(BaseNestedListItem):
     """A single paint layer (image, solid colour, adjustment, etc.) within a channel.
@@ -897,10 +948,28 @@ class Layer(BaseNestedListItem):
         if self.blend_mode == "PASSTHROUGH" and self.type != "FOLDER":
             self.blend_mode = "MIX"
         
-        # Ensure node tree
-        if not self.node_tree:
-            node_tree = bpy.data.node_groups.new(name=f"PS_Layer ({self.name})", type='ShaderNodeTree')
+        # Create node tree if it doesn't exist
+        if not self.node_tree and not self.is_linked:
+            node_tree = bpy.data.node_groups.new(name=f"PS_Layer ({self.layer_name})", type='ShaderNodeTree')
             self.node_tree = node_tree
+            expected_input = [
+                ExpectedSocket(name="Clip", socket_type="NodeSocketBool"),
+                ExpectedSocket(name="Color", socket_type="NodeSocketColor"),
+                ExpectedSocket(name="Alpha", socket_type="NodeSocketFloat"),
+            ]
+            if self.type == "FOLDER":
+                expected_input.append(ExpectedSocket(name="Over Color", socket_type="NodeSocketColor"))
+                expected_input.append(ExpectedSocket(name="Over Alpha", socket_type="NodeSocketFloat"))
+            expected_output = [
+                ExpectedSocket(name="Color", socket_type="NodeSocketColor"),
+                ExpectedSocket(name="Alpha", socket_type="NodeSocketFloat"),
+            ]
+            ensure_sockets(node_tree, expected_input, "INPUT")
+            ensure_sockets(node_tree, expected_output, "OUTPUT")
+
+        # Generate UUID if it doesn't exist or is invalid
+        if not is_valid_uuidv4(self.uid):
+            self.uid = str(uuid.uuid4())
         
         # Ensure sockets
         expected_input = [
@@ -1329,6 +1398,24 @@ class Layer(BaseNestedListItem):
         description="Lock the alpha channel",
         default=False,
         update=update_brush_settings
+    )
+    
+    # Layer mask data
+    use_masks: BoolProperty(
+        name="Use Masks",
+        description="Use layer masks",
+        default=False,
+        update=update_node_tree
+    )
+    layer_masks: CollectionProperty(
+        type=LayerMask,
+        name="Layer Masks",
+        description="Collection of layer masks for the layer"
+    )
+    active_layer_mask_index: IntProperty(
+        name="Active Layer Mask Index",
+        description="Active layer mask index",
+        default=0
     )
     
     # For parallax coordinate type

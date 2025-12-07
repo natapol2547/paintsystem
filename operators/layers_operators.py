@@ -7,11 +7,14 @@ from bpy.types import Operator, Context, NodeTree
 from bpy.utils import register_classes_factory
 import mathutils
 
+from ..paintsystem.list_manager import ListManager
+
 from ..paintsystem.data import (
     ACTION_BIND_ENUM,
     ACTION_TYPE_ENUM,
     ADJUSTMENT_TYPE_ENUM,
     ATTRIBUTE_TYPE_ENUM,
+    MASK_TYPE_ENUM,
     TEXTURE_TYPE_ENUM,
     GRADIENT_TYPE_ENUM,
     GEOMETRY_TYPE_ENUM,
@@ -1185,6 +1188,52 @@ class PAINTSYSTEM_OT_RenameLayerSuffix(PSContextMixin, Operator):
         redraw_panel(context)
         return {'FINISHED'}
 
+class PAINTSYSTEM_OT_NewLayerMask(PSContextMixin, Operator):
+    """Create a layer mask for the active layer"""
+    bl_idname = "paint_system.new_layer_mask"
+    bl_label = "Create Layer Mask"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Create layer mask for active layer"
+    
+    mask_type: EnumProperty(
+        name="Mask Type",
+        items=MASK_TYPE_ENUM,
+    )
+    
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_layer
+    
+    def execute(self, context: Context):
+        ps_ctx = self.parse_context(context)
+        active_layer = ps_ctx.active_layer
+        active_layer.use_masks = True
+        lm = ListManager(active_layer, "layer_masks", active_layer, "active_layer_mask_index")
+        layer_mask = lm.add_item()
+        layer_mask.type = self.mask_type
+        return {'FINISHED'}
+
+
+class PAINTSYSTEM_OT_DeleteLayerMask(PSContextMixin, Operator):
+    """Delete the active layer mask"""
+    bl_idname = "paint_system.delete_layer_mask"
+    bl_label = "Delete Layer Mask"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Delete the active layer mask"
+    
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_layer and ps_ctx.active_layer.use_masks
+    
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        active_layer = ps_ctx.active_layer
+        lm = ListManager(active_layer, "layer_masks", active_layer, "active_layer_mask_index")
+        lm.remove_active_item()
+        return {'FINISHED'}
+
 classes = (
     PAINTSYSTEM_OT_NewImage,
     PAINTSYSTEM_OT_NewFolder,
@@ -1216,6 +1265,8 @@ classes = (
     PAINTSYSTEM_OT_NewAttributeMask,
     PAINTSYSTEM_OT_NewTextureMask,
     PAINTSYSTEM_OT_RenameLayerSuffix,
+    PAINTSYSTEM_OT_NewLayerMask,
+    PAINTSYSTEM_OT_DeleteLayerMask
 )
 
 register, unregister = register_classes_factory(classes)

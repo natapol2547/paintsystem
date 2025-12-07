@@ -2,11 +2,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..data import Layer
+    from ..data import Layer, LayerMask
 
 from pathlib import Path
 from typing import Optional
-from .nodetree_builder import NodeTreeBuilder
+from .nodetree_builder import NodeTreeBuilder, START, END
 
 import bpy
 import re
@@ -151,6 +151,16 @@ def create_mixing_graph(builder: NodeTreeBuilder, layer: "Layer", color_node_nam
     builder.link("group_input", "post_mix", "Clip", "Clip")
     builder.link("post_mix", "group_output", "Color", "Color")
     builder.link("post_mix", "group_output", "Alpha", "Alpha")
+    return builder
+
+
+def create_mask_mixing_graph(builder: NodeTreeBuilder, layer_mask: "LayerMask", color_node_name: str = None, color_socket: str = None) -> NodeTreeBuilder:
+    blend_mode = layer_mask.blend_mode
+    builder.add_node("mix_rgb", "ShaderNodeMix", {"blend_type": blend_mode, "data_type": "RGBA"}, {0: 1, "A": (1, 1, 1, 1), "B": (1, 1, 1, 1)}, force_properties=True, force_default_values=True)
+    if color_node_name is not None and color_socket is not None:
+        builder.link(color_node_name, "mix_rgb", color_socket, "B")
+    builder.link(START, "mix_rgb", "Color", "A")
+    builder.link("mix_rgb", END, "Result", "Color")
     return builder
 
 
