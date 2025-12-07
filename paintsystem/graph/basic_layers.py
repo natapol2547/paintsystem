@@ -44,7 +44,6 @@ class PSNodeTreeBuilder:
         alpha_node_name: Optional[str] = None,
         alpha_socket: Optional[str] = None,
         frame_name: str = "Layer",
-        as_subgraph: bool = False,
         **kwargs
     ):
         """
@@ -58,10 +57,9 @@ class PSNodeTreeBuilder:
             alpha_node_name: Name of the node providing alpha (can be added later)
             alpha_socket: Socket name/index on the alpha node
             is_mask: Whether this builder is for a mask
-            as_subgraph: Whether to create the graph as a subgraph
             **kwargs: Additional arguments passed to NodeTreeBuilder
         """
-        self._builder = NodeTreeBuilder(layer.node_tree, frame_name, version=version, verbose=False, **kwargs)
+        self._builder = NodeTreeBuilder(layer.node_tree, frame_name, version=version, verbose=True, **kwargs)
         self._layer = layer
         
         self.mask_builders = []
@@ -86,7 +84,6 @@ class PSNodeTreeBuilder:
             None,
             None,  # Don't link alpha yet - will be done after modifiers
             None,
-            as_subgraph=as_subgraph,
         )
         
         # Now link the sources (or final modifier outputs) to the mixing graph
@@ -440,18 +437,6 @@ class PSNodeTreeBuilder:
                     case "GRADIENT_MAP":
                         builder.add_node("map_range", "ShaderNodeMapRange")
                         builder.link("group_input", "map_range", "Color", "Value")
-                    case "FAKE_LIGHT":
-                        builder.add_node("map_range", "ShaderNodeMapRange")
-                        builder.add_node("combine_xyz", "ShaderNodeCombineXYZ", default_values={2: -1 if empty_object and empty_object.type == 'EMPTY' else 1}, force_default_values=True)
-                        builder.add_node("object_rotation", "ShaderNodeCombineXYZ")
-                        builder.add_node("vector_rotate", "ShaderNodeVectorRotate", {"rotation_type": "EULER_XYZ"})
-                        builder.add_node("normal", "ShaderNodeNewGeometry")
-                        builder.add_node("dot_product", "ShaderNodeVectorMath", {"operation": "DOT_PRODUCT"})
-                        builder.link("combine_xyz", "vector_rotate", "Vector", "Vector")
-                        builder.link("object_rotation", "vector_rotate", "Vector", "Rotation")
-                        builder.link("vector_rotate", "dot_product", "Vector", 0)
-                        builder.link("normal", "dot_product", "Normal", 1)
-                        builder.link("dot_product", "map_range", "Value", "Value")
                     case _:
                         raise ValueError(f"Invalid gradient type: {gradient_type}")
                 builder.link("map_range", "source", "Result", "Fac")
@@ -552,80 +537,19 @@ class PSNodeTreeBuilder:
             for mask in layer.layer_masks:
                 if not mask.uid:
                     mask.uid = str(uuid.uuid4())
-                if mask.type != 'IMAGE':
-                    mask.type = 'IMAGE'
-                if not mask.node_tree:
-                    mask.node_tree = bpy.data.node_groups.new(
-                        name=f"PS_Mask ({mask.name})",
-                        type='ShaderNodeTree'
-                    )
-                builder.mask_builders.append(cls._create_mask_graph(mask, context).builder)
-
-        # PS 1.0-style active image mask path
-        active_image_mask = None
-        if getattr(layer, "use_masks", False) and hasattr(layer, "layer_masks") and layer.layer_masks:
-            active_mask_index = max(0, min(layer.active_layer_mask_index, len(layer.layer_masks) - 1))
-            check_mask = layer.layer_masks[active_mask_index]
-            if check_mask.enabled and check_mask.type == 'IMAGE' and check_mask.mask_image:
-                active_image_mask = check_mask
-
-        if active_image_mask:
-            mask_uv_map_name = active_image_mask.mask_uv_map or getattr(layer, "uv_map_name", "")
-            builder.add_node(
-                "ps_active_mask_source",
-                "ShaderNodeTexImage",
-                {"image.force": active_image_mask.mask_image, "interpolation": "Closest", "name": "ps_active_mask_source"}
-            )
-            create_coord_graph(
-                builder,
-                layer,
-                active_image_mask.coord_type,
-                mask_uv_map_name,
-                "ps_active_mask_source",
-                "Vector",
-            )
-            builder.add_node("ps_active_mask_rgb_to_bw", "ShaderNodeRGBToBW")
-            builder.link("ps_active_mask_source", "ps_active_mask_rgb_to_bw", "Color", "Color")
-
-            if builder._color_source_node is not None and builder._color_source_socket is not None:
-                builder.add_node(
-                    "ps_active_mask_color_mix",
-                    "ShaderNodeMix",
-                    {"blend_type": "MIX", "data_type": "RGBA"},
-                    default_values={"A": (0.0, 0.0, 0.0, 1.0)},
-                    force_default_values=True,
-                )
-                builder.link("ps_active_mask_rgb_to_bw", "ps_active_mask_color_mix", "Val", "Factor")
-                builder.add_color_modifier("ps_active_mask_color_mix", "B", "Result")
-
-            if builder._alpha_source_node is not None and builder._alpha_source_socket is not None:
-                builder.add_node(
-                    "ps_active_mask_alpha_multiply",
-                    "ShaderNodeMath",
-                    {"operation": "MULTIPLY"},
-                    default_values={0: 1.0, 1: 1.0},
-                    force_default_values=True,
-                )
-                builder.link(builder._alpha_source_node, "ps_active_mask_alpha_multiply", builder._alpha_source_socket, 0)
-                builder.link("ps_active_mask_rgb_to_bw", "ps_active_mask_alpha_multiply", "Val", 1)
-                builder._alpha_source_node = "ps_active_mask_alpha_multiply"
-                builder._alpha_source_socket = "Value"
-                builder._update_mixing_graph_links()
-            else:
-                builder._alpha_source_node = "ps_active_mask_rgb_to_bw"
-                builder._alpha_source_socket = "Val"
-                builder._update_mixing_graph_links()
+                builder.mask_builders.append(builder._create_mask_graph(mask, context))
         
         return builder
 
-    @classmethod
-    def _create_mask_graph(cls, layer_mask: "LayerMask", context: Context):
+    def _create_mask_graph(self, layer_mask: "LayerMask", context: Context):
         layer_pre_processing(layer_mask, context)
         
-        builder = cls(layer_mask, IMAGE_LAYER_VERSION, "source", "Color", as_subgraph=True, properties={"hide": True})
+        builder = NodeTreeBuilder(self._layer.node_tree, "Mask", version=IMAGE_LAYER_VERSION, verbose=True, properties={"hide": True})
         
         match layer_mask.type:
             case "IMAGE":
+                if layer_mask.mask_image:
+                    layer_mask.mask_image.name = layer_mask.name
                 img = layer_mask.mask_image
                 create_mask_mixing_graph(builder, layer_mask, "source", "Color")
                 builder.add_node("source", "ShaderNodeTexImage", {"image.force": img, "interpolation": "Closest", "name": "source"})
@@ -699,6 +623,14 @@ class PSNodeTreeBuilder:
                 builder.link("value_multiply_add", "hue_saturation_value", "Value", "Value")
                 return builder
 
+            case "TEXTURE":
+                color_socket = parse_socket_name(layer_mask, "source", "Color")
+                texture_type = get_texture_identifier(layer_mask.texture_type)
+                create_mask_mixing_graph(builder, layer_mask, "source", color_socket)
+                builder.add_node("source", texture_type, {"name": "source"})
+                builder.create_coord_graph('source', 'Vector')
+                return builder
+
             case _:
                 raise ValueError(f"Invalid layer mask type: {layer_mask.type}")
 
@@ -763,11 +695,8 @@ def parse_socket_name(layer: "Layer", socket_name: str, default_socket_name: str
         if custom_node_tree:
             return socket_name if socket_name in custom_node_tree.interface.items_tree else None
         return default_socket_name
-    source_node = getattr(layer, "source_node", None)
-    if source_node is not None:
+    elif layer.source_node:
         return socket_name if socket_name != "_NONE_" else None
-    if socket_name != "_NONE_":
-        return socket_name
     return default_socket_name
 
 def get_paint_system_collection(context: bpy.types.Context) -> bpy.types.Collection:
@@ -785,6 +714,9 @@ def add_empty_to_collection(context: bpy.types.Context, empty_object: bpy.types.
         collection.objects.link(empty_object)
 
 def layer_pre_processing(layer: "Layer", context: Context):
+    if layer.layer_name:
+        layer.node_tree.name = f"PS {layer.layer_name} ({layer.uid[:8]})"
+    
     if layer.coord_type == "DECAL":
         if not layer.empty_object:
             layer.ensure_empty_object()
@@ -792,7 +724,7 @@ def layer_pre_processing(layer: "Layer", context: Context):
         elif layer.empty_object.name not in context.view_layer.objects:
             add_empty_to_collection(context, layer.empty_object)
             
-    if layer.type == "GRADIENT" and layer.gradient_type in ('LINEAR', 'RADIAL', 'FAKE_LIGHT'):
+    if layer.type == "GRADIENT" and layer.gradient_type in ('LINEAR', 'RADIAL'):
         if not layer.empty_object:
             layer.ensure_empty_object()
             if layer.gradient_type == 'LINEAR':
@@ -831,33 +763,3 @@ def get_alpha_over_nodetree():
     create_mixing_graph(builder, None, "group_input", "Over Color", "group_input", "Over Alpha")
     builder.compile()
     return node_tree
-
-def create_layer_graph(layer: "Layer"):
-    layer_graph = None
-    match layer.type:
-        case "IMAGE":
-            layer_graph = create_image_graph(layer)
-        case "FOLDER":
-            layer_graph = create_folder_graph(layer)
-        case "SOLID_COLOR":
-            layer_graph = create_solid_graph(layer)
-        case "ATTRIBUTE":
-            layer_graph = create_attribute_graph(layer)
-        case "ADJUSTMENT":
-            layer_graph = create_adjustment_graph(layer)
-        case "GRADIENT":
-            layer_graph = create_gradient_graph(layer)
-        case "RANDOM":
-            layer_graph = create_random_graph(layer)
-        case "NODE_GROUP":
-            layer_graph = create_custom_graph(layer)
-        case "TEXTURE":
-            layer_graph = create_texture_graph(layer)
-        case "GEOMETRY":
-            layer_graph = create_geometry_graph(layer)
-    if not layer_graph:
-        return None
-    if not layer.enabled:
-        layer_graph.link("group_input", "group_output", "Color", "Color")
-        layer_graph.link("group_input", "group_output", "Alpha", "Alpha")
-    return layer_graph

@@ -20,154 +20,6 @@ def scale_content(context, layout, scale_x=1.2, scale_y=1.2):
     return layout
 
 
-def is_uv_edit_active(context) -> bool:
-    return bool(
-        context
-        and context.scene
-        and getattr(context.scene, "ps_scene_data", None)
-        and context.scene.ps_scene_data.uv_edit_enabled
-    )
-
-
-def draw_uv_edit_alert(layout: bpy.types.UILayout, context: bpy.types.Context) -> bool:
-    if not context or not context.scene or not context.scene.ps_scene_data:
-        return False
-    ps_scene_data = context.scene.ps_scene_data
-    if not ps_scene_data.uv_edit_enabled:
-        return False
-    alert_box = layout.box()
-    alert_box.alert = True
-    current_uv = ps_scene_data.uv_edit_target_uv or "(not set)"
-    alert_box.label(text="UV Edit Mode Active", icon="ERROR")
-    alert_box.label(text=f"Editing UV: {current_uv}", icon="UV")
-    alert_row = alert_box.row(align=True)
-    alert_row.operator("paint_system.exit_uv_edit", text="Exit UV Edit", icon="CANCEL")
-    alert_box.alert = False
-    return True
-
-
-def draw_uv_edit_checker(layout: bpy.types.UILayout, context: bpy.types.Context, show_apply: bool = True) -> None:
-    if not context or not context.scene or not context.scene.ps_scene_data:
-        return
-    ps_scene_data = context.scene.ps_scene_data
-    if not ps_scene_data.uv_edit_enabled:
-        return
-    checker_box = layout.box()
-    checker_box.use_property_split = False
-    checker_box.use_property_decorate = False
-    checker_box.label(text="UV Checker", icon="GRID")
-    toggle_row = checker_box.row(align=True)
-    scale_content(context, toggle_row, 1.1, 1.1)
-    toggle_row.prop(
-        ps_scene_data,
-        "uv_edit_checker_enabled",
-        text="Show Checker Image",
-        toggle=True,
-        icon="HIDE_OFF" if ps_scene_data.uv_edit_checker_enabled else "HIDE_ON",
-    )
-    viewport_row = checker_box.row(align=True)
-    scale_content(context, viewport_row, 1.1, 1.1)
-    viewport_row.prop(
-        ps_scene_data,
-        "uv_edit_checker_viewport_enabled",
-        text="Show Checker on Objects",
-        toggle=True,
-        icon="HIDE_OFF" if ps_scene_data.uv_edit_checker_viewport_enabled else "HIDE_ON",
-    )
-    if not ps_scene_data.uv_edit_checker_enabled:
-        if show_apply:
-            apply_row = layout.row(align=True)
-            scale_content(context, apply_row, 1.1, 1.1)
-            apply_row.operator("paint_system.apply_uv_edit", text="Apply UV Edit", icon="FILE_TICK")
-        return
-    row = checker_box.row(align=True)
-    row.prop(ps_scene_data, "uv_edit_checker_type", expand=True)
-    checker_box.label(text="Checker Resolution", icon="IMAGE")
-    res_col = checker_box.column(align=True)
-    res_col.scale_y = 1.1
-    res_col.scale_x = 1.1
-    res_grid = res_col.grid_flow(columns=3, align=True, even_columns=True, even_rows=True, row_major=True)
-    res_grid.prop(ps_scene_data, "uv_edit_checker_resolution", expand=True)
-    if show_apply:
-        apply_row = layout.row(align=True)
-        scale_content(context, apply_row, 1.1, 1.1)
-        apply_row.operator("paint_system.apply_uv_edit", text="Apply UV Edit", icon="FILE_TICK")
-
-
-def is_uv_edit_active(context) -> bool:
-    return bool(
-        context
-        and context.scene
-        and getattr(context.scene, "ps_scene_data", None)
-        and context.scene.ps_scene_data.uv_edit_enabled
-    )
-
-
-def draw_uv_edit_alert(layout: bpy.types.UILayout, context: bpy.types.Context) -> bool:
-    if not context or not context.scene or not context.scene.ps_scene_data:
-        return False
-    ps_scene_data = context.scene.ps_scene_data
-    if not ps_scene_data.uv_edit_enabled:
-        return False
-    alert_box = layout.box()
-    alert_box.alert = True
-    current_uv = ps_scene_data.uv_edit_target_uv or "(not set)"
-    alert_box.label(text="UV Edit Mode Active", icon="ERROR")
-    alert_box.label(text=f"Editing UV: {current_uv}", icon="UV")
-    alert_row = alert_box.row(align=True)
-    alert_row.operator("paint_system.exit_uv_edit", text="Exit UV Edit", icon="CANCEL")
-    alert_box.alert = False
-    return True
-
-
-def draw_uv_edit_checker(layout: bpy.types.UILayout, context: bpy.types.Context, show_apply: bool = True) -> None:
-    if not context or not context.scene or not context.scene.ps_scene_data:
-        return
-    ps_scene_data = context.scene.ps_scene_data
-    if not ps_scene_data.uv_edit_enabled:
-        return
-    checker_box = layout.box()
-    checker_box.use_property_split = False
-    checker_box.use_property_decorate = False
-    checker_box.label(text="UV Checker", icon="GRID")
-    toggle_row = checker_box.row(align=True)
-    scale_content(context, toggle_row, 1.1, 1.1)
-    toggle_row.prop(
-        ps_scene_data,
-        "uv_edit_checker_enabled",
-        text="Show Checker Image",
-        toggle=True,
-        icon="HIDE_OFF" if ps_scene_data.uv_edit_checker_enabled else "HIDE_ON",
-    )
-    viewport_row = checker_box.row(align=True)
-    scale_content(context, viewport_row, 1.1, 1.1)
-    viewport_row.prop(
-        ps_scene_data,
-        "uv_edit_checker_viewport_enabled",
-        text="Show Checker on Objects",
-        toggle=True,
-        icon="HIDE_OFF" if ps_scene_data.uv_edit_checker_viewport_enabled else "HIDE_ON",
-    )
-    if not ps_scene_data.uv_edit_checker_enabled:
-        if show_apply:
-            apply_row = layout.row(align=True)
-            scale_content(context, apply_row, 1.1, 1.1)
-            apply_row.operator("paint_system.apply_uv_edit", text="Apply UV Edit", icon="FILE_TICK")
-        return
-    row = checker_box.row(align=True)
-    row.prop(ps_scene_data, "uv_edit_checker_type", expand=True)
-    checker_box.label(text="Checker Resolution", icon="IMAGE")
-    res_col = checker_box.column(align=True)
-    res_col.scale_y = 1.1
-    res_col.scale_x = 1.1
-    res_grid = res_col.grid_flow(columns=3, align=True, even_columns=True, even_rows=True, row_major=True)
-    res_grid.prop(ps_scene_data, "uv_edit_checker_resolution", expand=True)
-    if show_apply:
-        apply_row = layout.row(align=True)
-        scale_content(context, apply_row, 1.1, 1.1)
-        apply_row.operator("paint_system.apply_uv_edit", text="Apply UV Edit", icon="FILE_TICK")
-
-
 def get_icon_from_channel(channel: Channel) -> int:
     type_to_icon = {
         'COLOR': 'color_socket',
@@ -355,7 +207,7 @@ def image_node_settings(layout: bpy.types.UILayout, image_node: bpy.types.Node, 
         row = header.row(align=True)
         row.prop(data, propname, text="")
         if simple_ui:
-            row.operator("paint_system.export_image", text="", icon="FILE_TICK").image_name = image_node.image.name
+            row.operator("paint_system.export_image", text="", icon="EXPORT").image_name = image_node.image.name
             row.menu("MAT_MT_ImageMenu",
                     text="", icon='COLLAPSEMENU')
     else:
@@ -372,7 +224,7 @@ def image_node_settings(layout: bpy.types.UILayout, image_node: bpy.types.Node, 
         image = image_node.image
         if not simple_ui and image:
             row = col.row(align=True)
-            row.operator("paint_system.export_image", text="Export As...", icon="FILE_TICK").image_name = image.name
+            row.operator("paint_system.export_image", text="Export As...", icon="EXPORT").image_name = image.name
             row.menu("MAT_MT_ImageMenu",
                     text="", icon='COLLAPSEMENU')
             col.separator()
@@ -408,8 +260,6 @@ def is_basic_setup(node_tree: bpy.types.NodeTree) -> bool:
 
 
 def toggle_paint_mode_ui(layout: bpy.types.UILayout, context: bpy.types.Context):
-    if is_uv_edit_active(context):
-        return
     current_mode = context.mode
     ps_ctx = PSContextMixin.parse_context(context)
     active_group = ps_ctx.active_group
@@ -669,6 +519,8 @@ def draw_warning_box(layout: bpy.types.UILayout, lines):
     for text, icon in lines:
         warning_col.label(text=text, icon=icon)
     return warning_col
+
+
 def draw_layer_icon(layer: "Layer", layout: bpy.types.UILayout):
     match layer.type:
         case 'IMAGE':
@@ -712,9 +564,3 @@ def draw_layer_icon(layer: "Layer", layout: bpy.types.UILayout):
             layout.label(icon='MESH_DATA')
         case _:
             layout.label(icon='BLANK1')
-
-def draw_indent(layout: bpy.types.UILayout, level: int):
-    row = layout.row(align=True)
-    for _ in range(level):
-        row.separator()
-    return row.column()
