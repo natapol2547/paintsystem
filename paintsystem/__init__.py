@@ -5,7 +5,7 @@ from .context import PSContextMixin
 submodules = [
     "data",
     "handlers",
-    # "graph",
+    "graph",
     # "nested_list_manager",
     # "move",
 ]

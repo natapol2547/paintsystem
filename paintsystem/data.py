@@ -44,19 +44,12 @@ from .context import get_global_layer, parse_context
 from .graph import (
     NodeTreeBuilder,
     Add_Node,
-    create_adjustment_graph,
-    create_attribute_graph,
-    create_custom_graph,
-    create_folder_graph,
-    create_gradient_graph,
-    create_image_graph,
-    create_random_graph,
-    create_solid_graph,
+    PSNodeTreeBuilder,
     get_alpha_over_nodetree,
-    create_texture_graph,
-    create_geometry_graph,
     get_layer_blend_type,
     set_layer_blend_type,
+    get_paint_system_collection,
+    add_empty_to_collection,
 )
 from .graph.common import get_library_nodetree, get_library_object, DEFAULT_PS_UV_MAP_NAME
 from .nested_list_manager import BaseNestedListManager, BaseNestedListItem
@@ -95,6 +88,15 @@ LAYER_TYPE_ENUM = [
     ('TEXTURE', "Texture", "Texture layer"),
     ('GEOMETRY', "Geometry", "Geometry layer"),
     ('BLANK', "Blank", "Blank layer"),
+]
+
+MASK_TYPE_ENUM = [
+    ('IMAGE', "Image", "Image layer"),
+    ('SOLID_COLOR', "Solid Color", "Solid Color layer"),
+    ('ATTRIBUTE', "Attribute", "Attribute layer"),
+    ('GRADIENT', "Gradient", "Gradient layer"),
+    ('RANDOM', "Random", "Random Color layer"),
+    ('TEXTURE', "Texture", "Texture layer"),
 ]
 
 CHANNEL_TYPE_ENUM = [
@@ -336,15 +338,6 @@ def is_valid_ps_nodetree(node_tree: NodeTree) -> bool:
                         has_alpha_output = True
         return has_color_input and has_alpha_input and has_color_output and has_alpha_output
 
-
-def get_paint_system_collection(context: bpy.types.Context) -> bpy.types.Collection:
-    view_layer = context.view_layer
-    if "Paint System Collection" not in view_layer.layer_collection.collection.children:
-        collection = bpy.data.collections.new("Paint System Collection")
-        view_layer.layer_collection.collection.children.link(collection)
-    else:
-        collection = view_layer.layer_collection.collection.children["Paint System Collection"]
-    return collection
 
 def blender_color_to_srgb_hex(color: Color):
     """
@@ -604,68 +597,23 @@ class MarkerAction(PropertyGroup):
     )
 
 class GlobalLayer(PropertyGroup):
-            
-    def update_node_tree(self, context):
-        if not self.node_tree:
-            return
-        if self.layer_name:
-            self.node_tree.name = f".PS_Layer ({self.layer_name})"
-        
-        match self.type:
-            case "IMAGE":
-                if self.image:
-                    self.image.name = self.layer_name
-                layer_graph = create_image_graph(self)
-            case "FOLDER":
-                layer_graph = create_folder_graph(self)
-            case "SOLID_COLOR":
-                layer_graph = create_solid_graph(self)
-            case "ATTRIBUTE":
-                layer_graph = create_attribute_graph(self)
-            case "ADJUSTMENT":
-                layer_graph = create_adjustment_graph(self)
-            case "GRADIENT":
-                def add_empty_to_collection(empty_object):
-                    collection = get_paint_system_collection(context)
-                    collection.objects.link(empty_object)
-                    
-                if self.gradient_type in ('LINEAR', 'RADIAL'):
-                    if not self.empty_object:
-                        ps_ctx = parse_context(context)
-                        with bpy.context.temp_override():
-                            empty_object = bpy.data.objects.new(f"{self.name}", None)
-                            empty_object.parent = ps_ctx.ps_object
-                            add_empty_to_collection(empty_object)
-                        self.empty_object = empty_object
-                        if self.gradient_type == 'LINEAR':
-                            self.empty_object.empty_display_type = 'SINGLE_ARROW'
-                        elif self.gradient_type == 'RADIAL':
-                            self.empty_object.empty_display_type = 'SPHERE'
-                    elif self.empty_object.name not in context.view_layer.objects:
-                        add_empty_to_collection(context, self.empty_object)
-                layer_graph = create_gradient_graph(self)
-            case "RANDOM":
-                layer_graph = create_random_graph(self)
-            case "NODE_GROUP":
-                layer_graph = create_custom_graph(self)
-            case "TEXTURE":
-                layer_graph = create_texture_graph(self)
-            case "GEOMETRY":
-                layer_graph = create_geometry_graph(self)
-            case _:
-                raise ValueError(f"Invalid layer type: {self.type}")
-        
-        # Clean up
-        if self.empty_object and self.type != "GRADIENT":
-            collection = get_paint_system_collection(context)
-            if self.empty_object.name in collection.objects:
-                collection.objects.unlink(self.empty_object)
-        
-        if not self.enabled:
-            layer_graph.link("group_input", "group_output", "Color", "Color")
-            layer_graph.link("group_input", "group_output", "Alpha", "Alpha")
-        layer_graph.compile()
-        update_active_image(self, context)
+    uid: StringProperty()
+
+    def ensure_empty_object(self):
+        context = bpy.context
+        ps_ctx = parse_context(context)
+        empty_name = f"{self.layer_name} ({self.uid[:8]}) Empty"
+        if empty_name in bpy.data.objects:
+            empty_object = bpy.data.objects[empty_name]
+            empty_object.parent = ps_ctx.ps_object
+            add_empty_to_collection(context, empty_object)
+        else:
+            with bpy.context.temp_override():
+                empty_object = bpy.data.objects.new(empty_name, None)
+                empty_object.parent = ps_ctx.ps_object
+                add_empty_to_collection(context, empty_object)
+        self.empty_object = empty_object
+        return empty_object
     
     # Not used anymore
     def update_layer_name(self, context):
@@ -695,7 +643,6 @@ class GlobalLayer(PropertyGroup):
     layer_name: StringProperty(
         name="Name",
         description="Layer name",
-        update=update_node_tree
     )
     updating_name_flag: bpy.props.BoolProperty(
         default=False, 
@@ -704,7 +651,6 @@ class GlobalLayer(PropertyGroup):
     image: PointerProperty(
         name="Image",
         type=Image,
-        update=update_node_tree
     )
     actions: CollectionProperty(
         type=MarkerAction,
@@ -719,79 +665,66 @@ class GlobalLayer(PropertyGroup):
     custom_node_tree: PointerProperty(
         name="Custom Node Tree",
         type=NodeTree,
-        update=update_node_tree
     )
     custom_color_input: IntProperty(
         name="Custom Color Input",
         description="Custom color input",
         default=-1,
-        update=update_node_tree
     )
     custom_alpha_input: IntProperty(
         name="Custom Alpha Input",
         description="Custom alpha input",
         default=-1,
-        update=update_node_tree
     )
     custom_color_output: IntProperty(
         name="Custom Color Output",
         description="Custom color output",
         default=-1,
-        update=update_node_tree
     )
     custom_alpha_output: IntProperty(
         name="Custom Alpha Output",
         description="Custom alpha output",
         default=-1,
-        update=update_node_tree
     )
     coord_type: EnumProperty(
         items=COORDINATE_TYPE_ENUM,
         name="Coordinate Type",
         description="Coordinate type",
         default='UV',
-        update=update_node_tree
     )
     uv_map_name: StringProperty(
         name="UV Map",
         description="Name of the UV map to use",
-        update=update_node_tree
     )
     adjustment_type: EnumProperty(
         items=ADJUSTMENT_TYPE_ENUM,
         name="Adjustment Type",
         description="Adjustment type",
-        update=update_node_tree
     )
     empty_object: PointerProperty(
         name="Empty Object",
         type=Object,
-        update=update_node_tree
     )
     gradient_type: EnumProperty(
         items=GRADIENT_TYPE_ENUM,
         name="Gradient Type",
         description="Gradient type",
         default='LINEAR',
-        update=update_node_tree
     )
     texture_type: EnumProperty(
         items=TEXTURE_TYPE_ENUM,
         name="Texture Type",
         description="Texture type",
-        update=update_node_tree
     )
     geometry_type: EnumProperty(
         items=GEOMETRY_TYPE_ENUM,
         name="Geometry Type",
         description="Geometry type",
-        update=update_node_tree
     )
     normalize_normal: BoolProperty(
         name="Normalize Normal",
         description="Normalize the normal",
         default=False,
-        update=update_node_tree
     )
     type: EnumProperty(
         items=LAYER_TYPE_ENUM,
@@ -827,7 +760,6 @@ class GlobalLayer(PropertyGroup):
         name="Enabled",
         description="Toggle layer visibility",
         default=True,
-        update=update_node_tree,
         options=set()
     )
     lock_alpha: BoolProperty(
@@ -845,10 +777,7 @@ class LayerMask(PropertyGroup):
         default="Mask",
     )
     type: EnumProperty(
-        items=[
-            ('IMAGE', "Image", "Image mask"),
-            ('GEOMETRY', "Geometry", "Geometry mask"),
-        ],
+        items=MASK_TYPE_ENUM,
         name="Mask Type",
         description="Mask type",
         default='IMAGE',
@@ -874,11 +803,42 @@ class LayerMask(PropertyGroup):
         description="Mask UV map",
         default="",
     )
+    empty_object: PointerProperty(
+        name="Empty Object",
+        type=Object,
+    )
+    gradient_type: EnumProperty(
+        items=GRADIENT_TYPE_ENUM,
+        name="Gradient Type",
+        description="Gradient type",
+        default='LINEAR',
+    )
+    texture_type: EnumProperty(
+        items=TEXTURE_TYPE_ENUM,
+        name="Texture Type",
+        description="Texture type",
+    )
+    node_tree: PointerProperty(
+        name="Node Tree",
+        type=NodeTree
+    )
+    
+    def ensure_empty_object(self):
+        context = bpy.context
+        ps_ctx = parse_context(context)
+        empty_name = f"{self.name} ({self.uid[:8]}) Empty"
+        if empty_name in bpy.data.objects:
+            empty_object = bpy.data.objects[empty_name]
+            empty_object.parent = ps_ctx.ps_object
+            add_empty_to_collection(context, empty_object)
+        else:
+            with bpy.context.temp_override():
+                empty_object = bpy.data.objects.new(empty_name, None)
+                empty_object.parent = ps_ctx.ps_object
+                add_empty_to_collection(context, empty_object)
+        self.empty_object = empty_object
+        return empty_object
 
-def add_empty_to_collection(context: bpy.types.Context, empty_object: bpy.types.Object):
-    collection = get_paint_system_collection(context)
-    if empty_object.name not in collection.objects:
-        collection.objects.link(empty_object)
 
 class Layer(BaseNestedListItem):
     """Base class for material layers in the Paint System"""
@@ -902,14 +862,13 @@ class Layer(BaseNestedListItem):
         
         if self.is_linked:
             return
-        if not is_valid_uuidv4(self.uid):
-            self.uid = str(uuid.uuid4())
         if self.type == "BLANK":
             return
         
         if self.blend_mode == "PASSTHROUGH" and self.type != "FOLDER":
             self.blend_mode = "MIX"
         
+        # Create node tree if it doesn't exist
         if not self.node_tree and not self.is_linked:
             node_tree = bpy.data.node_groups.new(name=f"PS_Layer ({self.layer_name})", type='ShaderNodeTree')
             self.node_tree = node_tree
@@ -927,68 +886,13 @@ class Layer(BaseNestedListItem):
             ]
             ensure_sockets(node_tree, expected_input, "INPUT")
             ensure_sockets(node_tree, expected_output, "OUTPUT")
-        if self.layer_name:
-            self.node_tree.name = f"PS {self.layer_name} ({self.uid[:8]})"
+
+        # Generate UUID if it doesn't exist or is invalid
+        if not is_valid_uuidv4(self.uid):
+            self.uid = str(uuid.uuid4())
         
-        if self.coord_type == "DECAL":
-            if not self.empty_object:
-                self.ensure_empty_object()
-                self.empty_object.empty_display_type = 'SINGLE_ARROW'
-            elif self.empty_object.name not in context.view_layer.objects:
-                add_empty_to_collection(context, self.empty_object)
-        
-        match self.type:
-            case "IMAGE":
-                # if not self.image:
-                #     if self.coord_type == 'UV':
-                #         ps_ctx = PSContextMixin.parse_context(context)
-                #         uv_layer = ps_ctx.ps_object.data.uv_layers.get(self.uv_map_name)
-                #         use_udim_tiles = get_udim_tiles(uv_layer) != {1001}
-                #         self.image = create_ps_image(self.layer_name, use_udim_tiles=use_udim_tiles, uv_layer=uv_layer)
-                #     else:
-                #         self.image = create_ps_image(self.layer_name)
-                if self.image:
-                    self.image.name = self.layer_name
-                layer_graph = create_image_graph(self)
-            case "FOLDER":
-                layer_graph = create_folder_graph(self)
-            case "SOLID_COLOR":
-                layer_graph = create_solid_graph(self)
-            case "ATTRIBUTE":
-                layer_graph = create_attribute_graph(self)
-            case "ADJUSTMENT":
-                layer_graph = create_adjustment_graph(self)
-            case "GRADIENT":
-                if self.gradient_type in ('LINEAR', 'RADIAL'):
-                    if not self.empty_object:
-                        self.ensure_empty_object()
-                        if self.gradient_type == 'LINEAR':
-                            self.empty_object.empty_display_type = 'SINGLE_ARROW'
-                        elif self.gradient_type == 'RADIAL':
-                            self.empty_object.empty_display_type = 'SPHERE'
-                    elif self.empty_object.name not in context.view_layer.objects:
-                        add_empty_to_collection(context, self.empty_object)
-                layer_graph = create_gradient_graph(self)
-            case "RANDOM":
-                layer_graph = create_random_graph(self)
-            case "NODE_GROUP":
-                layer_graph = create_custom_graph(self)
-            case "TEXTURE":
-                layer_graph = create_texture_graph(self)
-            case "GEOMETRY":
-                layer_graph = create_geometry_graph(self)
-            case _:
-                raise ValueError(f"Invalid layer type: {self.type}")
-        
-        # Clean up
-        if self.empty_object and self.type not in ("GRADIENT", "IMAGE", "TEXTURE"):
-            collection = get_paint_system_collection(context)
-            if self.empty_object.name in collection.objects:
-                collection.objects.unlink(self.empty_object)
-        elif self.type == "IMAGE" and self.empty_object and self.coord_type != "DECAL":
-            collection = get_paint_system_collection(context)
-            if self.empty_object.name in collection.objects:
-                collection.objects.unlink(self.empty_object)
+        # Create node tree based on layer type
+        layer_graph = PSNodeTreeBuilder.create_layer_graph(self, context)
 
         if not self.enabled:
             layer_graph.link("group_input", "group_output", "Color", "Color")
@@ -1329,6 +1233,24 @@ class Layer(BaseNestedListItem):
         description="Lock the alpha channel",
         default=False,
         update=update_brush_settings
+    )
+    
+    # Layer mask data
+    use_masks: BoolProperty(
+        name="Use Masks",
+        description="Use layer masks",
+        default=False,
+        update=update_node_tree
+    )
+    layer_masks: CollectionProperty(
+        type=LayerMask,
+        name="Layer Masks",
+        description="Collection of layer masks for the layer"
+    )
+    active_layer_mask_index: IntProperty(
+        name="Active Layer Mask Index",
+        description="Active layer mask index",
+        default=0
     )
     
     # For parallax coordinate type
@@ -2899,6 +2821,7 @@ class LegacyPaintSystemContextParser:
 classes = (
     MarkerAction,
     GlobalLayer,
+    LayerMask,
     Layer,
     Channel,
     Group,
