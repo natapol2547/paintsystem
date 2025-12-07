@@ -29,6 +29,7 @@ from .common import (
 
 from ..utils.nodes import find_node, traverse_connected_nodes, get_material_output
 from ..paintsystem.data import (
+    MASK_TYPE_ENUM,
     GlobalLayer,
     ADJUSTMENT_TYPE_ENUM, 
     GRADIENT_TYPE_ENUM, 
@@ -778,6 +779,138 @@ class MAT_MT_ImageMenu(PSContextMixin, Menu):
         layout.operator("paint_system.clear_image",
                         icon="X")
 
+class MAT_PT_ImageLayerSettings(PSContextMixin, Panel):
+    bl_idname = 'MAT_PT_ImageLayerSettings'
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_label = "Image"
+    bl_category = 'Paint System'
+    bl_parent_id = 'MAT_PT_LayerSettings'
+    bl_options = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        active_layer = ps_ctx.active_layer
+        if ps_ctx.ps_object.type != 'MESH' or ps_ctx.active_channel.use_bake_image:
+            return False
+        return active_layer and active_layer.type == 'IMAGE'
+    
+    def draw_header(self, context):
+        layout = self.layout
+        layout.label(icon_value=get_icon('image'))
+        
+    def draw_header_preset(self, context):
+        layout = self.layout
+        ps_ctx = self.parse_context(context)
+        layer = ps_ctx.active_layer
+        if not ps_ctx.ps_settings.use_legacy_ui:
+            if ps_ctx.ps_object.type == 'MESH' and layer.type == 'IMAGE':
+                layout.operator("wm.call_menu", text="Filters", icon="IMAGE_DATA").name = "MAT_MT_ImageFilterMenu"
+    
+    def draw(self, context):
+        ps_ctx = self.parse_context(context)
+        active_layer = ps_ctx.active_layer
+        layout = self.layout
+        layout.enabled = not active_layer.lock_layer
+        if not active_layer.external_image:
+            layout.operator("paint_system.quick_edit", text="Edit Externally")
+        else:
+            if active_layer.edit_external_mode == 'IMAGE_EDIT':
+                row = layout.row(align=True)
+                row.operator("paint_system.quick_edit", text="Open Image", icon_value=get_image_editor_icon(context.preferences.filepaths.image_editor))
+                row.operator("paint_system.reload_image", text="Reload Image", icon="FILE_REFRESH")
+            elif active_layer.edit_external_mode == 'VIEW_CAPTURE':
+                layout.operator("paint_system.project_apply", text="Apply Edit")
+        box = layout.box()
+        col = box.column()
+        image_node = active_layer.source_node
+        panel = image_node_settings(col, image_node, active_layer, "image", simple_ui=True)
+        if panel:
+            line_separator(col)
+        draw_input_sockets(col, context, only_output=True)
+        row = col.row(align=True)
+        row.label(icon="BLANK1")
+        row.prop(active_layer, "correct_image_aspect", text="Correct Aspect", toggle=1, icon='CHECKBOX_HLT' if active_layer.correct_image_aspect else 'CHECKBOX_DEHLT')
+
+class MAT_MT_LayerMaskMenu(PSContextMixin, Menu):
+    bl_label = "Layer Mask Menu"
+    bl_idname = "MAT_MT_LayerMaskMenu"
+    bl_options = {'SEARCH_ON_KEY_PRESS'}
+
+    def draw(self, context):
+        layout = self.layout
+        col = layout.column()
+        
+        if layout.operator_context == 'EXEC_REGION_WIN':
+            layout.operator_context = 'INVOKE_REGION_WIN'
+            col.operator(
+                "WM_OT_search_single_menu",
+                text="Search...",
+                icon='VIEWZOOM',
+            ).menu_idname = "MAT_MT_AddLayerMenu"
+            col.separator()
+
+        layout.operator_context = 'INVOKE_REGION_WIN'
+        col.operator("paint_system.new_layer_mask", text="Solid Color",
+                     icon=icon_parser('STRIP_COLOR_03', "SEQUENCE_COLOR_03")).mask_type = 'SOLID_COLOR'
+        col.operator("paint_system.new_layer_mask", text="Image", icon_value=get_icon('image')).mask_type = 'IMAGE'
+        col.operator("paint_system.new_layer_mask", text="Gradient", icon='COLOR')
+        col.operator("paint_system.new_layer_mask", text="Texture", icon='TEXTURE')
+        # col.menu("MAT_MT_AddAdjustmentLayerMenu", text="Adjustment", icon='SHADERFX')
+        # col.menu("MAT_MT_AddGeometryLayerMenu", text="Geometry", icon='MESH_DATA')
+        # col.separator()
+        # # col.label(text="Advanced:")
+        # col.operator("paint_system.new_attribute_layer",
+        #              text="Attribute Color", icon='MESH_DATA')
+        # col.operator("paint_system.new_random_color_layer",
+        #              text="Random Color", icon='SEQ_HISTOGRAM')
+
+        # col.operator("paint_system.new_custom_node_group_layer",
+        #              text="Custom Layer", icon='NODETREE')
+
+class MAT_UL_LayerMasks(PSContextMixin, UIList):
+    bl_idname = "MAT_UL_LayerMasks"
+    bl_label = "Layer Masks"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = 'Paint System'
+    
+    def draw_item(self, context, layout, data, item, icon, active_data, active_property, index):
+        layout.prop(item, "name", text="")
+        layout.prop(item, "type", text="")
+class MAT_PT_LayerMaskSettings(PSContextMixin, Panel):
+    bl_idname = 'MAT_PT_LayerMaskSettings'
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_label = "Mask"
+    bl_category = 'Paint System'
+    bl_parent_id = 'MAT_PT_LayerSettings'
+    bl_options = {'DEFAULT_CLOSED'}
+    
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_layer and ps_ctx.active_layer.type == 'IMAGE'
+    
+    def draw_header(self, context):
+        layout = self.layout
+        ps_ctx = self.parse_context(context)
+        active_layer = ps_ctx.active_layer
+        layout.prop(active_layer, "use_masks", text="")
+    
+    def draw(self, context):
+        layout = self.layout
+        ps_ctx = self.parse_context(context)
+        active_layer = ps_ctx.active_layer
+        layout.enabled = not active_layer.lock_layer
+        box = layout.box()
+        row = box.row()
+        row.template_list("MAT_UL_LayerMasks", "", active_layer, "layer_masks", active_layer, "active_layer_mask_index", rows=5)
+        col = row.column(align=True)
+        col.operator("wm.call_menu", text="", icon="ADD").name = "MAT_MT_LayerMaskMenu"
+        col.operator("paint_system.delete_layer_mask", text="", icon="REMOVE")
+
 class MAT_MT_LayerMenu(PSContextMixin, Menu):
     bl_label = "Layer Menu"
     bl_idname = "MAT_MT_LayerMenu"
@@ -980,6 +1113,10 @@ classes = (
     MAT_PT_LayerSettings,
     MAT_PT_GreasePencilMaskSettings,
     MAT_PT_GreasePencilOnionSkinningSettings,
+    MAT_PT_ImageLayerSettings,
+    MAT_MT_LayerMaskMenu,
+    MAT_UL_LayerMasks,
+    MAT_PT_LayerMaskSettings,
     PAINTSYSTEM_UL_Actions,
 )
 

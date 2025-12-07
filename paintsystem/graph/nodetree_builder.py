@@ -245,15 +245,20 @@ class NodeTreeBuilder:
     Once the graph is defined, the `compile` method builds the actual node tree.
     """
 
-    def __init__(self, node_tree: bpy.types.NodeTree, frame_name, frame_color: Sequence[float] = None, adjustable: bool = False, clear: bool = False, node_width: int = 140, verbose: bool = False, version: int = 1):
+    def __init__(self, node_tree: bpy.types.NodeTree, frame_name, frame_color: Sequence[float] = None, adjustable: bool = False, clear: bool = False, node_width: int = 140, verbose: bool = False, version: int = 1, properties: dict = None):
         """
         Initializes the NodeTreeBuilder.
 
         Args:
             node_tree (bpy.types.NodeTree): The node tree to build upon (e.g., material.node_tree).
             frame_name (str, optional): The name of the frame. Defaults to None.
+            frame_color (Sequence[float], optional): The color of the frame. Defaults to None.
+            adjustable (bool, optional): If True, the graph is adjustable. Defaults to False.
             clear (bool): If True, clears the existing nodes in the tree except for the output node.
             node_width (int): The width of the nodes when arranged in the graph.
+            verbose (bool, optional): If True, the graph will be verbose. Defaults to False.
+            version (int, optional): The version of the graph. Defaults to 1.
+            properties (dict, optional): Properties to add to every node in the graph. Defaults to None.
         """
         if not node_tree:
             raise ValueError("A valid node_tree must be provided.")
@@ -276,7 +281,7 @@ class NodeTreeBuilder:
         self.width = 0 # Width of the graph
         self.node_links = []
         self.node_offset = Vector((0, 0))
-        
+        self.node_properties = properties
         self.__min_x_pos = 0
         self.__max_x_pos = 0
         
@@ -373,7 +378,14 @@ class NodeTreeBuilder:
         # self.tree.links.new
         self._log(f"Time taken to hydrate existing nodes from frame: {time.time() - start_time_hydrate} seconds")
         # self._arrange_nodes()
-        
+        # Set the width of the frame based on the nodes
+        min_x_pos = 0
+        max_x_pos = 0
+        for node in self.nodes.values():
+            if node.type != 'FRAME':
+                min_x_pos = min(min_x_pos, node.location.x)
+                max_x_pos = max(max_x_pos, node.location.x + node.width)
+        self.width = max_x_pos - min_x_pos + 35*2
 
     def clear_tree(self, clean: bool = False):
         """Clears the node tree, removing nodes and links created by this builder.
@@ -451,6 +463,9 @@ class NodeTreeBuilder:
         # Process properties with .force suffix
         forced_properties = set()
         processed_properties = {}
+        if self.node_properties:
+            for key, value in self.node_properties.items():
+                processed_properties[key] = value
         if properties:
             for key, value in properties.items():
                 if key.endswith('.force'):
@@ -607,7 +622,8 @@ class NodeTreeBuilder:
             if source == START:
                 # Find the START node
                 node, socket = self._get_socket_by_prefix(True, source_socket)
-                source = self.get_node_identifier(node)
+                if node:
+                    source = self.get_node_identifier(node)
         else:
             raise ValueError(
                 "Source must be a NodeTreeBuilder instance or a string representing a node name.")
@@ -622,7 +638,8 @@ class NodeTreeBuilder:
             if target == END:
                 # Find the END node
                 node, socket = self._get_socket_by_prefix(False, target_socket)
-                target = self.get_node_identifier(node)
+                if node:
+                    target = self.get_node_identifier(node)
         else:
             raise ValueError(
                 "Target must be a NodeTreeBuilder instance or a string representing a node name.")
@@ -674,7 +691,8 @@ class NodeTreeBuilder:
             if node.type != 'REROUTE':
                 continue
             socket = node.inputs[0] if is_input_socket else node.outputs[0]
-            identifier = node.get("identifier", None)
+            identifier = self.get_node_identifier(node)
+            self._log(f"Identifier: {identifier}. Prefix: {prefix}. Socket name: {socket_name} Checking for {prefix}{socket_name}")
             if identifier is not None and identifier.startswith(f"{prefix}{socket_name}"):
                 return node, socket
         return None, None
@@ -820,7 +838,7 @@ class NodeTreeBuilder:
             if is_source and identifier == START:
                 # Try to find node by prefix and create a reroute node if not found
                 # node, sock = self._get_socket_by_prefix(False, socket_name)
-                node = next((node for node in self.nodes.values() if node.get("identifier", None).startswith(f"{START}{socket}")), None)
+                node = next((node for node in self.nodes.values() if self.get_node_identifier(node).startswith(f"{START}{socket}")), None)
                 if not node:
                     node, sock = self._create_reroute_node(socket, False)
                 else:
@@ -829,7 +847,7 @@ class NodeTreeBuilder:
                 self.edges[edge_idx].source = node.name # Update edge source
             elif not is_source and identifier == END:
                 # Try to find node by prefix and create a reroute node if not found
-                node = next((node for node in self.nodes.values() if node.get("identifier", None).startswith(f"{END}{socket}")), None)
+                node = next((node for node in self.nodes.values() if self.get_node_identifier(node).startswith(f"{END}{socket}")), None)
                 if not node:
                     node, sock = self._create_reroute_node(socket, True)
                 else:
@@ -926,6 +944,8 @@ class NodeTreeBuilder:
         used_node_identifiers = self.__add_nodes_commands.keys()
         to_remove = set()
         for node in self.nodes.values():
+            if isinstance(node, NodeTreeBuilder):
+                continue
             node_identifier = self.get_node_identifier(node)
             bl_idname = node.bl_idname
             desired_bl_idname = self.__add_nodes_commands[node_identifier].node_type if node_identifier in self.__add_nodes_commands else None # Ensure deletion of nodes that are not in add commands
@@ -1095,6 +1115,7 @@ class NodeTreeBuilder:
         self.__min_x_pos = 0
         self.__max_x_pos = 0
 
+        self._log(f"--------- Arranging nodes ---------")
         # --- 1. Determine End Nodes by Analyzing Connections ---
         # An "end node" is any node within the graph that does not serve as a
         # source for any defined edge. These are the leaves of the graph.
@@ -1134,15 +1155,25 @@ class NodeTreeBuilder:
         
         NODE_MARGIN = 20  # Margin between nodes
         
+        max_level = max(level_map.values())
+        # Set the level of the START and END nodes to the max level + 1 and 0 respectively
+        for name, level in level_map.items():
+            if name.startswith(START):
+                level_map[name] = max_level + 1
+            elif name.startswith(END):
+                level_map[name] = 0
         for name, level in list(level_map.items()):
+            self._log(f"Name: {name}, Level: {level}")
             if level not in layer_infos:
                 layer_infos[level] = LayerInfo()
 
             matching_subgraph = next((sg for sg in self.sub_graphs if name == str(sg)), None)
             if matching_subgraph is not None:
+                self._log(f"Matching subgraph: {matching_subgraph.frame.label}. Width: {matching_subgraph.width}")
                 layer_infos[level].width = max(layer_infos[level].width, matching_subgraph.width)
             else:
                 base_width = 0 if name.startswith(START) or name.startswith(END) else self.node_width
+                self._log(f"Base width: {base_width}")
                 layer_infos[level].width = max(layer_infos[level].width, base_width)
 
             layer_infos[level].nodes.append(name)
@@ -1269,7 +1300,7 @@ class EXAMPLE_OT_BuildMyNodeTree(bpy.types.Operator):
         # graph_builder.compile()
         
         graph_builder2 = NodeTreeBuilder(
-            node_tree, frame_name="Graph 2", adjustable=True)
+            node_tree, frame_name="Graph 2")
         graph_builder2.add_node("mix_rgb", "ShaderNodeMix",
                             properties={'data_type': 'RGBA'})
         graph_builder2.link(
@@ -1282,7 +1313,7 @@ class EXAMPLE_OT_BuildMyNodeTree(bpy.types.Operator):
             "mix_rgb", END, source_socket="Result", target_socket="Color")
         
         graph_builder3 = NodeTreeBuilder(
-            node_tree, frame_name="Graph 3", adjustable=True)
+            node_tree, frame_name="Graph 3", verbose=True)
         graph_builder3.add_node("mix_rgb", "ShaderNodeMix",
                             properties={'data_type': 'RGBA'})
         graph_builder3.add_node("mix_rgb2", "ShaderNodeMix",
@@ -1347,8 +1378,8 @@ class EXAMPLE_PT_NodeTreeBuilderPanel(bpy.types.Panel):
             layout.label(text=f"Node Location: {active_node.location_absolute[0]:.2f}, {active_node.location_absolute[1]:.2f}")
             layout.prop(active_node, "name", text="Node Name")
             layout.prop(active_node, "width", text="Node Width")
-            if active_node.get("identifier", None) is not None:
-                layout.label(text=f"Node Identifier: {active_node.get('identifier')}")
+            # if active_node.get_node_identifier(active_node) is not None:
+            #     layout.label(text=f"Node Identifier: {active_node.get_node_identifier(active_node)}")
 
 
 classes = (

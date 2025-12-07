@@ -4,6 +4,8 @@ import pathlib
 
 ICON_FOLDER = 'icons'
 
+
+icons = bpy.types.UILayout.bl_rna.functions["prop"].parameters["icon"].enum_items.keys()
 custom_icons = None
 
 def load_icons():
@@ -62,3 +64,8 @@ def get_image_editor_icon(current_image_editor: str) -> int:
         elif "affinity" in app_name:
             return get_icon("affinity")
         return get_icon("image")
+
+def icon_parser(icon: str, default="NONE") -> str:
+    if icon in icons:
+        return icon
+    return default

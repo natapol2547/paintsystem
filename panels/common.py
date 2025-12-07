@@ -7,7 +7,7 @@ from ..utils.version import is_newer_than
 # --
 from ..paintsystem.data import Channel, Layer
 from ..paintsystem.context import PSContextMixin
-from ..custom_icons import get_icon, get_icon_from_socket_type
+from ..custom_icons import get_icon, get_icon_from_socket_type, icon_parser
 from ..preferences import get_preferences
 from ..utils.nodes import find_node, get_material_output, traverse_connected_nodes
 
@@ -18,13 +18,6 @@ def scale_content(context, layout, scale_x=1.2, scale_y=1.2):
         layout.scale_x = scale_x
         layout.scale_y = scale_y
     return layout
-
-icons = bpy.types.UILayout.bl_rna.functions["prop"].parameters["icon"].enum_items.keys()
-
-def icon_parser(icon: str, default="NONE") -> str:
-    if icon in icons:
-        return icon
-    return default
 
 
 def get_icon_from_channel(channel: Channel) -> int:
