@@ -179,6 +179,16 @@ def create_mask_mixing_graph(builder: NodeTreeBuilder, layer_mask: "LayerMask", 
     return builder
 
 
+def create_mask_mixing_graph(builder: NodeTreeBuilder, layer_mask: "LayerMask", color_node_name: str = None, color_socket: str = None) -> NodeTreeBuilder:
+    blend_mode = layer_mask.blend_mode
+    builder.add_node("mix_rgb", "ShaderNodeMix", {"blend_type": blend_mode, "data_type": "RGBA"}, {0: 1, "A": (1, 1, 1, 1), "B": (1, 1, 1, 1)}, force_properties=True, force_default_values=True)
+    if color_node_name is not None and color_socket is not None:
+        builder.link(color_node_name, "mix_rgb", color_socket, "B")
+    builder.link(START, "mix_rgb", "Color", "A")
+    builder.link("mix_rgb", END, "Result", "Color")
+    return builder
+
+
 def create_coord_graph(builder: NodeTreeBuilder, layer: "Layer", coord_type: str, uv_map_name: str, node_name: str, socket_name: str, alpha_node_name: str = None, alpha_socket: str = None) -> NodeTreeBuilder:
     builder.add_node("mapping", "ShaderNodeMapping")
     if coord_type == "AUTO":
