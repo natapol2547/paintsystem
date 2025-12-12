@@ -51,12 +51,31 @@ class PaintSystemPreferences(AddonPreferences):
         default=False
     )
 
+    # Deprecated toggle retained for compatibility with stored preferences (not exposed in UI)
     use_legacy_ui: BoolProperty(
         name="Use Legacy UI",
-        description="Use the legacy UI",
-        default=False
+        description="Deprecated legacy UI toggle",
+        default=False,
+        options={'HIDDEN'}
     )
     
+    # RMB Context Menu Options
+    show_hsv_sliders_rmb: BoolProperty(
+        name="Show HSV Sliders in RMB Menu",
+        description="Show Hue, Saturation, Value sliders in the RMB quick paint menu",
+        default=False
+    )
+    show_active_palette_rmb: BoolProperty(
+        name="Show Palette in RMB Menu",
+        description="Show active palette in the RMB quick paint menu",
+        default=True
+    )
+    show_rmb_layers_panel: BoolProperty(
+        name="Show Layers Option in RMB Menu",
+        description="Show 'Paint System Layers' option in the RMB context menu",
+        default=True
+    )
+
     loading_donations: BoolProperty(
         name="Loading Donations",
         description="Loading donations",
@@ -93,7 +112,6 @@ class PaintSystemPreferences(AddonPreferences):
 
         layout.prop(self, "show_tooltips", text="Show Tooltips")
         layout.prop(self, "use_compact_design", text="Use Compact Design")
-        layout.prop(self, "use_legacy_ui", text="Use Legacy UI")
         # layout.prop(self, "name_layers_group",
         #             text="Name Layers According to Group Name")
 

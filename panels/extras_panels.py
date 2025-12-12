@@ -71,10 +71,8 @@ class MAT_PT_Brush(PSContextMixin, Panel, UnifiedPaintPanel):
         layout = self.layout
         settings = self.paint_settings(context)
         brush = settings.brush if settings else None
-        is_eraser = bool(brush and brush.blend == 'ERASE_ALPHA')
-        row = layout.row(align=True)
-        row.scale_y = 1.1
-        row.alert = is_eraser
+        is_eraser = brush and brush.blend == 'ERASE_ALPHA'
+        row = scale_content(context, layout.row(align=True), 1.3, 1.2)
         row.operator(
             "paint_system.toggle_brush_erase_alpha",
             text="Eraser",
