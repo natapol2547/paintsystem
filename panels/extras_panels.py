@@ -141,7 +141,7 @@ class MAT_PT_Brush(PSContextMixin, Panel, UnifiedPaintPanel):
             col.prop(image_paint, "normal_angle", text="Angle")
 
 
-class MAT_PT_BrushColorSettings(PSContextMixin, Panel):
+class MAT_PT_BrushColorSettings(PSContextMixin, UnifiedPaintPanel, Panel):
     bl_idname = "MAT_PT_BrushColorSettings"
     bl_label = "Color Picker Settings"
     bl_space_type = "VIEW_3D"
@@ -152,10 +152,23 @@ class MAT_PT_BrushColorSettings(PSContextMixin, Panel):
     def draw(self, context):
         layout = self.layout
         ps_ctx = self.parse_context(context)
-        layout.prop(context.preferences.view, "color_picker_type", text="")
+        settings = self.paint_settings(context)
+        brush = getattr(settings, 'brush', None)
+        
+        layout.prop(context.preferences.view, "color_picker_type", text="Picker Type")
         layout.prop(ps_ctx.ps_settings, "color_picker_scale", text="Color Picker Scale", slider=True)
+        layout.separator()
         layout.prop(ps_ctx.ps_settings, "show_hex_color", text="Show Hex Color")
         layout.prop(ps_ctx.ps_settings, "show_more_color_picker_settings", text="Show HSV Sliders")
+        
+        # Add randomize color settings
+        if brush:
+            layout.separator()
+            try:
+                from bl_ui.properties_paint_common import color_jitter_panel
+                color_jitter_panel(layout, context, brush)
+            except Exception:
+                pass
 
 class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
     bl_idname = 'MAT_PT_BrushColor'
@@ -205,10 +218,11 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
         layout = self.layout
         settings = self.paint_settings(context)
         brush = settings.brush
-        if ps_ctx.ps_object.type == 'MESH':
-            self.prop_unified_color(layout, context, brush, "color", text="")
-        elif ps_ctx.ps_object.type == 'GREASEPENCIL':
-            layout.prop(brush, "color", text="")
+        layout.popover(
+            panel="MAT_PT_BrushColorSettings",
+            icon="SETTINGS",
+            text=""
+        )
             
 
     def draw(self, context):
@@ -218,16 +232,38 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
         settings = self.paint_settings(context)
         brush = settings.brush
         if ps_ctx.ps_object.type == 'MESH':
-            row = col.row(align=True)
-            row.scale_y = 1.2
-            row.popover(
-                panel="MAT_PT_BrushColorSettings",
-                icon="SETTINGS"
-            )
             prop_owner = get_unified_settings(context, "use_unified_color")
             row = col.row()
             row.scale_y = ps_ctx.ps_settings.color_picker_scale
             self.prop_unified_color_picker(row, context, brush, "color", value_slider=True)
+            
+            # Color cards (swatches)
+            swatch_row = col.row(align=True)
+            swatch_row.scale_y = 1.0
+            swatches = swatch_row.split(factor=0.5, align=True)
+            try:
+                self.prop_unified_color(swatches, context, brush, "color", text="")
+            except Exception:
+                pass
+            try:
+                self.prop_unified_color(swatches, context, brush, "secondary_color", text="")
+            except Exception:
+                try:
+                    self.prop_unified_color(swatches, context, brush, "color", text="")
+                except Exception:
+                    pass
+            buttons_row = swatch_row.row(align=True)
+            buttons_row.scale_x = 1.2
+            buttons_row.operator("paint.brush_colors_flip", text="", icon='FILE_REFRESH')
+            try:
+                ups = getattr(context.tool_settings, 'unified_paint_settings', None)
+                use_unified = bool(ups and getattr(ups, 'use_unified_color', False))
+                data_path = "tool_settings.unified_paint_settings.color" if use_unified else "tool_settings.image_paint.brush.color"
+                eyedrop = buttons_row.operator("ui.eyedropper_color", text="", icon='EYEDROPPER')
+                eyedrop.prop_data_path = data_path
+            except Exception:
+                pass
+            
             if ps_ctx.ps_settings.show_more_color_picker_settings:
                 if not context.preferences.view.color_picker_type == "SQUARE_SV":
                     col.prop(ps_ctx.ps_scene_data, "hue", text="Hue")
@@ -237,12 +273,6 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
                 row = col.row()
                 row.prop(ps_ctx.ps_scene_data, "hex_color", text="Hex")
             if is_newer_than(4,5):
-                # Bforartists/Blender variants may not expose color_jitter_panel; fail gracefully
-                try:
-                    from bl_ui.properties_paint_common import color_jitter_panel
-                    color_jitter_panel(col, context, brush)
-                except Exception:
-                    pass
                 try:
                     header, panel = col.panel("paintsystem_color_history_palette", default_closed=True)
                     header.label(text="Color History")
@@ -250,6 +280,7 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
                         if not ps_ctx.ps_scene_data.color_history_palette:
                             panel.label(text="No color history yet")
                         else:
+                            # Display only color swatches, no toolbar buttons
                             panel.template_palette(ps_ctx.ps_scene_data, "color_history_palette", color=True)
                     header, panel = col.panel("paintsystem_color_palette", default_closed=True)
                     header.label(text="Color Palette")

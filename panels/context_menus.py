@@ -3,10 +3,8 @@ import logging
 from bpy.types import Menu, Panel, Operator
 from bpy.props import BoolProperty, EnumProperty
 
-from ..paintsystem.data import parse_context
 from ..preferences import get_preferences
-from .common import PSContextMixin, scale_content, get_icon
-from ..utils.nodes import find_node
+from .common import PSContextMixin, get_icon
 from bl_ui.properties_paint_common import UnifiedPaintPanel
 
 logger = logging.getLogger("PaintSystem")
@@ -60,8 +58,8 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, UnifiedPaintPanel, Pane
     bl_region_type = 'WINDOW'
     bl_label = "Paint Tools"
     bl_options = {'INSTANCED'}
-    bl_ui_units_x = 12
-    bl_ui_units_y = 20
+    bl_ui_units_x = 13
+    bl_ui_units_y = 22
 
     @classmethod
     def poll(cls, context):
@@ -76,7 +74,12 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, UnifiedPaintPanel, Pane
         layout.use_property_split = False
         layout.use_property_decorate = False
 
-        ps_ctx = self.parse_context(context)
+        ps_ctx = None
+        try:
+            ps_ctx = self.parse_context(context)
+        except Exception:
+            pass
+        
         prefs = get_preferences(context)
         settings = self.paint_settings(context)
         brush = getattr(settings, 'brush', None)
@@ -84,23 +87,44 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, UnifiedPaintPanel, Pane
         image_paint = getattr(tool_settings, 'image_paint', None)
         wm = context.window_manager
 
+        # Two-column layout when layers are enabled
+        show_layers = getattr(prefs, 'show_rmb_layers_panel', True) and ps_ctx and ps_ctx.ps_object
+
+        # Default to compact width; widen only when layers are visible
+        try:
+            type(self).bl_ui_units_x = 13
+            if show_layers:
+                type(self).bl_ui_units_x = 28
+        except Exception:
+            pass
+
+        if show_layers:
+            main_row = layout.row(align=False)
+            left_col = main_row.column(align=True)
+            left_col.scale_x = 0.95
+            right_col = main_row.column(align=True)
+            right_col.scale_x = 1.05
+        else:
+            left_col = layout.column(align=True)
+
         # Compact mode: only brush controls, no layers UI
-        picker_scale = 1.2
-        left_col = layout.column()
+        picker_scale = getattr(prefs, 'rmb_color_wheel_scale', 1.2)
 
         # ------------- Brush & Color Section -------------
         if brush:
-            color_box = left_col.box()
-            color_col = color_box.column(align=True)
-
+            color_col = left_col.column(align=True)
+            
+            # Color Picker Section
             picker_row = color_col.row()
-            picker_row.scale_y = picker_scale
+            picker_row.scale_y = picker_scale * 1.3
             try:
                 self.prop_unified_color_picker(picker_row, context, brush, "color", value_slider=True)
             except Exception:
                 pass
 
+            # Color Swatches Row
             swatch_row = color_col.row(align=True)
+            swatch_row.scale_y = 1.3
             swatches = swatch_row.split(factor=0.5, align=True)
             try:
                 self.prop_unified_color(swatches, context, brush, "color", text="")
@@ -124,8 +148,10 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, UnifiedPaintPanel, Pane
             except Exception:
                 pass
 
-            if getattr(prefs, 'show_hsv_sliders_rmb', False):
+            # HSV Sliders - Attached to Color Cards
+            if getattr(prefs, 'show_hsv_sliders_rmb', True) and ps_ctx:
                 hsv_col = color_col.column(align=True)
+                hsv_col.scale_y = 0.95
                 try:
                     # Skip Hue slider if square picker already provides it separately
                     if getattr(context.preferences.view, 'color_picker_type', '') != "SQUARE_SV":
@@ -135,18 +161,20 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, UnifiedPaintPanel, Pane
                 except Exception:
                     pass
 
-            # Separator between HSV and brush settings
+            # Brush Settings Section
             color_col.separator()
-
-            # Basic brush params
-            size_row = color_col.row(align=True)
+            brush_col = color_col.column(align=True)
+            brush_col.scale_y = 1.2
+            
+            size_row = brush_col.row(align=True)
             try:
                 self.prop_unified(size_row, context, brush, "size", "use_unified_size", text='Radius')
             except Exception:
                 pass
             if hasattr(brush, 'use_pressure_size'):
                 size_row.prop(brush, 'use_pressure_size', text='', icon='STYLUS_PRESSURE')
-            strength_row = color_col.row(align=True)
+            
+            strength_row = brush_col.row(align=True)
             try:
                 self.prop_unified(strength_row, context, brush, "strength", "use_unified_strength", text='Strength', slider=True)
             except Exception:
@@ -154,10 +182,11 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, UnifiedPaintPanel, Pane
             if hasattr(brush, 'use_pressure_strength'):
                 strength_row.prop(brush, 'use_pressure_strength', text='', icon='STYLUS_PRESSURE')
 
-            # Palette section (optional)
+            # Palette Section
             if image_paint and getattr(prefs, 'show_active_palette_rmb', True):
-                palette_box = color_col.box()
-                palette_col = palette_box.column(align=True)
+                color_col.separator()
+                palette_col = color_col.column(align=True)
+                palette_col.scale_y = 1.1
                 if wm and hasattr(wm, 'ps_palette_picker'):
                     try:
                         palette = getattr(image_paint, 'palette', None)
@@ -170,12 +199,79 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, UnifiedPaintPanel, Pane
                 palette = getattr(image_paint, 'palette', None)
                 if palette:
                     swatch_col = palette_col.column()
-                    swatch_col.scale_x = 0.8
-                    swatch_col.scale_y = 0.8
+                    swatch_col.scale_x = 0.9
+                    swatch_col.scale_y = 0.9
                     try:
                         swatch_col.template_palette(image_paint, "palette", color=True)
                     except Exception:
                         pass
+
+        # Layers Section - Right Column with full layer list
+        if show_layers:
+            try:
+                from .common import get_icon, scale_content
+                active_channel = ps_ctx.active_channel
+                active_layer = ps_ctx.active_layer
+                layers = active_channel.layers if active_channel else []
+                
+                # Layer settings at top (matching actual panel structure)
+                if active_layer and active_layer.node_tree:
+                    # First row: Icons + Blend mode (all in one row)
+                    top_row = right_col.row(align=True)
+                    top_row = scale_content(context, top_row, scale_x=1.25, scale_y=1.15)
+                    
+                    # Icon controls
+                    icon_row = top_row.row(align=True)
+                    icon_row.enabled = not active_layer.lock_layer
+                    icon_row.prop(active_layer, "is_clip", text="", icon="SELECT_INTERSECT")
+                    if active_layer.type == 'IMAGE':
+                        icon_row.prop(active_layer, "lock_alpha", text="", icon='TEXTURE')
+                    icon_row.prop(active_layer, "lock_layer", text="", icon='LOCKED')
+                    
+                    # Blend mode in same row
+                    blend_row = top_row.row(align=True)
+                    blend_row.enabled = not active_layer.lock_layer
+                    blend_row.prop(active_layer, "blend_mode", text="")
+                    
+                    # Second row: Opacity slider (full width)
+                    opacity_row = right_col.row(align=True)
+                    opacity_row = scale_content(context, opacity_row, scale_x=1.25, scale_y=1.15)
+                    opacity_row.enabled = not active_layer.lock_layer
+                    opacity_row.prop(active_layer.pre_mix_node.inputs['Opacity'], "default_value", text="Opacity", slider=True)
+                
+                # Layer list with control buttons
+                list_row = right_col.row()
+                list_row = scale_content(context, list_row, scale_x=1, scale_y=1.5)
+                list_col = list_row.column()
+                if active_channel:
+                    list_col.template_list(
+                        "MAT_PT_UL_LayerList", "", 
+                        active_channel, "layers", 
+                        active_channel, "active_index",
+                        rows=min(max(6, len(layers)), 7)
+                    )
+                else:
+                    info_col = list_col.column(align=True)
+                    info_col.label(text="No active channel", icon='INFO')
+                
+                # Layer controls column (matching actual panel)
+                col = list_row.column(align=True)
+                col.scale_x = 1.2
+                if active_channel:
+                    col.operator("wm.call_menu", text="", icon_value=get_icon('layer_add')).name = "MAT_MT_AddLayerMenu"
+                    col.operator("paint_system.new_folder_layer", icon_value=get_icon('folder'), text="")
+                    col.menu("MAT_MT_LayerMenu", text="", icon='COLLAPSEMENU')
+                    from .common import line_separator
+                    line_separator(col)
+                    col.operator("paint_system.delete_item", text="", icon="TRASH")
+                    line_separator(col)
+                    col.operator("paint_system.move_up", icon="TRIA_UP", text="")
+                    col.operator("paint_system.move_down", icon="TRIA_DOWN", text="")
+                else:
+                    col.label(text="", icon='BLANK1')
+                
+            except Exception as e:
+                logger.debug(f"Error drawing layers section in RMB menu: {e}")
         else:
             left_col.label(text="No active brush", icon='INFO')
 
@@ -205,6 +301,21 @@ class PAINTSYSTEM_OT_open_texpaint_menu(Operator):
                 is_texpaint = bool(getattr(getattr(context, "tool_settings", None), "image_paint", None))
         except Exception:
             is_texpaint = False
+        
+        # Check if stencil mask is active - if so, pass through to allow stencil repositioning
+        if is_texpaint:
+            try:
+                tool_settings = context.tool_settings
+                brush = tool_settings.image_paint.brush if tool_settings and tool_settings.image_paint else None
+                if brush:
+                    # Check if any texture slot has a stencil mapping
+                    for tex_slot in brush.texture_slot, brush.mask_texture_slot:
+                        if tex_slot and tex_slot.map_mode == 'STENCIL':
+                            # Stencil is active, let Blender handle RMB for repositioning
+                            return {'PASS_THROUGH'}
+            except Exception as e:
+                print(f"Paint System RMB: Error checking stencil: {e}")
+        
         if is_texpaint:
             try:
                 bpy.ops.wm.call_panel(name="VIEW3D_PT_paintsystem_quick_layers")
@@ -370,24 +481,51 @@ def draw_entry(self, context):
 
 
 def register():
-    bpy.utils.register_class(VIEW3D_PT_paintsystem_quick_layers)
-    bpy.utils.register_class(VIEW3D_MT_paintsystem_texture_paint_context)
-    bpy.utils.register_class(PAINTSYSTEM_OT_open_texpaint_menu)
-    bpy.utils.register_class(PAINTSYSTEM_OT_open_layers_popover)
+    try:
+        bpy.utils.register_class(VIEW3D_PT_paintsystem_quick_layers)
+        print("✓ Registered VIEW3D_PT_paintsystem_quick_layers")
+    except Exception as e:
+        print(f"✗ Failed to register VIEW3D_PT_paintsystem_quick_layers: {e}")
+    
+    try:
+        bpy.utils.register_class(VIEW3D_MT_paintsystem_texture_paint_context)
+        print("✓ Registered VIEW3D_MT_paintsystem_texture_paint_context")
+    except Exception as e:
+        print(f"✗ Failed to register VIEW3D_MT_paintsystem_texture_paint_context: {e}")
+    
+    try:
+        bpy.utils.register_class(PAINTSYSTEM_OT_open_texpaint_menu)
+        print("✓ Registered PAINTSYSTEM_OT_open_texpaint_menu")
+    except Exception as e:
+        print(f"✗ Failed to register PAINTSYSTEM_OT_open_texpaint_menu: {e}")
+    
+    try:
+        bpy.utils.register_class(PAINTSYSTEM_OT_open_layers_popover)
+        print("✓ Registered PAINTSYSTEM_OT_open_layers_popover")
+    except Exception as e:
+        print(f"✗ Failed to register PAINTSYSTEM_OT_open_layers_popover: {e}")
 
-    bpy.types.WindowManager.ps_layers_popover_only = BoolProperty(
-        name="Layers Popover Only Mode",
-        description="When True, only show layer list without settings panels",
-        default=False
-    )
+    try:
+        bpy.types.WindowManager.ps_layers_popover_only = BoolProperty(
+            name="Layers Popover Only Mode",
+            description="When True, only show layer list without settings panels",
+            default=False
+        )
+        print("✓ Registered WindowManager.ps_layers_popover_only")
+    except Exception as e:
+        print(f"✗ Failed to register WindowManager.ps_layers_popover_only: {e}")
 
-    bpy.types.WindowManager.ps_palette_picker = EnumProperty(
-        name="Palette Picker",
-        description="Select existing palette (no create/unlink controls)",
-        items=_ps_palette_enum_items,
-        update=_ps_palette_enum_update,
-        options={'SKIP_SAVE'}
-    )
+    try:
+        bpy.types.WindowManager.ps_palette_picker = EnumProperty(
+            name="Palette Picker",
+            description="Select existing palette (no create/unlink controls)",
+            items=_ps_palette_enum_items,
+            update=_ps_palette_enum_update,
+            options={'SKIP_SAVE'}
+        )
+        print("✓ Registered WindowManager.ps_palette_picker")
+    except Exception as e:
+        print(f"✗ Failed to register WindowManager.ps_palette_picker: {e}")
 
     try:
         if not hasattr(bpy.types, 'VIEW3D_MT_paint_texture_context_menu'):
@@ -400,6 +538,11 @@ def register():
                     draw_entry(self, context)
             bpy.utils.register_class(VIEW3D_MT_PaintSystem_TexturePaintMenuBridge)
             _BRIDGE_MENUS.append(VIEW3D_MT_PaintSystem_TexturePaintMenuBridge)
+            print("✓ Registered VIEW3D_MT_paint_texture_context_menu bridge")
+    except Exception as e:
+        print(f"✗ Failed to register paint_texture_context_menu bridge: {e}")
+    
+    try:
         if not hasattr(bpy.types, 'VIEW3D_MT_paint_texture'):
             class VIEW3D_MT_PaintSystem_TexturePaintMenuBridgeLegacy(Menu):
                 bl_space_type = 'VIEW_3D'
@@ -410,16 +553,18 @@ def register():
                     draw_entry(self, context)
             bpy.utils.register_class(VIEW3D_MT_PaintSystem_TexturePaintMenuBridgeLegacy)
             _BRIDGE_MENUS.append(VIEW3D_MT_PaintSystem_TexturePaintMenuBridgeLegacy)
-    except Exception:
-        pass
+            print("✓ Registered VIEW3D_MT_paint_texture bridge (legacy)")
+    except Exception as e:
+        print(f"✗ Failed to register paint_texture bridge (legacy): {e}")
 
     _append_to_texture_paint_context_menu()
     try:
         def _late_attach():
             _append_to_texture_paint_context_menu(); return None
         bpy.app.timers.register(_late_attach, first_interval=0.6)
-    except Exception:
-        pass
+        print("✓ Registered late attachment timer")
+    except Exception as e:
+        print(f"✗ Failed to register late attachment timer: {e}")
 
 
 def unregister():

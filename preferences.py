@@ -37,7 +37,7 @@ def get_preferences(context) -> PaintSystemPreferences:
             hide_color_attr_tips=False,
             loading_donations=False,
             use_legacy_ui=False,
-            show_hsv_sliders_rmb=False,
+            show_hsv_sliders_rmb=True,
             show_active_palette_rmb=True,
-            show_rmb_layers_panel=True,
+            show_rmb_layers_panel=False,
         )

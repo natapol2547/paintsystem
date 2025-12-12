@@ -5,36 +5,7 @@ import bpy
 addon_keymaps = []
 
 # Toggleable shortcuts
-# 1) Optional Shift+RMB fallback (off by default to avoid duplicates)
-ENABLE_SHIFT_RMB_FALLBACK = False
-# 2) Plain RMB override (enabled by default for Bforartists compatibility)
-#    Bforartists 4.4.3 doesn't have a default Texture Paint RMB menu,
-#    so we NEED to override RMB to provide menu access
 ENABLE_RMB_OVERRIDE_IN_TEXPAINT = True
-
-
-def _override_rmb_in_keymap(kc, keymap_name, idname, space_type='VIEW_3D'):
-    """Find existing keymap and override its RMB binding, or create new one."""
-    try:
-        km = kc.keymaps.get(keymap_name)
-        if km is None:
-            km = kc.keymaps.new(name=keymap_name, space_type=space_type)
-        
-        # Look for existing RMB PRESS binding and replace it
-        for kmi in km.keymap_items:
-            if kmi.type == 'RIGHTMOUSE' and kmi.value == 'PRESS' and not kmi.shift and not kmi.ctrl and not kmi.alt:
-                # Replace existing RMB binding
-                kmi.idname = idname
-                addon_keymaps.append((km, kmi))
-                return True
-        
-        # No existing RMB binding found, create new one
-        kmi = km.keymap_items.new(idname, type='RIGHTMOUSE', value='PRESS')
-        addon_keymaps.append((km, kmi))
-        return True
-    except Exception as e:
-        print(f"Error overriding RMB in {keymap_name}: {e}")
-        return False
 
 
 def register() -> None:
@@ -47,44 +18,57 @@ def register() -> None:
         if not kc:
             return
 
-        # Override RMB in Texture Paint - IMAGE EDITOR is the main space for texture paint
         if ENABLE_RMB_OVERRIDE_IN_TEXPAINT:
-            # IMAGE EDITOR keymaps (primary texture paint location in both Blender and Bforartists)
-            image_keymaps = [
-                'Image Paint',
-                'Image Editor',
-                'Paint Mode',
-            ]
-            
-            for km_name in image_keymaps:
-                _override_rmb_in_keymap(kc, km_name, 'paint_system.open_texpaint_menu', space_type='IMAGE_EDITOR')
-            
-            # 3D View keymaps (fallback for paint modes and generic 3D operations)
-            view3d_keymaps = [
-                '3D View Tool: Paint Draw',
-                'Texture Paint',
-                '3D View Generic',
-                '3D View',
-                'Paint Mode',
-            ]
-            
-            for km_name in view3d_keymaps:
-                _override_rmb_in_keymap(kc, km_name, 'paint_system.open_texpaint_menu', space_type='VIEW_3D')
-
-        # Optional Shift+RMB fallback
-        if ENABLE_SHIFT_RMB_FALLBACK:
-            try:
-                km = kc.keymaps.get('3D View')
-                if km is None:
-                    km = kc.keymaps.new(name='3D View', space_type='VIEW_3D')
-                kmi = km.keymap_items.new('paint_system.open_texpaint_menu', type='RIGHTMOUSE', value='PRESS', shift=True)
+            # Try to override existing RMB binding in Image Paint keymap
+            km = kc.keymaps.get('Image Paint')
+            if km:
+                print("    Searching for RMB binding in 'Image Paint' keymap...")
+                found_rmb = False
+                for kmi in km.keymap_items:
+                    if kmi.type == 'RIGHTMOUSE' and kmi.value == 'PRESS' and not kmi.shift and not kmi.ctrl and not kmi.alt:
+                        print(f"      Found RMB binding: {kmi.idname}")
+                        kmi.idname = 'paint_system.open_texpaint_menu'
+                        addon_keymaps.append((km, kmi))
+                        print(f"      ✓ Overridden to paint_system.open_texpaint_menu")
+                        found_rmb = True
+                        break
+                
+                if not found_rmb:
+                    print("      RMB binding not found, creating new one...")
+                    kmi = km.keymap_items.new('paint_system.open_texpaint_menu', type='RIGHTMOUSE', value='PRESS')
+                    addon_keymaps.append((km, kmi))
+                    print(f"      ✓ Created new RMB binding")
+            else:
+                print("    'Image Paint' keymap not found, creating new one...")
+                km = kc.keymaps.new(name='Image Paint', space_type='EMPTY')
+                kmi = km.keymap_items.new('paint_system.open_texpaint_menu', type='RIGHTMOUSE', value='PRESS')
                 addon_keymaps.append((km, kmi))
-            except Exception:
-                pass
+                print(f"    ✓ Created new Image Paint keymap with RMB binding")
+            
+            # Also try 3D View Tool: Paint Draw
+            km = kc.keymaps.get('3D View Tool: Paint Draw')
+            if km:
+                print("    Searching for RMB binding in '3D View Tool: Paint Draw' keymap...")
+                found_rmb = False
+                for kmi in km.keymap_items:
+                    if kmi.type == 'RIGHTMOUSE' and kmi.value == 'PRESS' and not kmi.shift and not kmi.ctrl and not kmi.alt:
+                        print(f"      Found RMB binding: {kmi.idname}")
+                        kmi.idname = 'paint_system.open_texpaint_menu'
+                        addon_keymaps.append((km, kmi))
+                        print(f"      ✓ Overridden to paint_system.open_texpaint_menu")
+                        found_rmb = True
+                        break
+                
+                if not found_rmb:
+                    print("      RMB binding not found, creating new one...")
+                    kmi = km.keymap_items.new('paint_system.open_texpaint_menu', type='RIGHTMOUSE', value='PRESS')
+                    addon_keymaps.append((km, kmi))
+                    print(f"      ✓ Created new RMB binding")
+
     except Exception as e:
-        # Keymap setup is best-effort; failures shouldn't block add-on load
-        print(f"Keymap registration error: {e}")
-        pass
+        print(f"✗ Keymap registration error: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def unregister() -> None:
