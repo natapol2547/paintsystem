@@ -14,6 +14,7 @@
 import bpy
 from bpy.utils import register_submodule_factory
 from .custom_icons import load_icons, unload_icons
+from . import keymaps
 
 # from .paintsystem.data import parse_context
 
@@ -45,8 +46,11 @@ _register, _unregister = register_submodule_factory(__name__, submodules)
 def register():
     load_icons()
     _register()
+    keymaps.register()
+    print("Paint System: Registered keymaps")
     
 def unregister():
+    keymaps.unregister()
     _unregister()
     unload_icons()
     print("Paint System: Unregistered", __package__)

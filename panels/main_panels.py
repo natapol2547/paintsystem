@@ -155,12 +155,11 @@ class MAT_PT_PaintSystemMaterialSettings(PSContextMixin, Panel):
         layout = self.layout
         layout.use_property_split = True
         layout.use_property_decorate = False
-        if not ps_ctx.ps_settings.use_legacy_ui:
-            row = layout.row(align=True)
-            scale_content(context, row, 1.5, 1.2)
-            row.menu("MAT_MT_PaintSystemMaterialSelectMenu", text="" if ob.active_material else "Empty Material", icon="MATERIAL" if ob.active_material else "MESH_CIRCLE")
-            if mat:
-                row.prop(mat, "name", text="")
+        row = layout.row(align=True)
+        scale_content(context, row, 1.5, 1.2)
+        row.menu("MAT_MT_PaintSystemMaterialSelectMenu", text="" if ob.active_material else "Empty Material", icon="MATERIAL" if ob.active_material else "MESH_CIRCLE")
+        if mat:
+            row.prop(mat, "name", text="")
         layout.prop(mat, "surface_render_method", text="Render Method")
         layout.prop(mat, "use_backface_culling", text="Backface Culling")
         if ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.groups:
@@ -222,27 +221,12 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
             
             return
         ps_ctx = self.parse_context(context)
-        if not ps_ctx.ps_settings.use_legacy_ui and ps_ctx.active_channel:
+        if ps_ctx.active_channel:
             toggle_paint_mode_ui(layout, context)
         ob = ps_ctx.ps_object
         if ob.type != 'MESH':
             return
         
-        if ps_ctx.ps_settings.use_legacy_ui:
-            mat = ps_ctx.active_material
-            if any([ob.material_slots[i].material for i in range(len(ob.material_slots))]):
-                col = layout.column(align=True)
-                row = col.row(align=True)
-                scale_content(context, row, 1.5, 1.2)
-                row.menu("MAT_MT_PaintSystemMaterialSelectMenu", text="" if ob.active_material else "Empty Material", icon="MATERIAL" if ob.active_material else "MESH_CIRCLE")
-                if mat:
-                    row.prop(mat, "name", text="")
-                
-                # row.operator("object.material_slot_add", icon='ADD', text="")
-                if mat:
-                    row.popover("MAT_PT_PaintSystemMaterialSettings", text="", icon="PREFERENCES")
-        
-
         if ps_ctx.active_group and check_group_multiuser(ps_ctx.active_group.node_tree):
             # Show a warning
             box = layout.box()
