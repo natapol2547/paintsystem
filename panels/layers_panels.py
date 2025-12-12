@@ -113,28 +113,15 @@ def draw_input_sockets(layout, context: Context, only_output: bool = False):
     header, panel = layout.panel("input_sockets_panel", default_closed=True)
     header.label(text="Sockets Settings:", icon_value=get_icon('float_socket'))
     if panel:
-        row = panel.row(align=True)
-        row.label(icon="BLANK1")
-        if only_output:
-            output_box = row
-        else:
-            input_box = row.box()
-        grid = output_box.grid_flow(columns=2, align=True, even_columns=True, row_major=True)
-        grid_col = grid.column()
-        grid_col.label(text="Color Output")
-        grid_col.prop(active_layer, "color_output_name", text="")
-        grid_col = grid.column()
-        grid_col.label(text="Alpha Output")
-        grid_col.prop(active_layer, "alpha_output_name", text="")
+        col = panel.column()
+        col.use_property_split = True
+        col.use_property_decorate = False
+        col.prop(active_layer, "color_output_name", text="Color Output")
+        col.prop(active_layer, "alpha_output_name", text="Alpha Output")
         if not only_output:
-            input_box = panel.box()
-            grid = input_box.grid_flow(columns=2, align=True, even_columns=True, row_major=True)
-            grid_col = grid.column()
-            grid_col.label(text="Color Input")
-            grid_col.prop(active_layer, "color_input_name", text="")
-            grid_col = grid.column()
-            grid_col.label(text="Alpha Input")
-            grid_col.prop(active_layer, "alpha_input_name", text="")
+            col.separator()
+            col.prop(active_layer, "color_input_name", text="Color Input")
+            col.prop(active_layer, "alpha_input_name", text="Alpha Input")
 class MAT_PT_UL_LayerList(PSContextMixin, UIList):
     def draw_item(self, context: Context, layout, data, item, icon, active_data, active_property, index):
         linked_item = item.get_layer_data()
@@ -222,10 +209,6 @@ class MAT_MT_PaintSystemMergeAndExport(PSContextMixin, Menu):
         layout = self.layout
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
-        if active_channel.bake_image:
-            layout.prop(active_channel, "use_bake_image",
-                    text="Use Baked Image", icon='CHECKBOX_HLT' if active_channel.use_bake_image else 'CHECKBOX_DEHLT')
-            layout.separator()
         layout.label(text="Bake")
         layout.operator("paint_system.bake_channel", text=f"Bake Active Channel ({active_channel.name})", icon_value=get_icon_from_channel(active_channel))
         layout.operator("paint_system.bake_channel", text=f"Bake Active Channel as Layer", icon_value=get_icon("image")).as_layer = True
@@ -267,9 +250,9 @@ class MAT_PT_Layers(PSContextMixin, Panel):
         #         icon_value=get_icon_from_channel(ps_ctx.active_channel)
         #     )
         # else:
-        if ps_ctx.ps_object.type == 'MESH' and ps_ctx.active_channel.bake_image:
-            layout.prop(ps_ctx.active_channel, "use_bake_image",
-                    text="Use Baked", icon="TEXTURE_DATA")
+        if ps_ctx.ps_object.type == 'MESH':
+            # Always show Bake/Export dropdown
+            layout.menu("MAT_MT_PaintSystemMergeAndExport", text="Bake/Export", icon='EXPORT')
 
     def draw(self, context):
         ps_ctx = self.parse_context(context)
@@ -359,6 +342,7 @@ class MAT_PT_Layers(PSContextMixin, Panel):
                 col = bake_box.column()
                 col.label(text="Baked Image", icon="TEXTURE_DATA")
                 image_node_settings(col, image_node, active_channel, "bake_image", simple_ui=True, default_closed=True)
+                col.operator("bake_export", text="Use Baked as New Layer", icon='IMAGE_DATA')
                 col.operator("wm.call_menu", text="Apply Image Filters", icon="IMAGE_DATA").name = "MAT_MT_ImageFilterMenu"
                 col.operator("paint_system.delete_bake_image", text="Delete", icon="TRASH")
                 return
@@ -888,10 +872,10 @@ class MAT_PT_ImageLayerSettings(PSContextMixin, Panel):
         panel = image_node_settings(col, image_node, active_layer, "image", simple_ui=True)
         if panel:
             line_separator(col)
+        # Only show Correct Aspect if an image is assigned
+        if active_layer.image:
+            col.prop(active_layer, "correct_image_aspect", text="Correct Aspect", toggle=1, icon='CHECKBOX_HLT' if active_layer.correct_image_aspect else 'CHECKBOX_DEHLT')
         draw_input_sockets(col, context, only_output=True)
-        row = col.row(align=True)
-        row.label(icon="BLANK1")
-        row.prop(active_layer, "correct_image_aspect", text="Correct Aspect", toggle=1, icon='CHECKBOX_HLT' if active_layer.correct_image_aspect else 'CHECKBOX_DEHLT')
 
 class MAT_MT_LayerMenu(PSContextMixin, Menu):
     bl_label = "Layer Menu"
