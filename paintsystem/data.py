@@ -1481,7 +1481,42 @@ class Layer(BaseNestedListItem):
             # if image is not saved, save it
             image: Image = layer.image
             save_image(image)
-            self.image = image.copy()
+            
+            # For UDIM images, use pixel-level copying to preserve alpha transparency
+            if image.is_tiled:
+                # Create new UDIM image with same properties
+                new_image = bpy.data.images.new(
+                    name=f"{image.name}_copy",
+                    width=image.size[0],
+                    height=image.size[1],
+                    alpha=image.alpha_mode != 'NONE',
+                    tiled=True
+                )
+                new_image.colorspace_settings.name = image.colorspace_settings.name
+                new_image.alpha_mode = image.alpha_mode
+                
+                # Copy pixels from each tile
+                for tile in image.tiles:
+                    # Ensure tile exists in new image
+                    if tile.number not in [t.number for t in new_image.tiles]:
+                        new_image.tiles.new(tile.number)
+                    
+                    # Copy pixel data
+                    try:
+                        pixels_src = np.zeros(len(tile.pixels), dtype=np.float32)
+                        tile.pixels.foreach_get(pixels_src)
+                        
+                        new_tile = next(t for t in new_image.tiles if t.number == tile.number)
+                        new_tile.pixels.foreach_set(pixels_src)
+                        new_tile.update()
+                    except Exception as e:
+                        print(f"Error copying UDIM tile {tile.number}: {e}")
+                
+                self.image = new_image
+            else:
+                # For non-tiled images, use standard copy
+                self.image = image.copy()
+        
         if layer.empty_object:
             self.empty_object = layer.empty_object.copy()
             self.empty_object.name = f"{self.layer_name} ({self.uid[:8]}) Empty"
@@ -1491,8 +1526,10 @@ class Layer(BaseNestedListItem):
         layer = self.get_layer_data()
         if is_layer_linked(self) and not self.is_linked:
             # self owns the data
-            self.transfer_linked_data()
-            self.duplicate_layer_data(self)
+            result = self.transfer_linked_data()
+            # Only duplicate if transfer was successful
+            if result[0] is not None:
+                self.duplicate_layer_data(self)
         else:
             self.linked_layer_uid = ""
             self.linked_material = None
@@ -1534,6 +1571,11 @@ class Layer(BaseNestedListItem):
                         for layer in channel.layers:
                             if layer.is_linked and layer.linked_layer_uid == self.uid:
                                 linked_layer_uid_map[layer.uid] = [layer, material]
+        
+        # If no linked layers exist, nothing to transfer
+        if not linked_layer_uid_map:
+            return None, None
+        
         # Migrate layer data to one of the linked layers
         linked_layers = [layer for layer, _ in linked_layer_uid_map.values() if layer.is_linked and layer.linked_layer_uid == self.uid]
         new_main_layer, new_material = list(linked_layer_uid_map.values())[0]
@@ -1552,7 +1594,14 @@ class Layer(BaseNestedListItem):
         layer = self.get_layer_data()
         if is_layer_linked(layer) and not self.is_linked:
             print(f"Transferring layer data for {layer.name} to linked layers")
-            self.transfer_linked_data()
+            result = self.transfer_linked_data()
+            # Only proceed if transfer was successful
+            if result[0] is None:
+                print(f"No linked layers found, deleting layer data for {self.name}")
+                if self.empty_object:
+                    bpy.data.objects.remove(self.empty_object, do_unlink=True)
+                if self.node_tree:
+                    bpy.data.node_groups.remove(self.node_tree)
         else:
             print(f"Deleting layer data for {self.name}")
             if self.empty_object:

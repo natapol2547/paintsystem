@@ -179,6 +179,12 @@ class PSUVOptionsMixin():
             row.prop_search(self, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="")
             if not self.uv_map_name:
                 row.alert = True
+            # Show UDIM toggle directly under the UV map selector
+            if ps_ctx.ps_object and self.uv_map_name:
+                udim_tiles = get_udim_tiles(ps_ctx.ps_object, self.uv_map_name)
+                use_udim_tiles = udim_tiles != {1001}
+                if udim_tiles and use_udim_tiles:
+                    layout.prop(self, "use_udim_tiles")
 
 
 class PSImageCreateMixin(PSUVOptionsMixin):
@@ -237,12 +243,6 @@ class PSImageCreateMixin(PSUVOptionsMixin):
             col = box.column(align=True)
             col.prop(self, "image_width", text="Width")
             col.prop(self, "image_height", text="Height")
-        if self.coord_type == 'UV':
-            ps_ctx = PSContextMixin.parse_context(context)
-            udim_tiles = get_udim_tiles(ps_ctx.ps_object, self.uv_map_name)
-            use_udim_tiles = udim_tiles != {1001}
-            if udim_tiles and use_udim_tiles:
-                box.prop(self, "use_udim_tiles")
         if show_float:
             box.prop(self, "use_float", text="Use Float")
             

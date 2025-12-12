@@ -67,6 +67,21 @@ class MAT_PT_Brush(PSContextMixin, Panel, UnifiedPaintPanel):
         layout = self.layout
         layout.label(icon_value=get_icon('brush'))
 
+    def draw_header_preset(self, context):
+        layout = self.layout
+        settings = self.paint_settings(context)
+        brush = settings.brush if settings else None
+        is_eraser = bool(brush and brush.blend == 'ERASE_ALPHA')
+        row = layout.row(align=True)
+        row.scale_y = 1.1
+        row.alert = is_eraser
+        row.operator(
+            "paint_system.toggle_brush_erase_alpha",
+            text="Eraser",
+            icon='BRUSH_DATA',
+            depress=is_eraser
+        )
+
     # def draw_header_preset(self, context):
     #     layout = self.layout
     #     ps_ctx = self.parse_context(context)
