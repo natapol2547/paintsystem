@@ -16,9 +16,6 @@ DEFAULT_PS_UV_MAP_NAME = "PS_UVMap"
 
 LIBRARY_NODE_TREE_VERSIONS = {
     ".PS Projection": 1,
-    ".PS Tangent Normal": 2,
-    ".PS Post Mix": 2,
-    ".PS Pre Mix": 1,
 }
 
 def get_layer_blend_type(layer: Layer) -> str:
@@ -131,33 +128,35 @@ def get_library_object(object_name: str, library_filename: str = LIBRARY_FILENAM
         data_to.objects = [object_name]
     return bpy.data.objects.get(object_name)
 
-def create_mixing_graph(builder: NodeTreeBuilder, layer: "Layer"|None, color_node_name: str = None, color_socket: str = None, alpha_node_name: str = None, alpha_socket: str = None) -> NodeTreeBuilder:
+def create_mixing_graph(builder: NodeTreeBuilder, layer: "Layer", color_node_name: str = None, color_socket: str = None, alpha_node_name: str = None, alpha_socket: str = None, as_subgraph: bool = False) -> NodeTreeBuilder:
     blend_mode = get_layer_blend_type(layer) if layer is not None else "MIX"
-    use_pd_over = blend_mode not in ["MIX", "PASSTHROUGH"] and not layer.is_clip if layer else False
     pre_mix = get_library_nodetree(".PS Pre Mix")
-    post_mix = get_library_nodetree(".PS Porter-Duff Over") if use_pd_over else get_library_nodetree(".PS Post Mix")
-    builder.add_node("group_input", "NodeGroupInput")
-    builder.add_node("group_output", "NodeGroupOutput")
+    post_mix = get_library_nodetree(".PS Post Mix")
+    if as_subgraph:
+        input_node_name = START
+        output_node_name = END
+    else:
+        input_node_name = "group_input"
+        output_node_name = "group_output"
+        builder.add_node("group_input", "NodeGroupInput")
+        builder.add_node("group_output", "NodeGroupOutput")
     builder.add_node("pre_mix", "ShaderNodeGroup", {"node_tree": pre_mix}, {"Over Alpha": 1.0})
     builder.add_node("post_mix", "ShaderNodeGroup", {"node_tree": post_mix})
-    builder.add_node("mix_rgb", "ShaderNodeMix", {"blend_type": blend_mode, "data_type": "RGBA"}, {"Factor": 1.0}, force_properties=True, force_default_values=True)
+    builder.add_node("mix_rgb", "ShaderNodeMix", {"blend_type": blend_mode, "data_type": "RGBA"}, force_properties=True)
     if alpha_node_name is not None and alpha_socket is not None:
         builder.link(alpha_node_name, "pre_mix", alpha_socket, "Over Alpha")
-    builder.link("group_input", "mix_rgb", "Color", "A")
+    builder.link(input_node_name, "pre_mix", "Color", "Color")
+    builder.link(input_node_name, "pre_mix", "Alpha", "Alpha")
+    builder.link("pre_mix", "mix_rgb", "Color", "A")
+    builder.link("pre_mix", "mix_rgb", "Over Alpha", "Factor")
     if color_node_name is not None and color_socket is not None:
         builder.link(color_node_name, "mix_rgb", color_socket, "B")
-        builder.link(color_node_name, "post_mix", color_socket, "Over Color")
-    builder.link("group_input", "post_mix", "Clip", "Clip")
-    builder.link("mix_rgb", "post_mix", "Result", "Blended Color")
-    builder.link("group_input", "post_mix", "Color", "Color")
-    builder.link("group_input", "post_mix", "Alpha", "Alpha")
+    builder.link("mix_rgb", "post_mix", "Result", "Color")
     builder.link("pre_mix", "post_mix", "Over Alpha", "Over Alpha")
-    if layer and not layer.enabled:
-        builder.link("group_input", "group_output", "Color", "Color")
-        builder.link("group_input", "group_output", "Alpha", "Alpha")
-    else:
-        builder.link("post_mix", "group_output", "Color", "Color")
-        builder.link("post_mix", "group_output", "Alpha", "Alpha")
+    builder.link(input_node_name, "post_mix", "Alpha", "Alpha")
+    builder.link(input_node_name, "post_mix", "Clip", "Clip")
+    builder.link("post_mix", output_node_name, "Color", "Color")
+    builder.link("post_mix", output_node_name, "Alpha", "Alpha")
     return builder
 
 
