@@ -779,7 +779,7 @@ class GlobalLayer(PropertyGroup):
 
 class LayerMask(PropertyGroup):
     uid: StringProperty()
-    name: StringProperty(
+    layer_name: StringProperty(
         name="Name",
         description="Name of the mask",
         default="Mask",
@@ -904,6 +904,9 @@ class Layer(BaseNestedListItem):
             ]
             ensure_sockets(node_tree, expected_input, "INPUT")
             ensure_sockets(node_tree, expected_output, "OUTPUT")
+        
+        if self.layer_name:
+            self.node_tree.name = f"PS {self.layer_name} ({self.uid[:8]})"
 
         # Generate UUID if it doesn't exist or is invalid
         if not is_valid_uuidv4(self.uid):
@@ -1575,6 +1578,15 @@ class Layer(BaseNestedListItem):
             to_layer.auto_update_node_tree = original_auto_update_node_tree
         if failed_props:
             print(f"Warning: Could not apply properties {failed_props} for {to_layer.name}")
+
+    def create_layer_mask(self, context: Context, layer_mask_name: str, layer_mask_type: str, **kwargs):
+        layer_mask = self.layer_masks.add()
+        layer_mask.name = layer_mask_name
+        layer_mask.type = layer_mask_type
+        for key, value in kwargs.items():
+            setattr(layer_mask, key, value)
+        self.update_node_tree(context)
+        return layer_mask
     
     @property
     def modifies_color_data(self) -> bool:

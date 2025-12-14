@@ -79,7 +79,7 @@ class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSImageCreateMixin, MultiMaterialO
         """Get the next image name from the active channel"""
         ps_ctx = self.parse_context(context)
         if ps_ctx.active_channel:
-            return get_next_unique_name("Image", [layer.name for layer in ps_ctx.active_channel.layers])
+            return get_next_unique_name("Image", [layer.layer_name for layer in ps_ctx.active_channel.layers])
 
     def process_material(self, context):
         self.store_coord_type(context)
@@ -1085,51 +1085,6 @@ class PAINTSYSTEM_OT_ProjectionViewReset(PSContextMixin, Operator):
                 return {'FINISHED'}
         return {'FINISHED'}
 
-class PAINTSYSTEM_OT_NewLayerMask(PSContextMixin, Operator):
-    """Create a layer mask for the active layer"""
-    bl_idname = "paint_system.new_layer_mask"
-    bl_label = "Create Layer Mask"
-    bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Create layer mask for active layer"
-    
-    mask_type: EnumProperty(
-        name="Mask Type",
-        items=MASK_TYPE_ENUM,
-    )
-    
-    @classmethod
-    def poll(cls, context):
-        ps_ctx = cls.parse_context(context)
-        return ps_ctx.active_layer
-    
-    def execute(self, context: Context):
-        ps_ctx = self.parse_context(context)
-        active_layer = ps_ctx.active_layer
-        active_layer.use_masks = True
-        lm = ListManager(active_layer, "layer_masks", active_layer, "active_layer_mask_index")
-        layer_mask = lm.add_item()
-        layer_mask.type = self.mask_type
-        return {'FINISHED'}
-
-
-class PAINTSYSTEM_OT_DeleteLayerMask(PSContextMixin, Operator):
-    """Delete the active layer mask"""
-    bl_idname = "paint_system.delete_layer_mask"
-    bl_label = "Delete Layer Mask"
-    bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Delete the active layer mask"
-    
-    @classmethod
-    def poll(cls, context):
-        ps_ctx = cls.parse_context(context)
-        return ps_ctx.active_layer and ps_ctx.active_layer.use_masks
-    
-    def execute(self, context):
-        ps_ctx = self.parse_context(context)
-        active_layer = ps_ctx.active_layer
-        lm = ListManager(active_layer, "layer_masks", active_layer, "active_layer_mask_index")
-        lm.remove_active_item()
-        return {'FINISHED'}
 
 
 classes = (
@@ -1158,8 +1113,6 @@ classes = (
     PAINTSYSTEM_OT_ShowLayerWarnings,
     PAINTSYSTEM_OT_SetProjectionView,
     PAINTSYSTEM_OT_ProjectionViewReset,
-    PAINTSYSTEM_OT_NewLayerMask,
-    PAINTSYSTEM_OT_DeleteLayerMask
 )
 
 register, unregister = register_classes_factory(classes)
