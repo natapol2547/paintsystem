@@ -44,6 +44,7 @@ class PSNodeTreeBuilder:
         alpha_node_name: Optional[str] = None,
         alpha_socket: Optional[str] = None,
         frame_name: str = "Layer",
+        as_subgraph: bool = False,
         **kwargs
     ):
         """
@@ -57,6 +58,7 @@ class PSNodeTreeBuilder:
             alpha_node_name: Name of the node providing alpha (can be added later)
             alpha_socket: Socket name/index on the alpha node
             is_mask: Whether this builder is for a mask
+            as_subgraph: Whether to create the graph as a subgraph
             **kwargs: Additional arguments passed to NodeTreeBuilder
         """
         self._builder = NodeTreeBuilder(layer.node_tree, frame_name, version=version, verbose=True, **kwargs)
@@ -84,6 +86,7 @@ class PSNodeTreeBuilder:
             None,
             None,  # Don't link alpha yet - will be done after modifiers
             None,
+            as_subgraph=as_subgraph,
         )
         
         # Now link the sources (or final modifier outputs) to the mixing graph
@@ -437,6 +440,18 @@ class PSNodeTreeBuilder:
                     case "GRADIENT_MAP":
                         builder.add_node("map_range", "ShaderNodeMapRange")
                         builder.link("group_input", "map_range", "Color", "Value")
+                    case "FAKE_LIGHT":
+                        builder.add_node("map_range", "ShaderNodeMapRange")
+                        builder.add_node("combine_xyz", "ShaderNodeCombineXYZ", default_values={2: -1 if empty_object and empty_object.type == 'EMPTY' else 1}, force_default_values=True)
+                        builder.add_node("object_rotation", "ShaderNodeCombineXYZ")
+                        builder.add_node("vector_rotate", "ShaderNodeVectorRotate", {"rotation_type": "EULER_XYZ"})
+                        builder.add_node("normal", "ShaderNodeNewGeometry")
+                        builder.add_node("dot_product", "ShaderNodeVectorMath", {"operation": "DOT_PRODUCT"})
+                        builder.link("combine_xyz", "vector_rotate", "Vector", "Vector")
+                        builder.link("object_rotation", "vector_rotate", "Vector", "Rotation")
+                        builder.link("vector_rotate", "dot_product", "Vector", 0)
+                        builder.link("normal", "dot_product", "Normal", 1)
+                        builder.link("dot_product", "map_range", "Value", "Value")
                     case _:
                         raise ValueError(f"Invalid gradient type: {gradient_type}")
                 builder.link("map_range", "source", "Result", "Fac")
@@ -537,14 +552,15 @@ class PSNodeTreeBuilder:
             for mask in layer.layer_masks:
                 if not mask.uid:
                     mask.uid = str(uuid.uuid4())
-                builder.mask_builders.append(builder._create_mask_graph(mask, context))
+                builder.mask_builders.append(cls._create_mask_graph(mask, context).builder)
         
         return builder
 
-    def _create_mask_graph(self, layer_mask: "LayerMask", context: Context):
+    @classmethod
+    def _create_mask_graph(cls, layer_mask: "LayerMask", context: Context):
         layer_pre_processing(layer_mask, context)
         
-        builder = NodeTreeBuilder(self._layer.node_tree, "Mask", version=IMAGE_LAYER_VERSION, verbose=True, properties={"hide": True})
+        builder = cls(layer_mask, IMAGE_LAYER_VERSION, "source", "Color", as_subgraph=True, properties={"hide": True})
         
         match layer_mask.type:
             case "IMAGE":
@@ -714,9 +730,6 @@ def add_empty_to_collection(context: bpy.types.Context, empty_object: bpy.types.
         collection.objects.link(empty_object)
 
 def layer_pre_processing(layer: "Layer", context: Context):
-    if layer.layer_name:
-        layer.node_tree.name = f"PS {layer.layer_name} ({layer.uid[:8]})"
-    
     if layer.coord_type == "DECAL":
         if not layer.empty_object:
             layer.ensure_empty_object()
@@ -724,7 +737,7 @@ def layer_pre_processing(layer: "Layer", context: Context):
         elif layer.empty_object.name not in context.view_layer.objects:
             add_empty_to_collection(context, layer.empty_object)
             
-    if layer.type == "GRADIENT" and layer.gradient_type in ('LINEAR', 'RADIAL'):
+    if layer.type == "GRADIENT" and layer.gradient_type in ('LINEAR', 'RADIAL', 'FAKE_LIGHT'):
         if not layer.empty_object:
             layer.ensure_empty_object()
             if layer.gradient_type == 'LINEAR':
