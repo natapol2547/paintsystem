@@ -1294,22 +1294,9 @@ class MAT_MT_LayerMaskMenu(PSContextMixin, Menu):
             col.separator()
 
         layout.operator_context = 'INVOKE_REGION_WIN'
-        col.operator("paint_system.new_layer_mask", text="Solid Color",
-                     icon=icon_parser('STRIP_COLOR_03', "SEQUENCE_COLOR_03")).mask_type = 'SOLID_COLOR'
-        col.operator("paint_system.new_layer_mask", text="Image", icon_value=get_icon('image')).mask_type = 'IMAGE'
-        col.operator("paint_system.new_layer_mask", text="Gradient", icon='COLOR')
-        col.operator("paint_system.new_layer_mask", text="Texture", icon='TEXTURE')
-        # col.menu("MAT_MT_AddAdjustmentLayerMenu", text="Adjustment", icon='SHADERFX')
-        # col.menu("MAT_MT_AddGeometryLayerMenu", text="Geometry", icon='MESH_DATA')
-        # col.separator()
-        # # col.label(text="Advanced:")
-        # col.operator("paint_system.new_attribute_layer",
-        #              text="Attribute Color", icon='MESH_DATA')
-        # col.operator("paint_system.new_random_color_layer",
-        #              text="Random Color", icon='SEQ_HISTOGRAM')
-
-        # col.operator("paint_system.new_custom_node_group_layer",
-        #              text="Custom Layer", icon='NODETREE')
+        col.operator("paint_system.new_image_mask", text="Solid Color",
+                     icon=icon_parser('STRIP_COLOR_03', "SEQUENCE_COLOR_03"))
+        col.operator("paint_system.new_image_mask", text="Image", icon_value=get_icon('image'))
 
 class MAT_UL_LayerMasks(PSContextMixin, UIList):
     bl_idname = "MAT_UL_LayerMasks"
