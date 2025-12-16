@@ -513,33 +513,55 @@ def get_udim_tiles(object: bpy.types.Object, uv_layer_name: str):
         udim_tiles.add(1000 + row * 10 + col)
     return udim_tiles
 
-def ensure_udim_tiles(image: bpy.types.Image, objects: list[bpy.types.Object], uv_layer_name: str):
+def ensure_udim_tiles(image: bpy.types.Image, objects: list[bpy.types.Object], uv_layer_name: str, use_alpha: bool = True):
     # Check position the data in uv_layer, create a list of number for UDIM tiles
     udim_tiles = set()
     for object in objects:
         udim_tiles.update(get_udim_tiles(object, uv_layer_name))
     width, height = image.size
+    
+    # Set color based on use_alpha: transparent if True, black if False
+    tile_color = (0, 0, 0, 0) if use_alpha else (0, 0, 0, 1)
+    
     for tile_number in udim_tiles:
         if any(tile_number == tile.number for tile in image.tiles):
             continue
         with bpy.context.temp_override(edit_image=image):
-            bpy.ops.image.tile_add(number=tile_number, color=(0, 0, 0, 0), width=width, height=height)
+            bpy.ops.image.tile_add(number=tile_number, color=tile_color, width=width, height=height)
+    
     # Delete unused tiles
     for tile in image.tiles:
         if tile.number not in udim_tiles:
             print(f"Removing tile {tile.number}")
             image.tiles.remove(tile)
+    
+    # Explicitly initialize all tile pixels with the correct color
+    # This ensures transparency is properly set
+    if use_alpha:
+        try:
+            pixel_count = width * height * 4  # RGBA
+            transparent_pixels = [0.0] * pixel_count  # All channels to 0 (transparent)
+            
+            for tile in image.tiles:
+                try:
+                    tile.pixels[:] = transparent_pixels
+                    tile.pixels.update()  # Force update
+                except Exception as e:
+                    print(f"Failed to initialize tile {tile.number}: {e}")
+        except Exception as e:
+            print(f"Failed to initialize UDIM tile pixels: {e}")
+    
     save_image(image)
 
-def create_ps_image(name: str, width: int = 2048, height: int = 2048, use_udim_tiles: bool = False, objects: list[bpy.types.Object] = None, uv_layer_name: str = None, use_float: bool = False):
+def create_ps_image(name: str, width: int = 2048, height: int = 2048, use_udim_tiles: bool = False, objects: list[bpy.types.Object] = None, uv_layer_name: str = None, use_float: bool = False, use_alpha: bool = True):
     img = bpy.data.images.new(
         name=name, width=width, height=height, alpha=True, float_buffer=use_float)
-    img.generated_color = (0, 0, 0, 0)
+    img.generated_color = (0, 0, 0, 0) if use_alpha else (0, 0, 0, 1)
     save_image(img)
     if use_udim_tiles:
         img.source = "TILED"
         if objects and uv_layer_name:
-            ensure_udim_tiles(img, objects, uv_layer_name)
+            ensure_udim_tiles(img, objects, uv_layer_name, use_alpha=use_alpha)
         else:
             raise ValueError("Objects and UV layer name are required for UDIM tiles")
     return img

@@ -30,6 +30,7 @@ from ..paintsystem.data import (
     is_layer_linked,
     sort_actions
 )
+from ..paintsystem.data import get_udim_tiles
 
 # Check if PIL is available for conditional UI display
 try:
@@ -320,9 +321,11 @@ class MAT_PT_Layers(PSContextMixin, Panel):
                 image_node = find_node(active_channel.node_tree, {'bl_idname': 'ShaderNodeTexImage', 'image': active_channel.bake_image})
                 bake_box = layout.box()
                 col = bake_box.column()
+                # Toggle to switch baked usage on/off
+                toggle_row = col.row(align=True)
+                toggle_row.prop(active_channel, "use_bake_image", text="Use Baked Version", icon="TEXTURE_DATA")
                 col.label(text="Baked Image", icon="TEXTURE_DATA")
                 image_node_settings(col, image_node, active_channel, "bake_image", simple_ui=True, default_closed=True)
-                col.operator("bake_export", text="Use Baked as New Layer", icon='IMAGE_DATA')
                 col.operator("wm.call_menu", text="Apply Image Filters", icon="IMAGE_DATA").name = "MAT_MT_ImageFilterMenu"
                 col.operator("paint_system.delete_bake_image", text="Delete", icon="TRASH")
                 return
@@ -463,6 +466,20 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     picker_row.prop(active_layer, "image", text="")
                     picker_row.operator("paint_system.export_image", text="", icon="EXPORT").image_name = active_layer.image.name
                     picker_row.menu("MAT_MT_ImageMenu", text="", icon='COLLAPSEMENU')
+
+                    # UDIM status indicator
+                    try:
+                        tiles = sorted({t.number for t in active_layer.image.tiles}) if active_layer.image.tiles else []
+                        if len(tiles) > 1:
+                            udim_row = layout.row(align=True)
+                            udim_row.scale_y = 0.8
+                            udim_row.label(text="UDIM tiles: " + ", ".join(str(t) for t in tiles), icon='UV')
+                        elif tiles:
+                            udim_row = layout.row(align=True)
+                            udim_row.scale_y = 0.8
+                            udim_row.label(text=f"UDIM tile: {tiles[0]}", icon='UV')
+                    except Exception:
+                        pass
                 else:
                     picker_row.template_ID(active_layer, "image", text="", new="image.new", open="image.open")
 
@@ -890,6 +907,15 @@ class MAT_MT_LayerMenu(PSContextMixin, Menu):
             )
         
         if special_actions:
+            layout.separator()
+
+        # Image utilities
+        if ps_ctx.active_layer and ps_ctx.active_layer.image:
+            layout.operator(
+                "paint_system.rename_image",
+                text="Rename Image",
+                icon='IMAGE_DATA'
+            )
             layout.separator()
 
         layout.operator(

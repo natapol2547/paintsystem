@@ -73,7 +73,7 @@ class PaintSystemPreferences(AddonPreferences):
     show_rmb_layers_panel: BoolProperty(
         name="Show Layers Option in RMB Menu",
         description="Show 'Paint System Layers' option in the RMB context menu",
-        default=False
+        default=True
     )
     rmb_color_wheel_scale: FloatProperty(
         name="Color Wheel Scale",

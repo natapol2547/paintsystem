@@ -134,6 +134,42 @@ class PAINTSYSTEM_OT_ClearImage(PSImageFilterMixin, Operator):
         image.update()
         image.update_tag()
         return {'FINISHED'}
+
+
+class PAINTSYSTEM_OT_RenameImage(PSImageFilterMixin, Operator):
+    bl_idname = "paint_system.rename_image"
+    bl_label = "Rename Image"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Rename the active image or bake image"
+
+    new_name: StringProperty(name="New Name", default="")
+
+    def invoke(self, context, event):
+        self.invoke_get_image(context)
+        img = self.get_image(context)
+        if not img:
+            return {'CANCELLED'}
+        self.new_name = img.name
+        return context.window_manager.invoke_props_dialog(self, width=260)
+
+    def draw(self, context):
+        self.layout.prop(self, "new_name", text="")
+
+    def execute(self, context):
+        img = self.get_image(context)
+        if not img:
+            return {'CANCELLED'}
+        target = self.new_name.strip()
+        if not target:
+            self.report({'ERROR'}, "Name cannot be empty")
+            return {'CANCELLED'}
+        existing = bpy.data.images.get(target)
+        if existing and existing != img:
+            self.report({'ERROR'}, f"Image name '{target}' already exists")
+            return {'CANCELLED'}
+        img.name = target
+        self.report({'INFO'}, f"Renamed image to {img.name}")
+        return {'FINISHED'}
     
 class PAINTSYSTEM_OT_FillImage(PSImageFilterMixin, Operator):
     bl_idname = "paint_system.fill_image"
@@ -387,6 +423,7 @@ classes = [
     PAINTSYSTEM_OT_InvertColors,
     PAINTSYSTEM_OT_ResizeImage,
     PAINTSYSTEM_OT_ClearImage,
+    PAINTSYSTEM_OT_RenameImage,
     PAINTSYSTEM_OT_FillImage,
 ]
 

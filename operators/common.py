@@ -253,7 +253,9 @@ class PSImageCreateMixin(PSUVOptionsMixin):
         if self.coord_type == 'UV':
             ps_ctx = PSContextMixin.parse_context(context)
             use_udim_tiles = get_udim_tiles(ps_ctx.ps_object, self.uv_map_name) != {1001} and self.use_udim_tiles
-            img = create_ps_image(self.image_name, self.image_width, self.image_height, use_udim_tiles=use_udim_tiles, objects=[ps_ctx.ps_object], uv_layer_name=self.uv_map_name, use_float=self.use_float)
+            # Get use_alpha if it exists (from BakeOperator), default to True
+            use_alpha = getattr(self, 'use_alpha', True)
+            img = create_ps_image(self.image_name, self.image_width, self.image_height, use_udim_tiles=use_udim_tiles, objects=[ps_ctx.ps_object], uv_layer_name=self.uv_map_name, use_float=self.use_float, use_alpha=use_alpha)
         else:
             img = create_ps_image(self.image_name, self.image_width, self.image_height, use_float=self.use_float)
         return img

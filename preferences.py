@@ -39,5 +39,5 @@ def get_preferences(context) -> PaintSystemPreferences:
             use_legacy_ui=False,
             show_hsv_sliders_rmb=True,
             show_active_palette_rmb=True,
-            show_rmb_layers_panel=False,
+            show_rmb_layers_panel=True,
         )

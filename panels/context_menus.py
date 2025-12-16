@@ -88,7 +88,7 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, UnifiedPaintPanel, Pane
         wm = context.window_manager
 
         # Two-column layout when layers are enabled
-        show_layers = getattr(prefs, 'show_rmb_layers_panel', True) and ps_ctx and ps_ctx.ps_object
+        show_layers = getattr(prefs, 'show_rmb_layers_panel', True) and ps_ctx and ps_ctx.ps_object and ps_ctx.active_channel
 
         # Default to compact width; widen only when layers are visible
         try:
@@ -243,32 +243,25 @@ class VIEW3D_PT_paintsystem_quick_layers(PSContextMixin, UnifiedPaintPanel, Pane
                 list_row = right_col.row()
                 list_row = scale_content(context, list_row, scale_x=1, scale_y=1.5)
                 list_col = list_row.column()
-                if active_channel:
-                    list_col.template_list(
-                        "MAT_PT_UL_LayerList", "", 
-                        active_channel, "layers", 
-                        active_channel, "active_index",
-                        rows=min(max(6, len(layers)), 7)
-                    )
-                else:
-                    info_col = list_col.column(align=True)
-                    info_col.label(text="No active channel", icon='INFO')
+                list_col.template_list(
+                    "MAT_PT_UL_LayerList", "", 
+                    active_channel, "layers", 
+                    active_channel, "active_index",
+                    rows=min(max(6, len(layers)), 7)
+                )
                 
                 # Layer controls column (matching actual panel)
                 col = list_row.column(align=True)
                 col.scale_x = 1.2
-                if active_channel:
-                    col.operator("wm.call_menu", text="", icon_value=get_icon('layer_add')).name = "MAT_MT_AddLayerMenu"
-                    col.operator("paint_system.new_folder_layer", icon_value=get_icon('folder'), text="")
-                    col.menu("MAT_MT_LayerMenu", text="", icon='COLLAPSEMENU')
-                    from .common import line_separator
-                    line_separator(col)
-                    col.operator("paint_system.delete_item", text="", icon="TRASH")
-                    line_separator(col)
-                    col.operator("paint_system.move_up", icon="TRIA_UP", text="")
-                    col.operator("paint_system.move_down", icon="TRIA_DOWN", text="")
-                else:
-                    col.label(text="", icon='BLANK1')
+                col.operator("wm.call_menu", text="", icon_value=get_icon('layer_add')).name = "MAT_MT_AddLayerMenu"
+                col.operator("paint_system.new_folder_layer", icon_value=get_icon('folder'), text="")
+                col.menu("MAT_MT_LayerMenu", text="", icon='COLLAPSEMENU')
+                from .common import line_separator
+                line_separator(col)
+                col.operator("paint_system.delete_item", text="", icon="TRASH")
+                line_separator(col)
+                col.operator("paint_system.move_up", icon="TRIA_UP", text="")
+                col.operator("paint_system.move_down", icon="TRIA_DOWN", text="")
                 
             except Exception as e:
                 logger.debug(f"Error drawing layers section in RMB menu: {e}")
@@ -301,21 +294,6 @@ class PAINTSYSTEM_OT_open_texpaint_menu(Operator):
                 is_texpaint = bool(getattr(getattr(context, "tool_settings", None), "image_paint", None))
         except Exception:
             is_texpaint = False
-        
-        # Check if stencil mask is active - if so, pass through to allow stencil repositioning
-        if is_texpaint:
-            try:
-                tool_settings = context.tool_settings
-                brush = tool_settings.image_paint.brush if tool_settings and tool_settings.image_paint else None
-                if brush:
-                    # Check if any texture slot has a stencil mapping
-                    for tex_slot in brush.texture_slot, brush.mask_texture_slot:
-                        if tex_slot and tex_slot.map_mode == 'STENCIL':
-                            # Stencil is active, let Blender handle RMB for repositioning
-                            return {'PASS_THROUGH'}
-            except Exception as e:
-                print(f"Paint System RMB: Error checking stencil: {e}")
-        
         if is_texpaint:
             try:
                 bpy.ops.wm.call_panel(name="VIEW3D_PT_paintsystem_quick_layers")

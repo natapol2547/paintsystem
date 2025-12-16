@@ -2,6 +2,9 @@ import bpy
 from bpy.types import Context, Material, Operator, UILayout
 from bpy.utils import register_classes_factory
 from bpy.props import StringProperty, BoolProperty, IntProperty, EnumProperty
+import math
+import os
+from typing import Iterable, Set, Tuple, Dict, List, Optional
 
 from .common import PSContextMixin, PSImageCreateMixin, DEFAULT_PS_UV_MAP_NAME
 
@@ -69,6 +72,13 @@ class BakeOperator(PSContextMixin, PSImageCreateMixin, Operator):
         options={'SKIP_SAVE'}
     )
     
+    use_alpha: BoolProperty(
+        name="Transparent Background",
+        description="Initialize image tiles with transparent background (alpha=0). Uncheck for black background",
+        default=True,
+        options={'SKIP_SAVE'}
+    )
+    
     def find_objects_with_materials(self, context: Context, materials: list[Material]) -> list[bpy.types.Object]:
         objects = []
         for mat in materials:
@@ -95,6 +105,7 @@ class BakeOperator(PSContextMixin, PSImageCreateMixin, Operator):
             split = panel.split(factor=0.4, align=True)
             split.prop(self, "margin", text="Margin")
             split.prop(self, "margin_type", text="")
+            panel.prop(self, "use_alpha")
     
     def other_objects_ui(self, layout: UILayout, context: Context):
         ps_ctx = self.parse_context(context)
@@ -888,6 +899,7 @@ class PAINTSYSTEM_OT_MergeUp(BakeOperator):
         # Set cursor back to default
         context.window.cursor_set('DEFAULT')
         return {'FINISHED'}
+
 
 classes = (
     PAINTSYSTEM_OT_SelectAllBakedObjects,
