@@ -519,26 +519,60 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     chunks = [' '.join(words[j:j+6]) for j in range(0, len(words), 6)]
                     for i, chunk in enumerate(chunks):
                         warnings_col.label(text=chunk, icon='ERROR' if not i else 'BLANK1')
-            if ps_ctx.ps_settings.use_legacy_ui:
-                box = layout.box()
-                layer_settings_ui(box, context)
-            if active_layer.type not in ('IMAGE', 'ADJUSTMENT', 'NODE_GROUP', 'ATTRIBUTE', 'GRADIENT', 'SOLID_COLOR', 'RANDOM', 'TEXTURE', 'GEOMETRY'):
+            # Basic Image + UV/Transform controls inline (outside Advanced)
+            if active_layer.type == 'IMAGE':
+                picker_row = scale_content(context, layout.row(align=True))
+                picker_row.enabled = not active_layer.lock_layer
+                if active_layer.image:
+                    picker_row.prop(active_layer, "image", text="")
+                    picker_row.operator("paint_system.export_image", text="", icon="EXPORT").image_name = active_layer.image.name
+                    picker_row.menu("MAT_MT_ImageMenu", text="", icon='COLLAPSEMENU')
+
+                    # UDIM status indicator
+                    try:
+                        tiles = sorted({t.number for t in active_layer.image.tiles}) if active_layer.image.tiles else []
+                        if len(tiles) > 1:
+                            udim_row = layout.row(align=True)
+                            udim_row.scale_y = 0.8
+                            udim_row.label(text="UDIM tiles: " + ", ".join(str(t) for t in tiles), icon='UV')
+                        elif tiles:
+                            udim_row = layout.row(align=True)
+                            udim_row.scale_y = 0.8
+                            udim_row.label(text=f"UDIM tile: {tiles[0]}", icon='UV')
+                    except Exception:
+                        pass
+                else:
+                    picker_row.template_ID(active_layer, "image", text="", new="image.new", open="image.open")
+
+                transform_row = scale_content(context, layout.row(align=True))
+                transform_row.enabled = not active_layer.lock_layer
+                transform_row.prop(active_layer, "coord_type", text="")
+                match active_layer.coord_type:
+                    case 'UV':
+                        transform_row.prop_search(
+                            active_layer,
+                            "uv_map_name",
+                            text="",
+                            search_data=ps_ctx.ps_object.data,
+                            search_property="uv_layers",
+                            icon='GROUP_UVS'
+                        )
+                        transform_row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
+                    case 'AUTO':
+                        transform_row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
+                    case 'DECAL':
+                        transform_row.prop(active_layer, "empty_object", text="")
+                        transform_row.operator("paint_system.select_empty", text="", icon='OBJECT_ORIGIN')
+                    case 'PROJECT':
+                        transform_row.operator("paint_system.projection_view_reset", text="", icon='CAMERA_DATA')
+                        transform_row.operator("paint_system.set_projection_view", text="", icon='FILE_REFRESH')
+                    case 'PARALLAX':
+                        transform_row.prop(active_layer, "parallax_space", text="")
                 return
-            elif not ps_ctx.ps_settings.use_legacy_ui:
-                box = layout.box()
+            if active_layer.type not in ('ADJUSTMENT', 'NODE_GROUP', 'ATTRIBUTE', 'GRADIENT', 'SOLID_COLOR', 'RANDOM', 'TEXTURE', 'GEOMETRY'):
+                return
+            box = layout.box()
             match active_layer.type:
-                case 'IMAGE':
-                    col = box.column()
-                    scale_content(context, col, 1.2, 1.2)
-                    if not active_layer.external_image:
-                        col.operator("paint_system.quick_edit", text="Edit Externally")
-                    else:
-                        if active_layer.edit_external_mode == 'IMAGE_EDIT':
-                            row = col.row(align=True)
-                            row.operator("paint_system.quick_edit", text="Open Image", icon_value=get_image_editor_icon(context.preferences.filepaths.image_editor))
-                            row.operator("paint_system.reload_image", text="Reload Image", icon="FILE_REFRESH")
-                        elif active_layer.edit_external_mode == 'VIEW_CAPTURE':
-                            col.operator("paint_system.project_apply", text="Apply Edit")
                 case 'ADJUSTMENT':
                     col = box.column()
                     col.enabled = not active_layer.lock_layer
