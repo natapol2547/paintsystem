@@ -10,7 +10,7 @@ class MAT_PT_PaintSystemQuickTools(PSContextMixin, Panel):
     bl_idname = "MAT_PT_PaintSystemQuickTools"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Quick Tools"
+    bl_category = "Paint System"
 
     @classmethod
     def poll(cls, context):
@@ -39,6 +39,7 @@ class MAT_PT_PaintSystemQuickTools(PSContextMixin, Panel):
             'SCULPT_GPENCIL'
         }
         
+        # ===== DISPLAY SECTION =====
         box = layout.box()
         
         # Wireframe toggle
@@ -72,7 +73,7 @@ class MAT_PT_PaintSystemQuickToolsMesh(PSContextMixin, Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_label = "Mesh"
-    bl_category = 'Quick Tools'
+    bl_category = 'Paint System'
     # bl_parent_id = 'MAT_PT_PaintSystemQuickTools'
 
     def draw_header(self, context):
@@ -144,7 +145,7 @@ class MAT_PT_PaintSystemQuickToolsPaint(PSContextMixin, Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_label = "Paint"
-    bl_category = 'Quick Tools'
+    bl_category = 'Paint System'
     # bl_parent_id = 'MAT_PT_PaintSystemQuickTools'
     
     @classmethod
