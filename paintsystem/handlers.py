@@ -223,6 +223,9 @@ def transform_gizmo_mode_handler(scene: bpy.types.Scene, depsgraph: bpy.types.De
         'PAINT_WEIGHT',
         'PAINT_GREASE_PENCIL',
         'SCULPT_GREASE_PENCIL',
+        'PAINT_GPENCIL',
+        'PAINT_GPENCIL_LEGACY',
+        'SCULPT_GPENCIL',
     }
     
     current_mode = obj.mode if (obj and hasattr(obj, 'mode')) else None

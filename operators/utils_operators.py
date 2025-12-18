@@ -273,7 +273,6 @@ class PAINTSYSTEM_OT_RecalculateNormals(Operator):
             bpy.ops.object.mode_set(mode=orig_mode)
         return {'FINISHED'}
 
-
 class PAINTSYSTEM_OT_AddCameraPlane(Operator):
     bl_idname = "paint_system.add_camera_plane"
     bl_label = "Add View Capture Plane"

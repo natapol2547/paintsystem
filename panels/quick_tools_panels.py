@@ -39,7 +39,6 @@ class MAT_PT_PaintSystemQuickTools(PSContextMixin, Panel):
             'SCULPT_GPENCIL'
         }
         
-        # ===== DISPLAY SECTION =====
         box = layout.box()
         
         # Wireframe toggle
@@ -66,8 +65,6 @@ class MAT_PT_PaintSystemQuickTools(PSContextMixin, Panel):
         row.prop(space, "show_gizmo_object_translate", text="", icon='EMPTY_ARROWS')
         row.prop(space, "show_gizmo_object_rotate", text="", icon='FILE_REFRESH')
         row.prop(space, "show_gizmo_object_scale", text="", icon='MOD_MESHDEFORM')
-        
-        # ===== MESH SECTION =====
         box = layout.box()
         row = box.row()
         row.alignment = "CENTER"
