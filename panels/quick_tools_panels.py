@@ -6,7 +6,7 @@ from bpy.utils import register_classes_factory
 
 
 class MAT_PT_PaintSystemQuickTools(PSContextMixin, Panel):
-    bl_label = "Quick Tools"
+    bl_label = "Display"
     bl_idname = "MAT_PT_PaintSystemQuickTools"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
@@ -39,7 +39,6 @@ class MAT_PT_PaintSystemQuickTools(PSContextMixin, Panel):
             'SCULPT_GPENCIL'
         }
         
-        # ===== DISPLAY SECTION =====
         box = layout.box()
         
         # Wireframe toggle
@@ -66,6 +65,28 @@ class MAT_PT_PaintSystemQuickTools(PSContextMixin, Panel):
         row.prop(space, "show_gizmo_object_translate", text="", icon='EMPTY_ARROWS')
         row.prop(space, "show_gizmo_object_rotate", text="", icon='FILE_REFRESH')
         row.prop(space, "show_gizmo_object_scale", text="", icon='MOD_MESHDEFORM')
+
+
+class MAT_PT_PaintSystemQuickToolsMesh(PSContextMixin, Panel):
+    bl_idname = 'MAT_PT_PaintSystemQuickToolsMesh'
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_label = "Mesh"
+    bl_category = 'Quick Tools'
+    # bl_parent_id = 'MAT_PT_PaintSystemQuickTools'
+
+    def draw_header(self, context):
+        layout = self.layout
+        ps_ctx = self.parse_context(context)
+        layout.label(icon="MESH_CUBE")
+
+    def draw(self, context):
+        ps_ctx = self.parse_context(context)
+        obj = ps_ctx.active_object
+        layout = self.layout
+        space = context.area.spaces[0]
+        overlay = space.overlay
+
         box = layout.box()
         row = box.row()
         row.alignment = "CENTER"
@@ -147,6 +168,7 @@ class MAT_PT_PaintSystemQuickToolsPaint(PSContextMixin, Panel):
 
 classes = (
     MAT_PT_PaintSystemQuickTools,
+    MAT_PT_PaintSystemQuickToolsMesh,
     MAT_PT_PaintSystemQuickToolsPaint,
 )
 
