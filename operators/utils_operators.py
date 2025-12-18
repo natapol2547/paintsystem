@@ -104,82 +104,7 @@ class PAINTSYSTEM_OT_NewMaterial(PSContextMixin, MultiMaterialOperator):
 class PAINTSYSTEM_OT_IsolateChannel(PSContextMixin, Operator):
     bl_idname = "paint_system.isolate_active_channel"
     bl_label = "Isolate Channel"
-    bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Isolate the active channel"
-    
-    @classmethod
-    def poll(cls, context):
-        ps_ctx = cls.parse_context(context)
-        return ps_ctx.ps_object is not None and ps_ctx.active_material is not None and ps_ctx.active_channel is not None
-    
-    def execute(self, context):
-        ps_ctx = self.parse_context(context)
-        ps_ctx.active_channel.isolate_channel(context)
-                
-        # Change render mode
-        if bpy.context.space_data.shading.type not in {'RENDERED', 'MATERIAL'}:
-            bpy.context.space_data.shading.type = 'RENDERED'
-        return {'FINISHED'}
 
-
-class PAINTSYSTEM_OT_ToggleBrushEraseAlpha(Operator):
-    bl_idname = "paint_system.toggle_brush_erase_alpha"
-    bl_label = "Toggle Brush Erase Alpha"
-    bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Toggle between brush and erase alpha"
-    
-    @classmethod
-    def poll(cls, context):
-        return context.mode == 'PAINT_TEXTURE'
-
-    def execute(self, context):
-        tool_settings = UnifiedPaintPanel.paint_settings(context)
-
-        if tool_settings is not None:
-            brush = tool_settings.brush
-            if brush is not None:
-                if brush.blend == 'ERASE_ALPHA':
-                    brush.blend = 'MIX'  # Switch back to normal blending
-                else:
-                    brush.blend = 'ERASE_ALPHA'  # Switch to Erase Alpha mode
-        return {'FINISHED'}
-
-
-class PAINTSYSTEM_OT_ColorSample(PSContextMixin, Operator):
-    """Sample the color under the mouse cursor"""
-    bl_idname = "paint_system.color_sample"
-    bl_label = "Color Sample"
-
-    x: IntProperty()
-    y: IntProperty()
-    
-    @classmethod
-    def poll(cls, context):
-        return context.mode == 'PAINT_TEXTURE'
-
-    def execute(self, context):
-        if is_newer_than(4,4):
-            bpy.ops.paint.sample_color('INVOKE_DEFAULT', merged=True, palette=False)
-            return {'FINISHED'}
-
-        x, y = self.x, self.y
-        buffer = gpu.state.active_framebuffer_get()
-        pixel = buffer.read_color(x, y, 1, 1, 3, 0, 'FLOAT')
-        pixel.dimensions = 1 * 1 * 3
-        pix_value = [float(item) for item in pixel]
-
-        tool_settings = UnifiedPaintPanel.paint_settings(context)
-        brush_settings = tool_settings.brush
-        unified_settings = get_unified_settings(context, "use_unified_color")
-
-        brush_settings = tool_settings.brush
-        unified_settings.color = pix_value
-        brush_settings.color = pix_value
-        context.scene.ps_scene_data.update_hsv_color(context)
-        return {'FINISHED'}
-
-    def invoke(self, context, event):
-        self.x = event.mouse_x
         self.y = event.mouse_y
         return self.execute(context)
 
@@ -254,6 +179,81 @@ class PAINTSYSTEM_OT_RecalculateNormals(Operator):
             bpy.ops.object.mode_set(mode=orig_mode)
         return {'FINISHED'}
 
+<<<<<<< HEAD
+=======
+class PAINTSYSTEM_OT_ToggleTransformGizmos(Operator):
+    bl_idname = "paint_system.toggle_transform_gizmos"
+    bl_label = "Toggle Transform Gizmos"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Toggle transform gizmos with mode-aware behavior"
+
+    @classmethod
+    def poll(cls, context):
+        # Must have a 3D View space to toggle gizmos
+        return context.area and context.area.type == 'VIEW_3D'
+
+    def execute(self, context):
+        # Access active 3D view space
+        space = context.area.spaces[0]
+        if space.type != 'VIEW_3D':
+            return {'CANCELLED'}
+
+        wm = context.window_manager
+        
+        # Preserve overlay state before changing gizmos
+        overlay_state = None
+        if hasattr(space, 'overlay'):
+            overlay_state = space.overlay.show_overlays
+        
+        # Check if any gizmo is currently ON
+        current_translate = bool(getattr(space, "show_gizmo_object_translate", False))
+        current_rotate = bool(getattr(space, "show_gizmo_object_rotate", False))
+        current_scale = bool(getattr(space, "show_gizmo_object_scale", False))
+        
+        any_gizmo_on = current_translate or current_rotate or current_scale
+        
+        if any_gizmo_on:
+            # If any gizmo is ON, save their state and turn them all OFF
+            wm["ps_gizmo_translate"] = current_translate
+            wm["ps_gizmo_rotate"] = current_rotate
+            wm["ps_gizmo_scale"] = current_scale
+            # Mark that gizmos are manually toggled OFF
+            wm["ps_gizmo_toggled_off"] = True
+            
+            space.show_gizmo_object_translate = False
+            space.show_gizmo_object_rotate = False
+            space.show_gizmo_object_scale = False
+        else:
+            # If all gizmos are OFF, check if we have saved state to restore
+            has_saved = wm.get("ps_gizmo_translate") is not None
+            if has_saved:
+                # Restore exactly what was saved (not defaults)
+                translate_pref = wm.get("ps_gizmo_translate", False)
+                rotate_pref = wm.get("ps_gizmo_rotate", False)
+                scale_pref = wm.get("ps_gizmo_scale", False)
+            else:
+                # First time - default to just translate and rotate
+                translate_pref = True
+                rotate_pref = True
+                scale_pref = False
+                # Save these defaults
+                wm["ps_gizmo_translate"] = translate_pref
+                wm["ps_gizmo_rotate"] = rotate_pref
+                wm["ps_gizmo_scale"] = scale_pref
+            
+            # Mark that gizmos are manually toggled ON
+            wm["ps_gizmo_toggled_off"] = False
+            
+            space.show_gizmo_object_translate = translate_pref
+            space.show_gizmo_object_rotate = rotate_pref
+            space.show_gizmo_object_scale = scale_pref
+        
+        # Restore overlay state if it was affected
+        if overlay_state is not None and hasattr(space, 'overlay'):
+            space.overlay.show_overlays = overlay_state
+
+        return {'FINISHED'}
+>>>>>>> 23bbfb0 (toggle gizmo)
 
 class PAINTSYSTEM_OT_AddCameraPlane(Operator):
     bl_idname = "paint_system.add_camera_plane"
@@ -540,6 +540,7 @@ classes = (
     PAINTSYSTEM_OT_OpenPaintSystemPreferences,
     PAINTSYSTEM_OT_FlipNormals,
     PAINTSYSTEM_OT_RecalculateNormals,
+    PAINTSYSTEM_OT_ToggleTransformGizmos,
     PAINTSYSTEM_OT_AddCameraPlane,
     PAINTSYSTEM_OT_HidePaintingTips,
     PAINTSYSTEM_OT_DuplicatePaintSystemData,
