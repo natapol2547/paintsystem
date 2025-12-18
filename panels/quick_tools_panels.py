@@ -39,6 +39,7 @@ class MAT_PT_PaintSystemQuickTools(PSContextMixin, Panel):
             'SCULPT_GPENCIL'
         }
         
+        # ===== DISPLAY SECTION =====
         box = layout.box()
         
         # Wireframe toggle
@@ -122,7 +123,7 @@ class MAT_PT_PaintSystemQuickToolsPaint(PSContextMixin, Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_label = "Paint"
-    bl_category = 'Quick Tools'
+    bl_category = 'Paint System'
     # bl_parent_id = 'MAT_PT_PaintSystemQuickTools'
     
     @classmethod

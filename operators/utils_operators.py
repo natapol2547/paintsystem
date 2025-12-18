@@ -273,6 +273,67 @@ class PAINTSYSTEM_OT_RecalculateNormals(Operator):
             bpy.ops.object.mode_set(mode=orig_mode)
         return {'FINISHED'}
 
+
+class PAINTSYSTEM_OT_ToggleTransformGizmos(Operator):
+    bl_idname = "paint_system.toggle_transform_gizmos"
+    bl_label = "Toggle Transform Gizmos"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Toggle transform gizmos with mode-aware behavior"
+
+    @classmethod
+    def poll(cls, context):
+        return context.area and context.area.type == 'VIEW_3D'
+
+    def execute(self, context):
+        space = context.area.spaces[0]
+        if space.type != 'VIEW_3D':
+            return {'CANCELLED'}
+
+        wm = context.window_manager
+        overlay_state = None
+        if hasattr(space, 'overlay'):
+            overlay_state = space.overlay.show_overlays
+
+        current_translate = bool(getattr(space, "show_gizmo_object_translate", False))
+        current_rotate = bool(getattr(space, "show_gizmo_object_rotate", False))
+        current_scale = bool(getattr(space, "show_gizmo_object_scale", False))
+
+        any_gizmo_on = current_translate or current_rotate or current_scale
+
+        if any_gizmo_on:
+            wm["ps_gizmo_translate"] = current_translate
+            wm["ps_gizmo_rotate"] = current_rotate
+            wm["ps_gizmo_scale"] = current_scale
+            wm["ps_gizmo_toggled_off"] = True
+
+            space.show_gizmo_object_translate = False
+            space.show_gizmo_object_rotate = False
+            space.show_gizmo_object_scale = False
+        else:
+            has_saved = wm.get("ps_gizmo_translate") is not None
+            if has_saved:
+                translate_pref = wm.get("ps_gizmo_translate", False)
+                rotate_pref = wm.get("ps_gizmo_rotate", False)
+                scale_pref = wm.get("ps_gizmo_scale", False)
+            else:
+                translate_pref = True
+                rotate_pref = True
+                scale_pref = False
+                wm["ps_gizmo_translate"] = translate_pref
+                wm["ps_gizmo_rotate"] = rotate_pref
+                wm["ps_gizmo_scale"] = scale_pref
+
+            wm["ps_gizmo_toggled_off"] = False
+
+            space.show_gizmo_object_translate = translate_pref
+            space.show_gizmo_object_rotate = rotate_pref
+            space.show_gizmo_object_scale = scale_pref
+
+        if overlay_state is not None and hasattr(space, 'overlay'):
+            space.overlay.show_overlays = overlay_state
+
+        return {'FINISHED'}
+
 class PAINTSYSTEM_OT_AddCameraPlane(Operator):
     bl_idname = "paint_system.add_camera_plane"
     bl_label = "Add View Capture Plane"
@@ -523,15 +584,19 @@ class PAINTSYSTEM_OT_ToggleImageEditor(PSContextMixin, Operator):
             execute_operator_in_area(new_area, 'image.view_all', fit_view=True)
 
         return {'FINISHED'}
-        if image:
-            space = new_area.spaces[0]
-            space.show_region_ui = True
-            space.image = image
-            space.ui_mode = 'PAINT'
-            space.overlay.show_overlays = active_layer.coord_type in {'AUTO', 'UV'}
-            execute_operator_in_area(new_area, 'image.view_all', fit_view=True)
-        return ps_ctx.active_group is not None
-    
+
+
+class PAINTSYSTEM_OT_FocusPSNode(PSContextMixin, Operator):
+    bl_idname = "paint_system.focus_ps_node"
+    bl_label = "Focus Paint System Node"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Open Shader Editor and focus active Paint System node group"
+
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_group is not None and ps_ctx.active_material is not None
+
     def execute(self, context):
         ps_ctx = self.parse_context(context)
         active_group = ps_ctx.active_group
@@ -585,7 +650,6 @@ classes = (
     PAINTSYSTEM_OT_AddCameraPlane,
     PAINTSYSTEM_OT_HidePaintingTips,
     PAINTSYSTEM_OT_DuplicatePaintSystemData,
-    PAINTSYSTEM_OT_ToggleTransformGizmos,
     PAINTSYSTEM_OT_ToggleImageEditor,
     PAINTSYSTEM_OT_FocusPSNode,
 )
@@ -611,9 +675,13 @@ def register():
             print(f"Paint System: Operators already registered (module reload): {e}")
         else:
             raise
+
+    wm = bpy.context.window_manager
+    kc = wm.keyconfigs.addon
+    if kc:
         km = kc.keymaps.new(name="3D View", space_type='VIEW_3D')
-            PAINTSYSTEM_OT_ToggleImageEditor,
-            PAINTSYSTEM_OT_ColorSample.bl_idname, 'I', 'PRESS', repeat=True)
+        kmi = km.keymap_items.new(
+            PAINTSYSTEM_OT_ToggleImageEditor.bl_idname, type='I', value='PRESS', repeat=True)
         addon_keymaps.append((km, kmi))
         kmi = km.keymap_items.new(
             PAINTSYSTEM_OT_ToggleBrushEraseAlpha.bl_idname, type='E', value='PRESS')
