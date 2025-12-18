@@ -242,6 +242,91 @@ class MAT_MT_PaintSystemMergeAndExport(PSContextMixin, Menu):
         if not ps_ctx.ps_settings.use_legacy_ui:
             layout.operator("paint_system.export_all_images", text="Export All Channels", icon='EXPORT')
 
+
+class MAT_PT_ChannelsPopover(PSContextMixin, Panel):
+    bl_idname = 'MAT_PT_ChannelsPopover'
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_label = "Channels"
+    bl_ui_units_x = 12
+
+    def draw(self, context):
+        layout = self.layout
+        ps_ctx = self.parse_context(context)
+        if not ps_ctx.active_group:
+            layout.label(text="No Active Group")
+            return
+        
+        from .channels_panels import PAINTSYSTEM_UL_channels
+        
+        col = layout.column(align=True)
+        row = col.row()
+        row.template_list(
+            "PAINTSYSTEM_UL_channels", 
+            "",
+            ps_ctx.active_group,
+            "channels", 
+            ps_ctx.active_group,
+            "active_index",
+            rows=max(len(ps_ctx.active_group.channels), 3),
+        )
+        col = row.column(align=True)
+        col.operator("paint_system.add_channel", icon='ADD', text="")
+        col.operator("paint_system.delete_channel", icon='REMOVE', text="")
+        col.operator("paint_system.move_channel_up", icon='TRIA_UP', text="")
+        col.operator("paint_system.move_channel_down", icon='TRIA_DOWN', text="")
+        
+        # Channel Settings
+        active_channel = ps_ctx.active_channel
+        if active_channel:
+            layout.separator()
+            settings_col = layout.column(align=True)
+            settings_col.use_property_split = True
+            settings_col.use_property_decorate = False
+            
+            # Bake image section
+            if active_channel.bake_image:
+                row = settings_col.row(align=True)
+                row.prop(active_channel, "use_bake_image", text="Use Baked Image", icon="TEXTURE_DATA")
+                row.operator("paint_system.delete_bake_image", text="", icon="TRASH")
+                if active_channel.type == "VECTOR":
+                    settings_col.prop(active_channel, "bake_vector_space", text="")
+                return
+            
+            # Channel settings
+            box = settings_col.box()
+            col = box.column()
+            col.label(text="Settings:", icon="SETTINGS")
+            col.prop(active_channel, "type", text="Type")
+            col.prop(active_channel, "color_space", text="Color Space")
+            col.prop(active_channel, "use_alpha", text="Use Alpha")
+            
+            if active_channel.use_alpha:
+                group_node = ps_ctx.active_group.get_group_node(ps_ctx.active_material.node_tree)
+                if group_node:
+                    socket = group_node.inputs[f"{active_channel.name} Alpha"]
+                    if socket.enabled and len(socket.links) == 0:
+                        col.prop(socket, "default_value", text="Alpha")
+            
+            # Vector settings
+            if active_channel.type == "VECTOR":
+                box = settings_col.box()
+                col = box.column()
+                col.use_property_split = False
+                col.prop(active_channel, "vector_space", text="")
+                col.prop(active_channel, "normalize_input", text="Normalize Input")
+            
+            # Float settings
+            if active_channel.type == "FLOAT":
+                box = settings_col.box()
+                col = box.column()
+                col.label(text="Float Input Settings:", icon="SETTINGS")
+                col.use_property_split = False
+                col.prop(active_channel, "use_max_min")
+                if active_channel.use_max_min:
+                    col.prop(active_channel, "factor_min")
+                    col.prop(active_channel, "factor_max")
+
 class MAT_PT_Layers(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_Layers'
     bl_space_type = "VIEW_3D"
