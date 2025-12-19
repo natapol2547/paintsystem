@@ -85,6 +85,8 @@ class MAT_PT_Brush(PSContextMixin, Panel, UnifiedPaintPanel):
             
     def draw(self, context):
         layout = self.layout
+        layout.use_property_split = False
+        layout.use_property_decorate = False
         ps_ctx = self.parse_context(context)
         settings = self.paint_settings(context)
         brush = settings.brush
@@ -290,6 +292,106 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
             sub_row.operator("paint.brush_colors_flip", icon='FILE_REFRESH', text="")
 
 
+class MAT_PT_TexPaintRMBMenu(PSContextMixin, Panel, UnifiedPaintPanel):
+    """Right-click menu for Texture Paint mode with color wheel and brush options"""
+    bl_idname = "MAT_PT_TexPaintRMBMenu"
+    bl_label = "Paint System"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "WINDOW"
+    bl_options = {"INSTANCED"}
+    bl_ui_units_x = 10
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'PAINT_TEXTURE'
+
+    def draw(self, context):
+        from ..preferences import addon_package
+        
+        layout = self.layout
+        ps_ctx = self.parse_context(context)
+        settings = self.paint_settings(context)
+        
+        if not settings:
+            layout.label(text="No paint settings available", icon='ERROR')
+            return
+            
+        brush = settings.brush
+        if not brush:
+            layout.label(text="No brush selected", icon='ERROR')
+            return
+        
+        # Get preferences
+        prefs = context.preferences.addons.get(addon_package())
+        show_hsv = prefs.preferences.show_hsv_sliders_rmb if prefs else True
+        show_palette = prefs.preferences.show_active_palette_rmb if prefs else True
+        show_brush_controls = prefs.preferences.show_brush_settings_rmb if prefs else True
+        color_wheel_scale = prefs.preferences.color_picker_scale_rmb if prefs else 1.2
+
+        # Guard against invalid picker enum values saved from older versions (e.g. "CIRCLE")
+        view = context.preferences.view
+        allowed_picker_types = {"CIRCLE_HSV", "CIRCLE_HSL", "SQUARE_SV", "SQUARE_HS", "SQUARE_HV"}
+        if view.color_picker_type not in allowed_picker_types:
+            view.color_picker_type = "CIRCLE_HSV"
+        
+        # Color settings container
+        color_box = layout.box()
+        color_col = color_box.column(align=True)
+
+        # Color wheel
+        row = color_col.row()
+        row.scale_y = color_wheel_scale
+        prop_owner = get_unified_settings(context, "use_unified_color")
+        row.template_color_picker(prop_owner, "color", value_slider=True)
+
+        # Color swatches with sample buttons tucked on the right
+        swatch_row = color_col.row(align=True)
+        swatch_row.scale_y = 1.05
+        swatch_col = swatch_row.column(align=True)
+        swatch_inner = swatch_col.row(align=True)
+        self.prop_unified_color(swatch_inner, context, brush, "color", text="")
+        self.prop_unified_color(swatch_inner, context, brush, "secondary_color", text="")
+        swatch_inner.operator("paint.brush_colors_flip", icon='FILE_REFRESH', text="")
+        sample_col = swatch_row.column(align=True)
+        sample_col.scale_y = 0.95
+        sample_col.alignment = 'RIGHT'
+        # primary_sample = sample_col.operator("paint_system.color_sampler", text="", icon='EYEDROPPER')
+
+        # HSV sliders (optional based on preferences)
+        if show_hsv and ps_ctx.ps_scene_data:
+            sub_col = color_col.column(align=True)
+            if not context.preferences.view.color_picker_type == "SQUARE_SV":
+                sub_col.prop(ps_ctx.ps_scene_data, "hue", text="Hue")
+            sub_col.prop(ps_ctx.ps_scene_data, "saturation", text="Saturation")
+            sub_col.prop(ps_ctx.ps_scene_data, "value", text="Value")
+
+        # Palette selection and history remain with color settings
+        # if show_palette:
+        #     color_col.separator()
+        #     color_col.template_ID(settings, "palette", new="palette.new")
+        #     if settings.palette:
+        #         color_col.template_palette(settings, "palette", color=True)
+
+        if show_brush_controls:
+            # Brush settings container
+            brush_box = layout.box()
+            brush_col = brush_box.column(align=True)
+            self.prop_unified(
+                brush_col, context, brush, "size",
+                unified_name="use_unified_size",
+                pressure_name="use_pressure_size",
+                text="Radius",
+                slider=True,
+            )
+            self.prop_unified(
+                brush_col, context, brush, "strength",
+                unified_name="use_unified_strength",
+                pressure_name="use_pressure_strength",
+                text="Strength",
+                slider=True,
+            )
+
+
 def draw_paint_system_material(self, context):
     layout = self.layout
     ps_ctx = PSContextMixin.parse_context(context)
@@ -308,6 +410,7 @@ classes = (
     MAT_PT_Brush,
     MAT_PT_BrushColorSettings,
     MAT_PT_BrushColor,
+    MAT_PT_TexPaintRMBMenu,
 )
 
 _register, _unregister = register_classes_factory(classes)
