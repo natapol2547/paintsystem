@@ -3,6 +3,7 @@ from bpy.utils import register_submodule_factory
 from .context import PSContextMixin
 
 submodules = [
+    "switch_panel",
     "data",
     "handlers",
     # "graph",

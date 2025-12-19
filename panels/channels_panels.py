@@ -208,10 +208,10 @@ class MAT_PT_ChannelsSettings(PSContextMixin, Panel):
 
 classes = (
     MAT_MT_PaintSystemChannelsMergeAndExport,
-    PAINTSYSTEM_UL_channels,
-    MAT_PT_ChannelsSelect,
-    MAT_PT_ChannelsPanel,
-    MAT_PT_ChannelsSettings,
+    # PAINTSYSTEM_UL_channels,
+    # MAT_PT_ChannelsSelect,
+    # MAT_PT_ChannelsPanel,
+    # MAT_PT_ChannelsSettings,
 )
 
 register, unregister = register_classes_factory(classes)

@@ -1,5 +1,8 @@
 import bpy
 
+from ..custom_icons import get_icon
+
+from .switch_panel import SwitchPanelManager
 from .version_check import get_latest_version
 from .data import get_global_layer, sort_actions, parse_context, get_all_layers, is_valid_uuidv4
 from .image import save_image
@@ -40,7 +43,8 @@ def frame_change_pre(scene):
             layer.enabled = enabled
 
 
-def load_paint_system_data(scene: bpy.types.Scene):
+def load_paint_system_data():
+    scene = bpy.context.scene
     print(f"Loading Paint System data...")
     start_time = time.time()
     if not hasattr(scene, 'ps_scene_data'):
@@ -154,27 +158,33 @@ def load_paint_system_data(scene: bpy.types.Scene):
             
     print(f"Paint System: Checked {len(checked_layers)} layers in {round((time.time() - start_time) * 1000, 2)} ms")
 
+def create_paint_mode_switch_panel():
+    scene = bpy.context.scene
+    ps_scene_data = scene.ps_scene_data
+    if len(ps_scene_data.paint_switch_panels) == 0:
+        print(f"Creating paint mode switch panel")
+        paint_mode_switch_panel_manager = SwitchPanelManager(ps_scene_data, 'paint_switch_panels', ps_scene_data, 'paint_switch_panels_active_index')
+        paint_mode_switch_panel_manager.add_switch_panel("Brush", custom_icon='brush')
+        paint_mode_switch_panel_manager.add_switch_panel("Color", custom_icon='color')
+        paint_mode_switch_panel_manager.set_active_switch_panel("Color")
 
-@bpy.app.handlers.persistent
-def load_post(scene):
-    
-    # Ensure color history palette is created
-    if not hasattr(scene, 'ps_scene_data'):
-        return
+def create_color_history_palette():
+    scene = bpy.context.scene
     ps_scene_data = scene.ps_scene_data
     if not ps_scene_data.color_history_palette:
         palette_name = "Paint System History"
         palette = bpy.data.palettes.get(palette_name)
         if not palette:
             palette = bpy.data.palettes.new(palette_name)
-    
-    load_paint_system_data(scene)
-    # Check for donation info
+        ps_scene_data.color_history_palette = palette
+
+@bpy.app.handlers.persistent
+def load_post(scene):
+    load_paint_system_data()
     # get_donation_info()
-    # if donation_info:
-    #     print(f"Donation info: {donation_info}")
-    # Check for version check
     get_latest_version()
+    create_paint_mode_switch_panel()
+    create_color_history_palette()
 
 @bpy.app.handlers.persistent
 def save_handler(scene: bpy.types.Scene):
@@ -325,6 +335,10 @@ def brush_color_callback(*args):
         hex_color = "#{:02x}{:02x}{:02x}".format(r, g, b).upper()
         context.scene.ps_scene_data.hex_color = hex_color
 
+def mode_change_callback(*args):
+    brush_color_callback()
+    create_paint_mode_switch_panel()
+
 
 def register():
     bpy.app.handlers.frame_change_pre.append(frame_change_pre)
@@ -354,7 +368,7 @@ def register():
         key=(bpy.types.Object, "mode"),
         owner=owner,
         args=(None,),
-        notify=brush_color_callback,
+        notify=mode_change_callback,
     )
 
 def unregister():

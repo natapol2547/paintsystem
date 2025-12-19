@@ -34,6 +34,7 @@ from typing import Optional
 from mathutils import Color, Euler, Vector
 
 from .image import blender_image_to_numpy, set_image_pixels, save_image, ImageTiles
+from .switch_panel import SwitchPanelItem
 
 from .list_manager import ListManager
 
@@ -2399,6 +2400,12 @@ class PaintSystemGlobalData(PropertyGroup):
             brush_color.g = color[1]
             brush_color.b = color[2]
     
+    
+    paint_switch_panels: CollectionProperty(
+        name="Main Switch Panel",
+        type=SwitchPanelItem
+    )
+    paint_switch_panels_active_index: IntProperty(name="Main Switch Panels Active Index")
     
     clipboard_layers: CollectionProperty(
         type=ClipboardLayer,
