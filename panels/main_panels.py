@@ -433,19 +433,20 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
             # row = align_center(layout)
             # row.label(text=f"{mode_name} Tools", icon_value=get_icon("paintbrush"))
             line_separator(layout)
-            main_switch_panel_manager = SwitchPanelManager(ps_ctx.ps_scene_data, 'paint_switch_panels', ps_ctx.ps_scene_data, 'paint_switch_panels_active_index')
-            main_switch_panel_manager.switch_panel_ui(layout, context)
-            
-            active_panel = main_switch_panel_manager.get_active_switch_panel()
+            main_spm = SwitchPanelManager(ps_ctx.ps_scene_data, 'paint_switch_panels', ps_ctx.ps_scene_data, 'paint_switch_panels_active_index')
+            headers, panels = main_spm.switch_panel_ui(layout, context)
+            header = headers[main_spm.active_index]
+            panel = panels[main_spm.active_index]
+            active_panel = main_spm.get_active_switch_panel()
             if not active_panel:
                 return
             active_panel_name = active_panel.name
-            layout.use_property_split = False
+            panel.use_property_split = False
             if active_panel_name == "Brush":
-                draw_brush_settings_panel(layout, context)
+                draw_brush_settings_panel(panel, context)
                 return
             elif active_panel_name == "Color":
-                draw_color_settings_panel(layout, context)
+                draw_color_settings_panel(panel, context)
                 return
 
 classes = (

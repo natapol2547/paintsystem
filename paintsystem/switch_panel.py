@@ -101,18 +101,26 @@ class SwitchPanelManager():
     def switch_panel_ui(self, layout: bpy.types.UILayout, context: bpy.types.Context):
         if len(self.collection) == 0:
             return
-        row = layout.row(align=True)
+        headers = []
+        panels = []
         for switch_panel in self.collection:
+            col = layout.column()
+            row = col.row(align=True)
+            row.alignment = 'LEFT'
             op_params = {
                 "operator": "paint_system.set_active_switch_panel",
-                "text": switch_panel.name,
-                "depress": switch_panel.enabled,
+                "emboss": False,
             }
+            row.operator(**op_params, text="", icon="DOWNARROW_HLT" if switch_panel.enabled else "RIGHTARROW").switch_panel_name = switch_panel.name
+            op_params["text"] = switch_panel.name
             if switch_panel.icon:
                 op_params["icon"] = switch_panel.icon
             if switch_panel.custom_icon:
                 op_params["icon_value"] = get_icon(switch_panel.custom_icon)
             row.operator(**op_params).switch_panel_name = switch_panel.name
+            headers.append(row)
+            panels.append(col)
+        return headers, panels
 
 classes = (
     SwitchPanelItem,
