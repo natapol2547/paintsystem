@@ -250,8 +250,11 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
             row = col.row()
             row.prop(settings, "color_mode", expand=True)
             use_unified_paint = (context.object.mode != 'PAINT_GREASE_PENCIL')
-            ups = context.tool_settings.unified_paint_settings
-            prop_owner = ups if use_unified_paint and ups.use_unified_color else brush
+            if hasattr(context.tool_settings, "unified_paint_settings"):
+                ups = context.tool_settings.unified_paint_settings
+                prop_owner = ups if use_unified_paint and ups.use_unified_color else brush
+            else:
+                prop_owner = brush
             enable_color_picker = settings.color_mode == 'VERTEXCOLOR'
             if not enable_color_picker:
                 ma = ps_ctx.ps_object.active_material

@@ -521,11 +521,29 @@ def ensure_udim_tiles(image: bpy.types.Image, objects: list[bpy.types.Object], u
         if tile.channels == 0:
             image.tiles.remove(tile)
 
+    tile_new_fn = getattr(image.tiles, "new", None)
     for tile_number in udim_tiles:
         if any(tile_number == tile.number for tile in image.tiles):
             continue
-        with bpy.context.temp_override(edit_image=image):
-            bpy.ops.image.tile_add(number=tile_number, color=(0, 0, 0, 0), width=width, height=height)
+        created = False
+        if callable(tile_new_fn):
+            # Blender 4.0+ exposes image.tiles.new which works without operator context
+            for call in (
+                lambda: tile_new_fn(tile_number),
+                lambda: tile_new_fn(number=tile_number),
+            ):
+                try:
+                    call()
+                    created = True
+                    break
+                except TypeError:
+                    continue
+                except RuntimeError:
+                    continue
+        if not created:
+            # Fallback to operator for older versions
+            with bpy.context.temp_override(edit_image=image):
+                bpy.ops.image.tile_add(number=tile_number, color=(0, 0, 0, 0), width=width, height=height)
     # Delete unused tiles
     for tile in image.tiles:
         if tile.number not in udim_tiles:
@@ -2231,7 +2249,10 @@ class Group(PropertyGroup):
         
         expected_sockets: List[ExpectedSocket] = []
         for channel in self.channels:
-            expected_sockets.append(ExpectedSocket(channel.name, f"NodeSocket{channel.type.title()}", channel.use_max_min, channel.factor_min, channel.factor_max))
+            # Map channel type to valid socket type
+            type_map = {"COLOR": "NodeSocketColor", "VECTOR": "NodeSocketVector", "FLOAT": "NodeSocketFloat"}
+            socket_type = type_map.get(channel.type, "NodeSocketColor")
+            expected_sockets.append(ExpectedSocket(channel.name, socket_type, channel.use_max_min, channel.factor_min, channel.factor_max))
             if channel.use_alpha:
                 expected_sockets.append(ExpectedSocket(f"{channel.name} Alpha", "NodeSocketFloat", True, 0, 1))
         

@@ -321,6 +321,30 @@ class PAINTSYSTEM_OT_DuplicatePaintSystemData(PSContextMixin, MultiMaterialOpera
         
         for group in ps_mat_data.groups:
             original_node_tree = group.node_tree
+            
+            # Store links connected to the original node group before replacing
+            group_nodes = [n for n in mat.node_tree.nodes if n.type == 'GROUP' and n.node_tree == original_node_tree]
+            relink_map = {}
+            for node_group in group_nodes:
+                input_links = []
+                output_links = []
+                for input_socket in node_group.inputs[:]:
+                    for link in input_socket.links:
+                        input_links.append({
+                            'from_socket': link.from_socket,
+                            'dest_name': getattr(input_socket, "name", None),
+                        })
+                for output_socket in node_group.outputs[:]:
+                    for link in output_socket.links:
+                        output_links.append({
+                            'to_socket': link.to_socket,
+                            'src_name': getattr(link.from_socket, "name", None),
+                        })
+                relink_map[node_group] = {
+                    'input_links': input_links,
+                    'output_links': output_links,
+                }
+            
             node_tree = bpy.data.node_groups.new(name=f"Paint System ({mat.name})", type='ShaderNodeTree')
             group.node_tree = node_tree
             for channel in group.channels:
@@ -334,10 +358,20 @@ class PAINTSYSTEM_OT_DuplicatePaintSystemData(PSContextMixin, MultiMaterialOpera
                 channel.update_node_tree(context)
             group.update_node_tree(context)
             
-            # Find node group that uses the original node tree
-            for node in mat.node_tree.nodes:
-                if node.type == 'GROUP' and node.node_tree == original_node_tree:
-                    node.node_tree = group.node_tree
+            # Reconnect the sockets using stored endpoints
+            from bpy_extras.node_utils import connect_sockets
+            for node_group, links in relink_map.items():
+                node_group.node_tree = group.node_tree
+                for link in links['input_links']:
+                    dest_name = link.get('dest_name')
+                    from_socket = link.get('from_socket')
+                    if dest_name and dest_name in node_group.inputs and from_socket:
+                        connect_sockets(from_socket, node_group.inputs[dest_name])
+                for link in links['output_links']:
+                    src_name = link.get('src_name')
+                    to_socket = link.get('to_socket')
+                    if src_name and src_name in node_group.outputs and to_socket:
+                        connect_sockets(node_group.outputs[src_name], to_socket)
         redraw_panel(context)
         return {'FINISHED'}
 
