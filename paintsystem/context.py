@@ -27,7 +27,7 @@ class PSContext:
     unlinked_layer: "Layer" | None = None
     active_global_layer: "GlobalLayer" | None = None
 
-def get_global_layer(layer: "Layer") -> "GlobalLayer" | None:
+def get_legacy_global_layer(layer: "Layer") -> "GlobalLayer" | None:
     """Get the global layer data from the context."""
     if not layer or not bpy.context.scene or not bpy.context.scene.ps_scene_data:
         return None
@@ -114,7 +114,7 @@ def parse_context(context: bpy.types.Context) -> PSContext:
         active_channel=active_channel,
         active_layer=unlinked_layer.get_layer_data() if unlinked_layer else None,
         unlinked_layer=unlinked_layer,
-        active_global_layer=get_global_layer(unlinked_layer) if unlinked_layer else None
+        active_global_layer=get_legacy_global_layer(unlinked_layer) if unlinked_layer else None
     )
 
 class PSContextMixin:

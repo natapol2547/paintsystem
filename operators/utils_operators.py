@@ -158,31 +158,29 @@ class PAINTSYSTEM_OT_ColorSampler(PSContextMixin, Operator):
     
     @classmethod
     def poll(cls, context):
-        return context.mode == 'PAINT_TEXTURE'
+        return context.area.type == 'VIEW_3D' and context.mode == 'PAINT_TEXTURE'
 
     def execute(self, context):
         if is_newer_than(4,4):
-            bpy.ops.paint.sample_color('INVOKE_DEFAULT', merged=True)
+            bpy.ops.paint.sample_color('INVOKE_DEFAULT', merged=True, palette=False)
+            context.scene.ps_scene_data.update_hsv_color(context)
             return {'FINISHED'}
-        # Get the screen dimensions
-        x, y = self.x, self.y
 
+        x, y = self.x, self.y
         buffer = gpu.state.active_framebuffer_get()
         pixel = buffer.read_color(x, y, 1, 1, 3, 0, 'FLOAT')
         pixel.dimensions = 1 * 1 * 3
         pix_value = [float(item) for item in pixel]
 
         tool_settings = UnifiedPaintPanel.paint_settings(context)
+        brush_settings = tool_settings.brush
         unified_settings = get_unified_settings(context, "use_unified_color")
+
         brush_settings = tool_settings.brush
         unified_settings.color = pix_value
         brush_settings.color = pix_value
-
+        context.scene.ps_scene_data.update_hsv_color(context)
         return {'FINISHED'}
-
-    @classmethod
-    def poll(cls, context):
-        return context.area.type == 'VIEW_3D' and context.mode == 'PAINT_TEXTURE'
 
     def invoke(self, context, event):
         self.x = event.mouse_x
@@ -321,6 +319,30 @@ class PAINTSYSTEM_OT_DuplicatePaintSystemData(PSContextMixin, MultiMaterialOpera
         
         for group in ps_mat_data.groups:
             original_node_tree = group.node_tree
+            
+            # Store links connected to the original node group before replacing
+            group_nodes = [n for n in mat.node_tree.nodes if n.type == 'GROUP' and n.node_tree == original_node_tree]
+            relink_map = {}
+            for node_group in group_nodes:
+                input_links = []
+                output_links = []
+                for input_socket in node_group.inputs[:]:
+                    for link in input_socket.links:
+                        input_links.append({
+                            'from_socket': link.from_socket,
+                            'dest_name': getattr(input_socket, "name", None),
+                        })
+                for output_socket in node_group.outputs[:]:
+                    for link in output_socket.links:
+                        output_links.append({
+                            'to_socket': link.to_socket,
+                            'src_name': getattr(link.from_socket, "name", None),
+                        })
+                relink_map[node_group] = {
+                    'input_links': input_links,
+                    'output_links': output_links,
+                }
+            
             node_tree = bpy.data.node_groups.new(name=f"Paint System ({mat.name})", type='ShaderNodeTree')
             group.node_tree = node_tree
             for channel in group.channels:
@@ -334,11 +356,76 @@ class PAINTSYSTEM_OT_DuplicatePaintSystemData(PSContextMixin, MultiMaterialOpera
                 channel.update_node_tree(context)
             group.update_node_tree(context)
             
-            # Find node group that uses the original node tree
-            for node in mat.node_tree.nodes:
-                if node.type == 'GROUP' and node.node_tree == original_node_tree:
-                    node.node_tree = group.node_tree
+            # Reconnect the sockets using stored endpoints
+            from bpy_extras.node_utils import connect_sockets
+            for node_group, links in relink_map.items():
+                node_group.node_tree = group.node_tree
+                for link in links['input_links']:
+                    dest_name = link.get('dest_name')
+                    from_socket = link.get('from_socket')
+                    if dest_name and dest_name in node_group.inputs and from_socket:
+                        connect_sockets(from_socket, node_group.inputs[dest_name])
+                for link in links['output_links']:
+                    src_name = link.get('src_name')
+                    to_socket = link.get('to_socket')
+                    if src_name and src_name in node_group.outputs and to_socket:
+                        connect_sockets(node_group.outputs[src_name], to_socket)
         redraw_panel(context)
+        return {'FINISHED'}
+
+
+class PAINTSYSTEM_OT_ToggleTransformGizmos(Operator):
+    bl_idname = "paint_system.toggle_transform_gizmos"
+    bl_label = "Toggle Transform Gizmos"
+    bl_options = {'REGISTER'}
+    bl_description = "Toggle transform gizmos on/off with state memory for paint mode"
+
+    def execute(self, context):
+        space = context.area.spaces[0] if context.area and context.area.spaces else None
+        if not space or space.type != 'VIEW_3D':
+            return {'CANCELLED'}
+        
+        wm = context.window_manager
+        obj = context.active_object
+        
+        # Determine current gizmo state
+        gizmos_enabled = (space.show_gizmo_object_translate or
+                         space.show_gizmo_object_rotate or
+                         space.show_gizmo_object_scale)
+        
+        # Treat paint, sculpt, vertex/weight paint, and GP draw modes the same for gizmos
+        paint_like_modes = {
+            'PAINT_TEXTURE',
+            'SCULPT',
+            'PAINT_VERTEX',
+            'PAINT_WEIGHT',
+            'PAINT_GPENCIL',
+            'PAINT_GPENCIL_LEGACY',
+            'PAINT_GREASE_PENCIL',
+        }
+        in_paint_mode = obj and obj.mode in paint_like_modes
+        
+        if in_paint_mode:
+            # Store current gizmo state before entering paint mode
+            wm["ps_gizmo_translate"] = space.show_gizmo_object_translate
+            wm["ps_gizmo_rotate"] = space.show_gizmo_object_rotate
+            wm["ps_gizmo_scale"] = space.show_gizmo_object_scale
+            # Keep gizmos disabled during paint mode
+            space.show_gizmo_object_translate = False
+            space.show_gizmo_object_rotate = False
+            space.show_gizmo_object_scale = False
+        else:
+            # Not in paint mode - toggle gizmos normally
+            new_state = not gizmos_enabled
+            space.show_gizmo_object_translate = new_state
+            space.show_gizmo_object_rotate = new_state
+            space.show_gizmo_object_scale = new_state
+        
+        # Redraw the viewport
+        for area in context.screen.areas:
+            if area.type == 'VIEW_3D':
+                area.tag_redraw()
+        
         return {'FINISHED'}
 
 
@@ -356,26 +443,13 @@ classes = (
     PAINTSYSTEM_OT_AddCameraPlane,
     PAINTSYSTEM_OT_HidePaintingTips,
     PAINTSYSTEM_OT_DuplicatePaintSystemData,
+    PAINTSYSTEM_OT_ToggleTransformGizmos,
 )
-
-addon_keymaps = []
 
 _register, _unregister = register_classes_factory(classes)
 
 def register():
     _register()
-    wm = bpy.context.window_manager
-    kc = wm.keyconfigs.addon
-    if kc:
-        km = kc.keymaps.new(name="3D View", space_type='VIEW_3D')
-        kmi = km.keymap_items.new(
-            PAINTSYSTEM_OT_ColorSampler.bl_idname, 'I', 'PRESS', repeat=True)
-        kmi = km.keymap_items.new(
-            PAINTSYSTEM_OT_ToggleBrushEraseAlpha.bl_idname, type='E', value='PRESS')
-        addon_keymaps.append((km, kmi))
 
 def unregister():
-    for km, kmi in addon_keymaps:
-        km.keymap_items.remove(kmi)
-    addon_keymaps.clear()
     _unregister()

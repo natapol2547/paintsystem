@@ -963,14 +963,7 @@ class PAINTSYSTEM_OT_AddAction(PSContextMixin, Operator):
     def execute(self, context):
         ps_ctx = self.parse_context(context)
         active_layer = ps_ctx.active_layer
-        action = active_layer.actions.add()
-        action.name = self.name
-        action.action_bind = self.action_bind
-        action.action_type = self.action_type
-        if self.action_bind == 'FRAME':
-            action.frame = self.frame
-        elif self.action_bind == 'MARKER':
-            action.marker_name = self.marker_name
+        active_layer.add_action(self.name, self.action_bind, self.action_type, self.frame, self.marker_name)
         redraw_panel(context)
         return {'FINISHED'}
     
@@ -994,9 +987,7 @@ class PAINTSYSTEM_OT_DeleteAction(PSContextMixin, Operator):
     
     def execute(self, context):
         ps_ctx = self.parse_context(context)
-        active_layer = ps_ctx.active_layer
-        active_layer.actions.remove(active_layer.active_action_index)
-        active_layer.active_action_index = min(active_layer.active_action_index, len(active_layer.actions) - 1)
+        ps_ctx.active_layer.remove_active_action()
         return {'FINISHED'}
 
 

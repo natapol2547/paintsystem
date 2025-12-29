@@ -44,7 +44,7 @@ from ..utils.version import is_newer_than
 from ..utils.nodes import find_node, get_material_output, get_node_socket_enum, get_nodetree_socket_enum
 from ..preferences import get_preferences
 from ..utils import get_next_unique_name
-from .context import get_global_layer, parse_context
+from .context import get_legacy_global_layer, parse_context
 from .graph import (
     NodeTreeBuilder,
     Add_Node,
@@ -300,7 +300,7 @@ def find_channels_containing_layer(check_layer: "Layer") -> list["Channel"]:
                     for layer in channel.layers:
                         if layer == check_layer or layer.linked_layer_uid == check_layer.uid:
                             channels.append(channel)
-    print(f"Found {len(channels)} channels containing layer {check_layer.layer_name}")
+    # print(f"Found {len(channels)} channels containing layer {check_layer.layer_name}")
     return channels
 
 def get_node_from_nodetree(node_tree: NodeTree, identifier: str) -> Node | None:
@@ -1360,6 +1360,28 @@ class Layer(BaseNestedListItem):
         options={'SKIP_SAVE'}
     )
     
+    def add_action(self, name: str, action_bind: str, action_type: str, frame: int|None = None, marker_name: str|None = None):
+        action = self.actions.add()
+        action.name = name
+        action.action_bind = action_bind
+        action.action_type = action_type
+        if action_bind == 'FRAME':
+            if frame is None:
+                raise ValueError("Frame is required")
+            action.frame = frame
+        elif action_bind == 'MARKER':
+            if marker_name is None:
+                raise ValueError("Marker name is required")
+            action.marker_name = marker_name
+        return action
+    
+    def remove_action(self, index: int):
+        self.actions.remove(index)
+    
+    def remove_active_action(self):
+        self.actions.remove(self.active_action_index)
+        self.active_action_index = min(self.active_action_index, len(self.actions) - 1)
+    
     @property
     def uses_coord_type(self) -> bool:
         return self.type in ['IMAGE', 'TEXTURE']
@@ -1966,8 +1988,6 @@ class Channel(BaseNestedListManager):
         temp_alpha_image = ps_bake(context, ps_objects, mat, uv_layer, temp_alpha_image, use_gpu, margin=margin, margin_type=margin_type)
 
         if bake_image and temp_alpha_image:
-            print(f"Pixel length: {len(bake_image.pixels)}")
-            print(f"Pixel length: {len(temp_alpha_image.pixels)}")
             # pixels_bake = np.empty(len(bake_image.pixels), dtype=np.float32)
             # pixels_temp_alpha = np.empty(len(temp_alpha_image.pixels), dtype=np.float32)
             pixels_bake = blender_image_to_numpy(bake_image)
@@ -2232,7 +2252,10 @@ class Group(PropertyGroup):
         
         expected_sockets: List[ExpectedSocket] = []
         for channel in self.channels:
-            expected_sockets.append(ExpectedSocket(channel.name, f"NodeSocket{channel.type.title()}", channel.use_max_min, channel.factor_min, channel.factor_max))
+            # Map channel type to valid socket type
+            type_map = {"COLOR": "NodeSocketColor", "VECTOR": "NodeSocketVector", "FLOAT": "NodeSocketFloat"}
+            socket_type = type_map.get(channel.type, "NodeSocketColor")
+            expected_sockets.append(ExpectedSocket(channel.name, socket_type, channel.use_max_min, channel.factor_min, channel.factor_max))
             if channel.use_alpha:
                 expected_sockets.append(ExpectedSocket(f"{channel.name} Alpha", "NodeSocketFloat", True, 0, 1))
         
@@ -2400,6 +2423,28 @@ class PaintSystemGlobalData(PropertyGroup):
             brush_color.g = color[1]
             brush_color.b = color[2]
     
+    def update_hsv_color(self, context):
+        if context.mode != 'PAINT_TEXTURE':
+            return
+        settings = context.tool_settings.image_paint
+        brush = settings.brush
+        if hasattr(context.tool_settings, "unified_paint_settings"):
+            ups = context.tool_settings.unified_paint_settings
+        else:
+            ups = settings.unified_paint_settings
+        ubs = ups if ups.use_unified_color else brush
+        # Store color to context.ps_scene_data.hsv_color
+        hsv = ubs.color.hsv
+        if hsv != (context.scene.ps_scene_data.hue, context.scene.ps_scene_data.saturation, context.scene.ps_scene_data.value):
+            context.scene.ps_scene_data.hue = hsv[0]
+            context.scene.ps_scene_data.saturation = hsv[1]
+            context.scene.ps_scene_data.value = hsv[2]
+            color = ubs.color
+            r = int(color[0] * 255)
+            g = int(color[1] * 255)
+            b = int(color[2] * 255)
+            hex_color = "#{:02x}{:02x}{:02x}".format(r, g, b).upper()
+            context.scene.ps_scene_data.hex_color = hex_color
     
     paint_switch_panels: CollectionProperty(
         name="Main Switch Panel",

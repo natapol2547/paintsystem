@@ -316,21 +316,6 @@ class MAT_PT_Layers(PSContextMixin, Panel):
         elif ps_ctx.ps_object.type == 'MESH':
             if not ps_ctx.active_channel.use_bake_image:
                 if not ps_ctx.ps_settings.use_legacy_ui:
-                    # col = layout.column()
-                    # row = col.row()
-                    # row.scale_y = 1.2
-                    # row.scale_x = 1.2
-                    # new_row = row.row(align=True)
-                    # new_row.operator("wm.call_menu", text="New", icon_value=get_icon('layer_add')).name = "MAT_MT_AddLayerMenu"
-                    # new_row.operator("paint_system.new_folder_layer",
-                    #      icon_value=get_icon('folder'), text="")
-                    # new_row.menu("MAT_MT_LayerMenu",
-                    #     text="", icon='COLLAPSEMENU')
-                    # move_row = row.row(align=True)
-                    # move_row.operator("paint_system.move_up", icon="TRIA_UP", text="")
-                    # move_row.operator("paint_system.move_down", icon="TRIA_DOWN", text="")
-                    # row.operator("paint_system.delete_item",
-                    #             text="", icon="TRASH")
                     main_row = layout.row()
                     box = main_row.box()
                     if ps_ctx.active_layer and ps_ctx.active_layer.node_tree:
@@ -361,7 +346,7 @@ class MAT_PT_Layers(PSContextMixin, Panel):
                 image_node = find_node(active_channel.node_tree, {'bl_idname': 'ShaderNodeTexImage', 'image': active_channel.bake_image})
                 bake_box = layout.box()
                 col = bake_box.column()
-                col.label(text="Baked Image", icon="TEXTURE_DATA")
+                # col.label(text="Baked Image", icon="TEXTURE_DATA")
                 image_node_settings(col, image_node, active_channel, "bake_image", simple_ui=True, default_closed=True)
                 col.operator("wm.call_menu", text="Apply Image Filters", icon="IMAGE_DATA").name = "MAT_MT_ImageFilterMenu"
                 col.operator("paint_system.delete_bake_image", text="Delete", icon="TRASH")
@@ -531,7 +516,8 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     col = box.column()
                     scale_content(context, col, 1.2, 1.2)
                     if not active_layer.external_image:
-                        col.operator("paint_system.quick_edit", text="Edit Externally")
+                        icon_value = get_image_editor_icon(context.preferences.filepaths.image_editor) or get_icon('image')
+                        col.operator("paint_system.quick_edit", text="Edit Externally", icon_value=icon_value)
                     else:
                         if active_layer.edit_external_mode == 'IMAGE_EDIT':
                             row = col.row(align=True)

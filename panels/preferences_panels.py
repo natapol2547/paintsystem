@@ -40,6 +40,14 @@ class PaintSystemPreferences(AddonPreferences):
         min=0.5,
         max=3.0
     )
+
+    color_picker_scale_rmb: FloatProperty(
+        name="RMB Color Wheel Scale",
+        description="Scale the color wheel in the Texture Paint right-click popover",
+        default=1.2,
+        min=0.5,
+        max=3.0
+    )
     
     # Tips
     hide_norm_paint_tips: BoolProperty(
@@ -57,6 +65,23 @@ class PaintSystemPreferences(AddonPreferences):
         name="Use Legacy UI",
         description="Use the legacy UI",
         default=False
+    )
+
+    # RMB popover options
+    show_hsv_sliders_rmb: BoolProperty(
+        name="Show Hue/Saturation/Value sliders (RMB)",
+        description="Show HSV sliders under the color wheel in the Texture Paint right-click popover",
+        default=False
+    )
+    show_active_palette_rmb: BoolProperty(
+        name="Show Active Palette (RMB)",
+        description="Show the active palette swatches in the Texture Paint right-click popover",
+        default=True
+    )
+    show_brush_settings_rmb: BoolProperty(
+        name="Show Brush Controls (RMB)",
+        description="Show brush radius/strength controls in the Texture Paint right-click popover",
+        default=True
     )
     
     loading_donations: BoolProperty(
@@ -136,6 +161,14 @@ class PaintSystemPreferences(AddonPreferences):
         layout.prop(self, "use_legacy_ui", text="Use Legacy UI")
         # layout.prop(self, "name_layers_group",
         #             text="Name Layers According to Group Name")
+
+        # --- Texture Paint Right Click Menu ---
+        rmb_box = layout.box()
+        rmb_box.label(text="Texture Paint Right Click Menu", icon='MOUSE_RMB')
+        rmb_box.prop(self, "color_picker_scale_rmb", text="Color Wheel Scale")
+        rmb_box.prop(self, "show_hsv_sliders_rmb", text="Show HSV sliders in RMB popover")
+        # rmb_box.prop(self, "show_active_palette_rmb", text="Show Active Palette in RMB popover")
+        rmb_box.prop(self, "show_brush_settings_rmb", text="Show Brush Controls in RMB popover")
         
         # Version check settings
         from ..utils.version import is_online

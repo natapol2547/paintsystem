@@ -226,20 +226,22 @@ def image_node_settings(layout: bpy.types.UILayout, image_node: bpy.types.Node, 
             col.separator()
         col.use_property_split = True
         col.use_property_decorate = False
-        if not simple_ui and image_node.image:
+        image = image_node.image
+        if not simple_ui and image:
             row = col.row(align=True)
-            row.operator("paint_system.export_image", text="Export As...", icon="EXPORT").image_name = image_node.image.name
+            row.operator("paint_system.export_image", text="Export As...", icon="EXPORT").image_name = image.name
             row.menu("MAT_MT_ImageMenu",
                     text="", icon='COLLAPSEMENU')
             col.separator()
+        if image:
+            col.label(text="UDIM tiles: " + ", ".join(str(t.number) for t in image.tiles), icon='UV')
         col.prop(image_node, "interpolation",
                     text="")
         col.prop(image_node, "projection",
                     text="")
         col.prop(image_node, "extension",
                     text="")
-        if image_node.image:
-            image = image_node.image
+        if image:
             col.prop(image, "source",
                         text="")
             # Color space settings

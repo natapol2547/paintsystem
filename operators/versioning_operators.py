@@ -24,7 +24,6 @@ pid_mapping = {
     "clip": "is_clip",
     "lock_alpha": "lock_alpha",
     "lock_layer": "lock_layer",
-    "node_tree": "node_tree",
     "external_image": "external_image",
     "expanded": "is_expanded",
 }
@@ -85,15 +84,21 @@ class PAINTSYSTEM_OT_UpdatePaintSystemData(PSContextMixin, Operator):
             legacy_group_nodes = find_nodes(ps_ctx.active_material.node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': legacy_group.node_tree})
             relink_map = {}
             for node_group in legacy_group_nodes:
-                # Get links
+                # Snapshot link endpoints so we don't hold onto link objects that Blender may free
                 input_links = []
                 output_links = []
                 for input_socket in node_group.inputs[:]:
                     for link in input_socket.links:
-                        input_links.append(link)
+                        input_links.append({
+                            'from_socket': link.from_socket,
+                            'dest_name': getattr(input_socket, "name", None),
+                        })
                 for output_socket in node_group.outputs[:]:
                     for link in output_socket.links:
-                        output_links.append(link)
+                        output_links.append({
+                            'to_socket': link.to_socket,
+                            'src_name': getattr(link.from_socket, "name", None),
+                        })
                 relink_map[node_group] = {
                     'input_links': input_links,
                     'output_links': output_links,
@@ -129,10 +134,43 @@ class PAINTSYSTEM_OT_UpdatePaintSystemData(PSContextMixin, Operator):
                         new_layer.uv_map_name = uv_map_name
                 new_layer.update_node_tree(context)
                 if legacy_layer.type == "NODE_GROUP":
-                    new_layer.color_input_name = "Color"
-                    new_layer.alpha_input_name = "Color Alpha"
-                    new_layer.color_output_name = "Color"
-                    new_layer.alpha_output_name = "Color Alpha"
+                    new_layer.custom_node_tree = legacy_layer.node_tree
+
+                    def _pick_enum(items, target, fallback="_NONE_"):
+                        for ident, name, *_ in items:
+                            if ident == target or name == target:
+                                return ident
+                        return fallback if items else fallback
+
+                    # Inputs (include _NONE_)
+                    input_items = new_layer.get_inputs_enum(context)
+                    if input_items:
+                        new_layer.color_input_name = _pick_enum(input_items, "Color", fallback=input_items[0][0])
+                        new_layer.alpha_input_name = _pick_enum(input_items, "Color Alpha", fallback=input_items[0][0])
+
+                    # Outputs (may lack alpha; use first available if target missing)
+                    try:
+                        color_out_items = new_layer.get_color_enum(context)
+                    except TypeError:
+                        color_out_items = []
+                    if color_out_items:
+                        new_layer.color_output_name = _pick_enum(color_out_items, "Color", fallback=color_out_items[0][0])
+
+                    try:
+                        alpha_out_items = new_layer.get_alpha_enum(context)
+                    except TypeError:
+                        alpha_out_items = []
+                    if alpha_out_items:
+                        new_layer.alpha_output_name = _pick_enum(alpha_out_items, "Color Alpha", fallback=alpha_out_items[0][0])
+
+                # Preserve blend mode if possible
+                legacy_mix = next(
+                    (n for n in legacy_layer.node_tree.nodes
+                     if getattr(n, "bl_idname", "") == "ShaderNodeMix" and getattr(n, "data_type", "") == "RGBA"),
+                    None,
+                ) if legacy_layer.node_tree else None
+                if legacy_mix and hasattr(new_layer, "blend_mode"):
+                    new_layer.blend_mode = getattr(legacy_mix, "blend_type", new_layer.blend_mode)
                 # Apply node values
                 # Copy rgb node value
                 if legacy_layer.type == "SOLID_COLOR":
@@ -159,9 +197,15 @@ class PAINTSYSTEM_OT_UpdatePaintSystemData(PSContextMixin, Operator):
             for node_group, links in relink_map.items():
                 node_group.node_tree = new_group.node_tree
                 for link in links['input_links']:
-                    connect_sockets(node_group.inputs[link.to_socket.name], link.from_socket)
+                    dest_name = link.get('dest_name')
+                    from_socket = link.get('from_socket')
+                    if dest_name and dest_name in node_group.inputs and from_socket:
+                        connect_sockets(from_socket, node_group.inputs[dest_name])
                 for link in links['output_links']:
-                    connect_sockets(link.to_socket, node_group.outputs[link.from_socket.name])
+                    src_name = link.get('src_name')
+                    to_socket = link.get('to_socket')
+                    if src_name and src_name in node_group.outputs and to_socket:
+                        connect_sockets(node_group.outputs[src_name], to_socket)
         legacy_groups.clear()
         if warning_messages:
             self.report({'WARNING'}, "\n".join(warning_messages))
