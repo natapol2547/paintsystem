@@ -259,79 +259,6 @@ class PAINTSYSTEM_OT_RecalculateNormals(Operator):
             bpy.ops.object.mode_set(mode=orig_mode)
         return {'FINISHED'}
 
-class PAINTSYSTEM_OT_ToggleTransformGizmos(Operator):
-    bl_idname = "paint_system.toggle_transform_gizmos"
-    bl_label = "Toggle Transform Gizmos"
-    bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Toggle transform gizmos with mode-aware behavior"
-
-    @classmethod
-    def poll(cls, context):
-        # Must have a 3D View space to toggle gizmos
-        return context.area and context.area.type == 'VIEW_3D'
-
-    def execute(self, context):
-        # Access active 3D view space
-        space = context.area.spaces[0]
-        if space.type != 'VIEW_3D':
-            return {'CANCELLED'}
-
-        wm = context.window_manager
-        
-        # Preserve overlay state before changing gizmos
-        overlay_state = None
-        if hasattr(space, 'overlay'):
-            overlay_state = space.overlay.show_overlays
-        
-        # Check if any gizmo is currently ON
-        current_translate = bool(getattr(space, "show_gizmo_object_translate", False))
-        current_rotate = bool(getattr(space, "show_gizmo_object_rotate", False))
-        current_scale = bool(getattr(space, "show_gizmo_object_scale", False))
-        
-        any_gizmo_on = current_translate or current_rotate or current_scale
-        
-        if any_gizmo_on:
-            # If any gizmo is ON, save their state and turn them all OFF
-            wm["ps_gizmo_translate"] = current_translate
-            wm["ps_gizmo_rotate"] = current_rotate
-            wm["ps_gizmo_scale"] = current_scale
-            # Mark that gizmos are manually toggled OFF
-            wm["ps_gizmo_toggled_off"] = True
-            
-            space.show_gizmo_object_translate = False
-            space.show_gizmo_object_rotate = False
-            space.show_gizmo_object_scale = False
-        else:
-            # If all gizmos are OFF, check if we have saved state to restore
-            has_saved = wm.get("ps_gizmo_translate") is not None
-            if has_saved:
-                # Restore exactly what was saved (not defaults)
-                translate_pref = wm.get("ps_gizmo_translate", False)
-                rotate_pref = wm.get("ps_gizmo_rotate", False)
-                scale_pref = wm.get("ps_gizmo_scale", False)
-            else:
-                # First time - default to just translate and rotate
-                translate_pref = True
-                rotate_pref = True
-                scale_pref = False
-                # Save these defaults
-                wm["ps_gizmo_translate"] = translate_pref
-                wm["ps_gizmo_rotate"] = rotate_pref
-                wm["ps_gizmo_scale"] = scale_pref
-            
-            # Mark that gizmos are manually toggled ON
-            wm["ps_gizmo_toggled_off"] = False
-            
-            space.show_gizmo_object_translate = translate_pref
-            space.show_gizmo_object_rotate = rotate_pref
-            space.show_gizmo_object_scale = scale_pref
-        
-        # Restore overlay state if it was affected
-        if overlay_state is not None and hasattr(space, 'overlay'):
-            space.overlay.show_overlays = overlay_state
-
-        return {'FINISHED'}
-
 class PAINTSYSTEM_OT_AddCameraPlane(Operator):
     bl_idname = "paint_system.add_camera_plane"
     bl_label = "Add Camera Plane"
@@ -394,30 +321,6 @@ class PAINTSYSTEM_OT_DuplicatePaintSystemData(PSContextMixin, MultiMaterialOpera
         
         for group in ps_mat_data.groups:
             original_node_tree = group.node_tree
-            
-            # Store links connected to the original node group before replacing
-            group_nodes = [n for n in mat.node_tree.nodes if n.type == 'GROUP' and n.node_tree == original_node_tree]
-            relink_map = {}
-            for node_group in group_nodes:
-                input_links = []
-                output_links = []
-                for input_socket in node_group.inputs[:]:
-                    for link in input_socket.links:
-                        input_links.append({
-                            'from_socket': link.from_socket,
-                            'dest_name': getattr(input_socket, "name", None),
-                        })
-                for output_socket in node_group.outputs[:]:
-                    for link in output_socket.links:
-                        output_links.append({
-                            'to_socket': link.to_socket,
-                            'src_name': getattr(link.from_socket, "name", None),
-                        })
-                relink_map[node_group] = {
-                    'input_links': input_links,
-                    'output_links': output_links,
-                }
-            
             node_tree = bpy.data.node_groups.new(name=f"Paint System ({mat.name})", type='ShaderNodeTree')
             group.node_tree = node_tree
             for channel in group.channels:
@@ -431,20 +334,10 @@ class PAINTSYSTEM_OT_DuplicatePaintSystemData(PSContextMixin, MultiMaterialOpera
                 channel.update_node_tree(context)
             group.update_node_tree(context)
             
-            # Reconnect the sockets using stored endpoints
-            from bpy_extras.node_utils import connect_sockets
-            for node_group, links in relink_map.items():
-                node_group.node_tree = group.node_tree
-                for link in links['input_links']:
-                    dest_name = link.get('dest_name')
-                    from_socket = link.get('from_socket')
-                    if dest_name and dest_name in node_group.inputs and from_socket:
-                        connect_sockets(from_socket, node_group.inputs[dest_name])
-                for link in links['output_links']:
-                    src_name = link.get('src_name')
-                    to_socket = link.get('to_socket')
-                    if src_name and src_name in node_group.outputs and to_socket:
-                        connect_sockets(node_group.outputs[src_name], to_socket)
+            # Find node group that uses the original node tree
+            for node in mat.node_tree.nodes:
+                if node.type == 'GROUP' and node.node_tree == original_node_tree:
+                    node.node_tree = group.node_tree
         redraw_panel(context)
         return {'FINISHED'}
 
@@ -547,61 +440,6 @@ class PAINTSYSTEM_OT_SyncUVs(PSContextMixin, Operator):
         return {'FINISHED'}
 
 
-class PAINTSYSTEM_OT_ToggleTransformGizmos(Operator):
-    bl_idname = "paint_system.toggle_transform_gizmos"
-    bl_label = "Toggle Transform Gizmos"
-    bl_options = {'REGISTER'}
-    bl_description = "Toggle transform gizmos on/off with state memory for paint mode"
-
-    def execute(self, context):
-        space = context.area.spaces[0] if context.area and context.area.spaces else None
-        if not space or space.type != 'VIEW_3D':
-            return {'CANCELLED'}
-        
-        wm = context.window_manager
-        obj = context.active_object
-        
-        # Determine current gizmo state
-        gizmos_enabled = (space.show_gizmo_object_translate or
-                         space.show_gizmo_object_rotate or
-                         space.show_gizmo_object_scale)
-        
-        # Treat paint, sculpt, vertex/weight paint, and GP draw modes the same for gizmos
-        paint_like_modes = {
-            'PAINT_TEXTURE',
-            'SCULPT',
-            'PAINT_VERTEX',
-            'PAINT_WEIGHT',
-            'PAINT_GPENCIL',
-            'PAINT_GPENCIL_LEGACY',
-            'PAINT_GREASE_PENCIL',
-        }
-        in_paint_mode = obj and obj.mode in paint_like_modes
-        
-        if in_paint_mode:
-            # Store current gizmo state before entering paint mode
-            wm["ps_gizmo_translate"] = space.show_gizmo_object_translate
-            wm["ps_gizmo_rotate"] = space.show_gizmo_object_rotate
-            wm["ps_gizmo_scale"] = space.show_gizmo_object_scale
-            # Keep gizmos disabled during paint mode
-            space.show_gizmo_object_translate = False
-            space.show_gizmo_object_rotate = False
-            space.show_gizmo_object_scale = False
-        else:
-            # Not in paint mode - toggle gizmos normally
-            new_state = not gizmos_enabled
-            space.show_gizmo_object_translate = new_state
-            space.show_gizmo_object_rotate = new_state
-            space.show_gizmo_object_scale = new_state
-        
-        # Redraw the viewport
-        for area in context.screen.areas:
-            if area.type == 'VIEW_3D':
-                area.tag_redraw()
-        
-        return {'FINISHED'}
-
-
 classes = (
     PAINTSYSTEM_OT_TogglePaintMode,
     PAINTSYSTEM_OT_AddPresetBrushes,
@@ -613,12 +451,10 @@ classes = (
     PAINTSYSTEM_OT_OpenPaintSystemPreferences,
     PAINTSYSTEM_OT_FlipNormals,
     PAINTSYSTEM_OT_RecalculateNormals,
-    PAINTSYSTEM_OT_ToggleTransformGizmos,
     PAINTSYSTEM_OT_AddCameraPlane,
     PAINTSYSTEM_OT_HidePaintingTips,
     PAINTSYSTEM_OT_DuplicatePaintSystemData,
     PAINTSYSTEM_OT_SyncUVs,
-    PAINTSYSTEM_OT_ToggleTransformGizmos,
 )
 
 addon_keymaps = []

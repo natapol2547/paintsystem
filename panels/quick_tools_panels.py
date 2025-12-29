@@ -11,55 +11,37 @@ class MAT_PT_PaintSystemQuickTools(PSContextMixin, Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = "Paint System"
-    
+
     def draw(self, context):
         layout = self.layout
-        
-        # Safety check
-        if not context.area or not context.area.spaces:
-            return
-        
+        ps_ctx = self.parse_context(context)
 
-        # Safety check for space
+        # Bail out early if there is no 3D view
         if not context.area or not context.area.spaces:
             return
+
         space = context.area.spaces.active
-        overlay = space.overlay
         obj = context.active_object
-        
-        # Define paint-like modes that should have gizmos disabled
-        paint_modes = {
-            'PAINT_TEXTURE',
-            'SCULPT',
-            'PAINT_VERTEX',
-            'PAINT_WEIGHT',
-            'PAINT_GPENCIL',
-            'PAINT_GPENCIL_LEGACY',
-            'PAINT_GREASE_PENCIL',
-            'SCULPT_GPENCIL'
-        }
-        
-        # ===== DISPLAY SECTION =====        if space.type != 'VIEW_3D':
+
+        # Only operate inside the 3D view
+        if space.type != 'VIEW_3D':
             return
 
         box = layout.box()
         if obj:
             row = box.row()
             scale_content(context, row)
-            row.prop(obj,
-                 "show_wire", text="Toggle Wireframe", icon='MOD_WIREFRAME')
+            row.prop(obj, "show_wire", text="Toggle Wireframe", icon='MOD_WIREFRAME')
+
         row = box.row()
         if not ps_ctx.ps_settings.use_compact_design:
             row.scale_y = 1
             row.scale_x = 1
         row.prop(space, "show_gizmo", text="Toggle Gizmo", icon='GIZMO')
         row = row.row(align=True)
-        row.prop(space, "show_gizmo_object_translate",
-                 text="", icon='EMPTY_ARROWS')
-        row.prop(space, "show_gizmo_object_rotate",
-                 text="", icon='FILE_REFRESH')
-        row.prop(space, "show_gizmo_object_scale",
-                 text="", icon='MOD_MESHDEFORM')
+        row.prop(space, "show_gizmo_object_translate", text="", icon='EMPTY_ARROWS')
+        row.prop(space, "show_gizmo_object_rotate", text="", icon='FILE_REFRESH')
+        row.prop(space, "show_gizmo_object_scale", text="", icon='MOD_MESHDEFORM')
 
 
 class MAT_PT_PaintSystemQuickToolsMesh(PSContextMixin, Panel):
@@ -161,7 +143,7 @@ class MAT_PT_PaintSystemQuickToolsPaint(PSContextMixin, Panel):
 
 
 classes = (
-    MAT_PT_PaintSystemQuickToolsDisplay,
+    MAT_PT_PaintSystemQuickTools,
     MAT_PT_PaintSystemQuickToolsMesh,
     MAT_PT_PaintSystemQuickToolsPaint,
 )
