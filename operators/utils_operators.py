@@ -447,61 +447,6 @@ class PAINTSYSTEM_OT_DuplicatePaintSystemData(PSContextMixin, MultiMaterialOpera
         return {'FINISHED'}
 
 
-class PAINTSYSTEM_OT_ToggleTransformGizmos(Operator):
-    bl_idname = "paint_system.toggle_transform_gizmos"
-    bl_label = "Toggle Transform Gizmos"
-    bl_options = {'REGISTER'}
-    bl_description = "Toggle transform gizmos on/off with state memory for paint mode"
-
-    def execute(self, context):
-        space = context.area.spaces[0] if context.area and context.area.spaces else None
-        if not space or space.type != 'VIEW_3D':
-            return {'CANCELLED'}
-        
-        wm = context.window_manager
-        obj = context.active_object
-        
-        # Determine current gizmo state
-        gizmos_enabled = (space.show_gizmo_object_translate or
-                         space.show_gizmo_object_rotate or
-                         space.show_gizmo_object_scale)
-        
-        # Treat paint, sculpt, vertex/weight paint, and GP draw modes the same for gizmos
-        paint_like_modes = {
-            'PAINT_TEXTURE',
-            'SCULPT',
-            'PAINT_VERTEX',
-            'PAINT_WEIGHT',
-            'PAINT_GPENCIL',
-            'PAINT_GPENCIL_LEGACY',
-            'PAINT_GREASE_PENCIL',
-        }
-        in_paint_mode = obj and obj.mode in paint_like_modes
-        
-        if in_paint_mode:
-            # Store current gizmo state before entering paint mode
-            wm["ps_gizmo_translate"] = space.show_gizmo_object_translate
-            wm["ps_gizmo_rotate"] = space.show_gizmo_object_rotate
-            wm["ps_gizmo_scale"] = space.show_gizmo_object_scale
-            # Keep gizmos disabled during paint mode
-            space.show_gizmo_object_translate = False
-            space.show_gizmo_object_rotate = False
-            space.show_gizmo_object_scale = False
-        else:
-            # Not in paint mode - toggle gizmos normally
-            new_state = not gizmos_enabled
-            space.show_gizmo_object_translate = new_state
-            space.show_gizmo_object_rotate = new_state
-            space.show_gizmo_object_scale = new_state
-        
-        # Redraw the viewport
-        for area in context.screen.areas:
-            if area.type == 'VIEW_3D':
-                area.tag_redraw()
-        
-        return {'FINISHED'}
-
-
 classes = (
     PAINTSYSTEM_OT_TogglePaintMode,
     PAINTSYSTEM_OT_AddPresetBrushes,
@@ -517,7 +462,6 @@ classes = (
     PAINTSYSTEM_OT_AddCameraPlane,
     PAINTSYSTEM_OT_HidePaintingTips,
     PAINTSYSTEM_OT_DuplicatePaintSystemData,
-    PAINTSYSTEM_OT_ToggleTransformGizmos,
 )
 
 _register, _unregister = register_classes_factory(classes)
