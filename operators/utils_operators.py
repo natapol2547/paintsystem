@@ -257,6 +257,79 @@ class PAINTSYSTEM_OT_RecalculateNormals(Operator):
             bpy.ops.object.mode_set(mode=orig_mode)
         return {'FINISHED'}
 
+class PAINTSYSTEM_OT_ToggleTransformGizmos(Operator):
+    bl_idname = "paint_system.toggle_transform_gizmos"
+    bl_label = "Toggle Transform Gizmos"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Toggle transform gizmos with mode-aware behavior"
+
+    @classmethod
+    def poll(cls, context):
+        # Must have a 3D View space to toggle gizmos
+        return context.area and context.area.type == 'VIEW_3D'
+
+    def execute(self, context):
+        # Access active 3D view space
+        space = context.area.spaces[0]
+        if space.type != 'VIEW_3D':
+            return {'CANCELLED'}
+
+        wm = context.window_manager
+        
+        # Preserve overlay state before changing gizmos
+        overlay_state = None
+        if hasattr(space, 'overlay'):
+            overlay_state = space.overlay.show_overlays
+        
+        # Check if any gizmo is currently ON
+        current_translate = bool(getattr(space, "show_gizmo_object_translate", False))
+        current_rotate = bool(getattr(space, "show_gizmo_object_rotate", False))
+        current_scale = bool(getattr(space, "show_gizmo_object_scale", False))
+        
+        any_gizmo_on = current_translate or current_rotate or current_scale
+        
+        if any_gizmo_on:
+            # If any gizmo is ON, save their state and turn them all OFF
+            wm["ps_gizmo_translate"] = current_translate
+            wm["ps_gizmo_rotate"] = current_rotate
+            wm["ps_gizmo_scale"] = current_scale
+            # Mark that gizmos are manually toggled OFF
+            wm["ps_gizmo_toggled_off"] = True
+            
+            space.show_gizmo_object_translate = False
+            space.show_gizmo_object_rotate = False
+            space.show_gizmo_object_scale = False
+        else:
+            # If all gizmos are OFF, check if we have saved state to restore
+            has_saved = wm.get("ps_gizmo_translate") is not None
+            if has_saved:
+                # Restore exactly what was saved (not defaults)
+                translate_pref = wm.get("ps_gizmo_translate", False)
+                rotate_pref = wm.get("ps_gizmo_rotate", False)
+                scale_pref = wm.get("ps_gizmo_scale", False)
+            else:
+                # First time - default to just translate and rotate
+                translate_pref = True
+                rotate_pref = True
+                scale_pref = False
+                # Save these defaults
+                wm["ps_gizmo_translate"] = translate_pref
+                wm["ps_gizmo_rotate"] = rotate_pref
+                wm["ps_gizmo_scale"] = scale_pref
+            
+            # Mark that gizmos are manually toggled ON
+            wm["ps_gizmo_toggled_off"] = False
+            
+            space.show_gizmo_object_translate = translate_pref
+            space.show_gizmo_object_rotate = rotate_pref
+            space.show_gizmo_object_scale = scale_pref
+        
+        # Restore overlay state if it was affected
+        if overlay_state is not None and hasattr(space, 'overlay'):
+            space.overlay.show_overlays = overlay_state
+
+        return {'FINISHED'}
+
 class PAINTSYSTEM_OT_AddCameraPlane(Operator):
     bl_idname = "paint_system.add_camera_plane"
     bl_label = "Add Camera Plane"
@@ -440,6 +513,7 @@ classes = (
     PAINTSYSTEM_OT_OpenPaintSystemPreferences,
     PAINTSYSTEM_OT_FlipNormals,
     PAINTSYSTEM_OT_RecalculateNormals,
+    PAINTSYSTEM_OT_ToggleTransformGizmos,
     PAINTSYSTEM_OT_AddCameraPlane,
     PAINTSYSTEM_OT_HidePaintingTips,
     PAINTSYSTEM_OT_DuplicatePaintSystemData,
