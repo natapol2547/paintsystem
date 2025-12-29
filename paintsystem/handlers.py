@@ -255,6 +255,78 @@ def color_history_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph
         pass
 
 @bpy.app.handlers.persistent
+def transform_gizmo_mode_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph = None):
+    """Automatically disable transform gizmos in paint-like modes,
+    and restore based on stored preferences otherwise.
+    """
+    try:
+        obj = bpy.context.object
+        area = bpy.context.area
+    except Exception:
+        return
+    if not area or area.type != 'VIEW_3D':
+        return
+    space = area.spaces[0]
+
+    paint_like_modes = {
+        'PAINT_TEXTURE',
+        'SCULPT',
+        'PAINT_VERTEX',
+        'PAINT_WEIGHT',
+        'PAINT_GPENCIL',
+        'PAINT_GPENCIL_LEGACY',
+        'PAINT_GREASE_PENCIL',
+        'SCULPT_GPENCIL',
+    }
+    in_paint_mode = obj and hasattr(obj, 'mode') and obj.mode in paint_like_modes
+
+    wm = bpy.context.window_manager
+    
+    # If user has manually toggled gizmos off, don't interfere
+    if wm.get("ps_gizmo_toggled_off", False):
+        return
+    
+    if in_paint_mode:
+        # Disable transform overlays while painting
+        # Always capture current states before disabling so we remember what to restore
+        current_t = bool(getattr(space, "show_gizmo_object_translate", False))
+        current_r = bool(getattr(space, "show_gizmo_object_rotate", False))
+        current_s = bool(getattr(space, "show_gizmo_object_scale", False))
+        
+        # Only save if gizmos are currently on (don't overwrite with "off" state)
+        if current_t or current_r or current_s:
+            wm["ps_gizmo_translate"] = current_t
+            wm["ps_gizmo_rotate"] = current_r
+            wm["ps_gizmo_scale"] = current_s
+        
+        space.show_gizmo_object_translate = False
+        space.show_gizmo_object_rotate = False
+        space.show_gizmo_object_scale = False
+    elif obj and getattr(obj, 'mode', None) == 'EDIT':
+        # In Edit mode, ensure translate and rotate are enabled
+        space.show_gizmo_object_translate = True
+        space.show_gizmo_object_rotate = True
+        # For scale, only enable if it was saved as on
+        space.show_gizmo_object_scale = bool(wm.get("ps_gizmo_scale", False))
+    else:
+        # Restore according to exactly what was saved (don't use defaults)
+        # Only restore if something has been saved before
+        if wm.get("ps_gizmo_translate") is not None:
+            t = wm.get("ps_gizmo_translate", False)
+            r = wm.get("ps_gizmo_rotate", False)
+            s = wm.get("ps_gizmo_scale", False)
+        else:
+            # Initialize defaults only once
+            t, r, s = True, True, False
+            wm["ps_gizmo_translate"] = t
+            wm["ps_gizmo_rotate"] = r
+            wm["ps_gizmo_scale"] = s
+        
+        space.show_gizmo_object_translate = bool(t)
+        space.show_gizmo_object_rotate = bool(r)
+        space.show_gizmo_object_scale = bool(s)
+
+@bpy.app.handlers.persistent
 def paint_system_object_update(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph = None):
     """Handle object changes and update paint canvas - based on UcuPaint's ypaint_last_object_update"""
     
@@ -337,6 +409,7 @@ def register():
     else:
         bpy.app.handlers.depsgraph_update_post.append(paint_system_object_update)
         bpy.app.handlers.depsgraph_update_post.append(color_history_handler)
+        bpy.app.handlers.depsgraph_update_post.append(transform_gizmo_mode_handler)
     bpy.app.timers.register(on_addon_enable, first_interval=0.1)
     bpy.msgbus.subscribe_rna(
         key=(bpy.types.UnifiedPaintSettings, "color"),
@@ -369,3 +442,4 @@ def unregister():
     else:
         bpy.app.handlers.depsgraph_update_post.remove(paint_system_object_update)
         bpy.app.handlers.depsgraph_update_post.remove(color_history_handler)
+        bpy.app.handlers.depsgraph_update_post.remove(transform_gizmo_mode_handler)

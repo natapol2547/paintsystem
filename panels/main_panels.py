@@ -164,6 +164,15 @@ class MAT_PT_PaintSystemMaterialSettings(PSContextMixin, Panel):
                 row.prop(mat, "name", text="")
         layout.prop(mat, "surface_render_method", text="Render Method")
         layout.prop(mat, "use_backface_culling", text="Backface Culling")
+        
+        # UV Tools
+        box = layout.box()
+        col = box.column(align=True)
+        col.label(text="UV Tools", icon="UV")
+        row = col.row(align=True)
+        row.operator("paint_system.sync_uvs", text="Sync UVs")
+        row.operator("paint_system.quick_edit", text="Quick Edit", icon="BRUSH_DATA")
+        
         if ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.groups:
             box = layout.box()
             box.label(text=f"Paint System Node Groups:", icon_value=get_icon("sunflower"))
