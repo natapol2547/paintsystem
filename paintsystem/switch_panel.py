@@ -52,11 +52,20 @@ class PAINTSYSTEM_OT_SetActiveSwitchPanel(Operator):
 class SwitchPanelManager():
     """Switch panel manager"""
     
-    def __init__(self, data_ptr, propname: str, active_dataptr, active_propname: str):
+    def __init__(self, data_ptr, propname: str, active_dataptr, active_propname: str, force_active: bool = False):
+        """Initialize the SwitchPanelManager
+        Args:
+            data_ptr (PropertyGroup): The data block instance holding the collection property (e.g., scene, object, material).
+            propname (str): The string name of the collection property.
+            active_dataptr (PropertyGroup): The data block instance holding the active index property.
+            active_propname (str): The string name of the integer property for the active index.
+            force_active (bool, optional): If True, forces at least one switch panel to be active. Defaults to False.
+        """
         self.data_ptr = data_ptr
         self.propname = propname
         self.active_dataptr = active_dataptr
         self.active_propname = active_propname
+        self.force_active = force_active
 
     @property
     def collection(self):
@@ -81,7 +90,7 @@ class SwitchPanelManager():
             new_switch_panel.icon = icon
         if custom_icon:
             new_switch_panel.custom_icon = custom_icon
-        if len(self.collection) == 1:
+        if len(self.collection) == 1 and self.force_active:
             new_switch_panel.enabled = True
         return new_switch_panel
     
@@ -101,26 +110,25 @@ class SwitchPanelManager():
     def switch_panel_ui(self, layout: bpy.types.UILayout, context: bpy.types.Context):
         if len(self.collection) == 0:
             return
-        headers = []
-        panels = []
+        row = layout.row()
+        row.alignment = 'LEFT'
         for switch_panel in self.collection:
-            col = layout.column()
-            row = col.row(align=True)
-            row.alignment = 'LEFT'
+            btn_row = row.row(align=True)
+            btn_row.alignment = 'LEFT'
             op_params = {
                 "operator": "paint_system.set_active_switch_panel",
-                "emboss": False,
+                "text": switch_panel.name,
+                "emboss": switch_panel.enabled,
+                "depress": switch_panel.enabled,
             }
-            row.operator(**op_params, text="", icon="DOWNARROW_HLT" if switch_panel.enabled else "RIGHTARROW").switch_panel_name = switch_panel.name
-            op_params["text"] = switch_panel.name
             if switch_panel.icon:
                 op_params["icon"] = switch_panel.icon
             if switch_panel.custom_icon:
                 op_params["icon_value"] = get_icon(switch_panel.custom_icon)
-            row.operator(**op_params).switch_panel_name = switch_panel.name
-            headers.append(row)
-            panels.append(col)
-        return headers, panels
+            btn_row.operator(**op_params).switch_panel_name = switch_panel.name
+            if switch_panel.enabled:
+                btn_row.operator("paint_system.set_active_switch_panel", text="", icon="X").switch_panel_name = switch_panel.name
+        return row
 
 classes = (
     SwitchPanelItem,
