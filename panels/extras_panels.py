@@ -170,10 +170,13 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
         elif ps_ctx.ps_object.type == 'GREASEPENCIL':
             from bl_ui.space_toolsystem_common import ToolSelectPanelHelper
             tool = ToolSelectPanelHelper.tool_active_from_context(context)
-            if is_newer_than(5,0):
+            # Blender 5.0+ renamed gpencil_tool to gpencil_brush_type
+            if hasattr(brush, 'gpencil_brush_type'):
                 gpencil_brush_type = brush.gpencil_brush_type
-            else:
+            elif hasattr(brush, 'gpencil_tool'):
                 gpencil_brush_type = brush.gpencil_tool
+            else:
+                return False  # Fallback if neither exists
             if tool and tool.idname in {"builtin.cutter", "builtin.eyedropper", "builtin.interpolate"}:
                 return False
             if gpencil_brush_type == 'TINT':
@@ -223,13 +226,15 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
             if ps_ctx.ps_settings.show_hex_color:
                 row = col.row()
                 row.prop(ps_ctx.ps_scene_data, "hex_color", text="Hex")
+            # Blender 4.5+ / Bforartists 5.0+ features
             if is_newer_than(4,5):
-                # Bforartists/Blender variants may not expose color_jitter_panel; fail gracefully
+                # Color jitter panel may not exist in all Blender/Bforartists variants
                 try:
                     from bl_ui.properties_paint_common import color_jitter_panel
                     color_jitter_panel(col, context, brush)
-                except Exception:
+                except (ImportError, AttributeError, Exception):
                     pass
+                # Color palette support
                 try:
                     header, panel = col.panel("paintsystem_color_history_palette", default_closed=True)
                     header.label(text="Color History")
@@ -243,7 +248,7 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
                     panel.template_ID(settings, "palette", new="palette.new")
                     if panel and settings.palette:
                         panel.template_palette(settings, "palette", color=True)
-                except Exception:
+                except (AttributeError, Exception):
                     pass
             # draw_color_settings(context, col, brush)
         if ps_ctx.ps_object.type == 'GREASEPENCIL':

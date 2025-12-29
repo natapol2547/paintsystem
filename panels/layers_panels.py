@@ -340,7 +340,7 @@ class MAT_PT_Layers(PSContextMixin, Panel):
         ps_ctx = cls.parse_context(context)
         if ps_ctx.active_group and check_group_multiuser(ps_ctx.active_group.node_tree):
             return False
-        return ps_ctx.ps_object and (ps_ctx.active_channel is not None or ps_ctx.ps_object.type == 'GREASEPENCIL')
+        return (ps_ctx.active_channel is not None or (ps_ctx.ps_object and ps_ctx.ps_object.type == 'GREASEPENCIL'))
     
     def draw_header(self, context):
         layout = self.layout
@@ -356,7 +356,7 @@ class MAT_PT_Layers(PSContextMixin, Panel):
         #         icon_value=get_icon_from_channel(ps_ctx.active_channel)
         #     )
         # else:
-        if ps_ctx.ps_object.type == 'MESH' and ps_ctx.active_channel.bake_image:
+        if ps_ctx.ps_object and ps_ctx.ps_object.type == 'MESH' and ps_ctx.active_channel.bake_image:
             layout.prop(ps_ctx.active_channel, "use_bake_image",
                     text="Use Baked", icon="TEXTURE_DATA")
 
@@ -369,7 +369,7 @@ class MAT_PT_Layers(PSContextMixin, Panel):
             toggle_paint_mode_ui(box, context)
         else:
             box = layout
-        if ps_ctx.ps_object.type == 'GREASEPENCIL':
+        if ps_ctx.ps_object and ps_ctx.ps_object.type == 'GREASEPENCIL':
             grease_pencil = context.grease_pencil
             layers = grease_pencil.layers
             is_layer_active = layers.active is not None
@@ -533,7 +533,7 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        if ps_ctx.ps_object.type == 'MESH':
+        if ps_ctx.ps_object and ps_ctx.ps_object.type == 'MESH':
             if ps_ctx.active_channel.use_bake_image:
                 return False
             active_layer = ps_ctx.active_layer
@@ -554,13 +554,13 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
         ps_ctx = self.parse_context(context)
         layer = ps_ctx.active_layer
         if ps_ctx.ps_settings.use_legacy_ui:
-            if ps_ctx.ps_object.type == 'MESH' and layer.type == 'IMAGE':
+            if ps_ctx.ps_object and ps_ctx.ps_object.type == 'MESH' and layer.type == 'IMAGE':
                 layout.operator("wm.call_menu", text="Filters", icon="IMAGE_DATA").name = "MAT_MT_ImageFilterMenu"
 
     def draw(self, context):
         layout = self.layout
         ps_ctx = self.parse_context(context)
-        if ps_ctx.ps_object.type == 'GREASEPENCIL':
+        if ps_ctx.ps_object and ps_ctx.ps_object.type == 'GREASEPENCIL':
             active_layer = context.grease_pencil.layers.active
             if active_layer:
                 box = layout.box()
@@ -801,7 +801,7 @@ class MAT_PT_GreasePencilMaskSettings(PSContextMixin, Panel):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        return ps_ctx.ps_object.type == 'GREASEPENCIL' and is_newer_than(4,3)
+        return ps_ctx.ps_object and ps_ctx.ps_object.type == 'GREASEPENCIL' and is_newer_than(4,3)
 
     def draw_header(self, context):
         GreasePencil_LayerMaskPanel.draw_header(self, context)
@@ -823,7 +823,7 @@ class MAT_PT_GreasePencilOnionSkinningSettings(PSContextMixin, Panel):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        return ps_ctx.ps_object.type == 'GREASEPENCIL' and is_newer_than(4,3)
+        return ps_ctx.ps_object and ps_ctx.ps_object.type == 'GREASEPENCIL' and is_newer_than(4,3)
     
     def draw(self, context):
         DATA_PT_grease_pencil_onion_skinning.draw(self, context)
@@ -838,20 +838,54 @@ class MAT_PT_GreasePencilOnionSkinningSettings(PSContextMixin, Panel):
 
 # Paint System Layer Settings Advanced
 
+class MAT_PT_LayerSettingsAdvanced(PSContextMixin, Panel):
+    """Parent panel for advanced layer settings - contains Image, Transform, and Actions child panels"""
+    bl_idname = 'MAT_PT_LayerSettingsAdvanced'
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_label = "Advanced"
+    bl_category = 'Paint System'
+    bl_parent_id = 'MAT_PT_Layers'
+    bl_options = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        try:
+            ps_ctx = cls.parse_context(context)
+            if not ps_ctx or not ps_ctx.active_layer:
+                return False
+            # Hide during UV Fix session
+            if ps_ctx.ps_scene_data and getattr(ps_ctx.ps_scene_data, 'fix_uv_session_active', False):
+                return False
+            if ps_ctx.ps_object and ps_ctx.ps_object.type == 'MESH':
+                return not getattr(ps_ctx.active_channel, 'use_bake_image', True)
+            return False
+        except Exception:
+            return False
+
+    def draw_header(self, context):
+        layout = self.layout
+        layout.label(icon='SETTINGS')
+
+    def draw(self, context):
+        # This is a parent panel - content comes from child panels
+        pass
+
+
 class MAT_PT_LayerTransformSettings(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_LayerCoordinateSettings'
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_label = "Transform"
     bl_category = 'Paint System'
-    bl_parent_id = 'MAT_PT_LayerSettings'
+    bl_parent_id = 'MAT_PT_LayerSettingsAdvanced'
     bl_options = {'DEFAULT_CLOSED'}
 
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
         active_layer = ps_ctx.active_layer
-        if ps_ctx.ps_object.type != 'MESH' or active_layer.type not in ('IMAGE', 'TEXTURE'):
+        if not ps_ctx.ps_object or ps_ctx.ps_object.type != 'MESH' or active_layer.type not in ('IMAGE', 'TEXTURE'):
             return False
         return True
     
@@ -879,8 +913,10 @@ class MAT_PT_LayerTransformSettings(PSContextMixin, Panel):
         if active_layer.coord_type in ['UV', 'AUTO']:
                 row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
         if active_layer.coord_type == 'UV':
-            col.prop_search(active_layer, "uv_map_name", text="UV Map",
+            row_uv = col.row(align=True)
+            row_uv.prop_search(active_layer, "uv_map_name", text="UV Map",
                                 search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
+            row_uv.operator("paint_system.set_active_uv_for_selected", text="", icon='RADIOBUT_ON')
         elif active_layer.coord_type == 'DECAL':
             col.use_property_split = False
             empty_col = col.column(align=True)
@@ -950,14 +986,14 @@ class MAT_PT_ImageLayerSettings(PSContextMixin, Panel):
     bl_region_type = "UI"
     bl_label = "Image"
     bl_category = 'Paint System'
-    bl_parent_id = 'MAT_PT_LayerSettings'
+    bl_parent_id = 'MAT_PT_LayerSettingsAdvanced'
     bl_options = {'DEFAULT_CLOSED'}
 
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
         active_layer = ps_ctx.active_layer
-        if ps_ctx.ps_object.type != 'MESH' or ps_ctx.active_channel.use_bake_image:
+        if not ps_ctx.ps_object or ps_ctx.ps_object.type != 'MESH' or ps_ctx.active_channel.use_bake_image:
             return False
         return active_layer and active_layer.type == 'IMAGE'
     
@@ -969,15 +1005,23 @@ class MAT_PT_ImageLayerSettings(PSContextMixin, Panel):
         layout = self.layout
         ps_ctx = self.parse_context(context)
         layer = ps_ctx.active_layer
-        if not ps_ctx.ps_settings.use_legacy_ui:
-            if ps_ctx.ps_object.type == 'MESH' and layer.type == 'IMAGE':
-                layout.operator("wm.call_menu", text="Filters", icon="IMAGE_DATA").name = "MAT_MT_ImageFilterMenu"
+        # Filter button moved to Layer Settings panel header; remove here.
+        pass
     
     def draw(self, context):
         ps_ctx = self.parse_context(context)
         active_layer = ps_ctx.active_layer
         layout = self.layout
         layout.enabled = not active_layer.lock_layer
+        if not active_layer.external_image:
+            layout.operator("paint_system.quick_edit", text="Edit Externally")
+        else:
+            if active_layer.edit_external_mode == 'IMAGE_EDIT':
+                row = layout.row(align=True)
+                row.operator("paint_system.quick_edit", text="Open Image", icon_value=get_image_editor_icon(context.preferences.filepaths.image_editor))
+                row.operator("paint_system.reload_image", text="Reload Image", icon="FILE_REFRESH")
+            elif active_layer.edit_external_mode == 'VIEW_CAPTURE':
+                layout.operator("paint_system.project_apply", text="Apply Edit")
         box = layout.box()
         col = box.column()
         image_node = active_layer.source_node
@@ -1182,7 +1226,7 @@ class MAT_PT_Actions(PSContextMixin, Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = 'Paint System'
-    bl_parent_id = 'MAT_PT_LayerSettings'
+    bl_parent_id = 'MAT_PT_LayerSettingsAdvanced'
     bl_options = {'DEFAULT_CLOSED'}
 
     @classmethod
@@ -1245,6 +1289,7 @@ classes = (
     MAT_PT_LayerSettings,
     MAT_PT_GreasePencilMaskSettings,
     MAT_PT_GreasePencilOnionSkinningSettings,
+    MAT_PT_LayerSettingsAdvanced,
     MAT_PT_ImageLayerSettings,
     MAT_PT_LayerTransformSettings,
     MAT_PT_Actions,

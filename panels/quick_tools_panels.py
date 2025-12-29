@@ -19,6 +19,10 @@ class MAT_PT_PaintSystemQuickTools(PSContextMixin, Panel):
         if not context.area or not context.area.spaces:
             return
         
+
+        # Safety check for space
+        if not context.area or not context.area.spaces:
+            return
         space = context.area.spaces.active
         overlay = space.overlay
         obj = context.active_object
@@ -35,35 +39,50 @@ class MAT_PT_PaintSystemQuickTools(PSContextMixin, Panel):
             'SCULPT_GPENCIL'
         }
         
-        # ===== DISPLAY SECTION =====
+        # ===== DISPLAY SECTION =====        if space.type != 'VIEW_3D':
+            return
+
         box = layout.box()
-        
-        # Wireframe toggle
         if obj:
             row = box.row()
-            if context.mode == 'EDIT_MESH':
-                row.prop(overlay, "show_wireframes", text="Toggle Wireframe", icon='MOD_WIREFRAME')
-            else:
-                row.prop(obj, "show_wire", text="Toggle Wireframe", icon='MOD_WIREFRAME')
-        
-        # Gizmo toggle button
+            scale_content(context, row)
+            row.prop(obj,
+                 "show_wire", text="Toggle Wireframe", icon='MOD_WIREFRAME')
         row = box.row()
-        any_gizmo_on = any([
-            getattr(space, "show_gizmo_object_translate", False),
-            getattr(space, "show_gizmo_object_rotate", False),
-            getattr(space, "show_gizmo_object_scale", False)
-        ])
-        op = row.operator("paint_system.toggle_transform_gizmos", text="Toggle Gizmo", icon='GIZMO', depress=any_gizmo_on)
-        
-        # Individual gizmo controls (disabled in paint mode)
-        is_paint_mode = context.mode in paint_modes
+        if not ps_ctx.ps_settings.use_compact_design:
+            row.scale_y = 1
+            row.scale_x = 1
+        row.prop(space, "show_gizmo", text="Toggle Gizmo", icon='GIZMO')
         row = row.row(align=True)
-        row.enabled = not is_paint_mode
-        row.prop(space, "show_gizmo_object_translate", text="", icon='EMPTY_ARROWS')
-        row.prop(space, "show_gizmo_object_rotate", text="", icon='FILE_REFRESH')
-        row.prop(space, "show_gizmo_object_scale", text="", icon='MOD_MESHDEFORM')
-        
-        # ===== MESH SECTION =====
+        row.prop(space, "show_gizmo_object_translate",
+                 text="", icon='EMPTY_ARROWS')
+        row.prop(space, "show_gizmo_object_rotate",
+                 text="", icon='FILE_REFRESH')
+        row.prop(space, "show_gizmo_object_scale",
+                 text="", icon='MOD_MESHDEFORM')
+
+
+class MAT_PT_PaintSystemQuickToolsMesh(PSContextMixin, Panel):
+    bl_idname = 'MAT_PT_PaintSystemQuickToolsMesh'
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_label = "Mesh"
+    bl_category = 'Quick Tools'
+    # bl_parent_id = 'MAT_PT_PaintSystemQuickTools'
+
+    def draw_header(self, context):
+        layout = self.layout
+        ps_ctx = self.parse_context(context)
+        layout.label(icon="MESH_CUBE")
+
+    def draw(self, context):
+        ps_ctx = self.parse_context(context)
+        obj = ps_ctx.active_object
+        layout = self.layout
+        space = context.area.spaces[0]
+        overlay = space.overlay
+        mode_string = context.mode
+
         box = layout.box()
         row = box.row()
         row.alignment = "CENTER"
@@ -100,7 +119,7 @@ class MAT_PT_PaintSystemQuickTools(PSContextMixin, Panel):
         row = box.row()
         row.alignment = "CENTER"
         row.label(text="Transforms:", icon="EMPTY_ARROWS")
-        if obj and (obj.scale[0] != 1 or obj.scale[1] != 1 or obj.scale[0] != 1):
+        if obj and hasattr(obj, 'scale') and (obj.scale[0] != 1 or obj.scale[1] != 1 or obj.scale[2] != 1):
             box1 = box.box()
             box1.alert = True
             col = box1.column(align=True)
@@ -142,8 +161,9 @@ class MAT_PT_PaintSystemQuickToolsPaint(PSContextMixin, Panel):
 
 
 classes = (
-    MAT_PT_PaintSystemQuickTools,
+    MAT_PT_PaintSystemQuickToolsDisplay,
+    MAT_PT_PaintSystemQuickToolsMesh,
     MAT_PT_PaintSystemQuickToolsPaint,
 )
 
-register, unregister = register_classes_factory(classes)    
+register, unregister = register_classes_factory(classes)  # type: ignore[misc]    
