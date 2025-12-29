@@ -89,14 +89,12 @@ def poll_brush_color_settings(context: Context):
         layout.label(icon_value=get_icon('color'))
 
     def draw_header_preset(self, context):
-        ps_ctx = self.parse_context(context)
         layout = self.layout
-        settings = self.paint_settings(context)
-        brush = settings.brush
-        if ps_ctx.ps_object.type == 'MESH':
-            self.prop_unified_color(layout, context, brush, "color", text="")
-        elif ps_ctx.ps_object.type == 'GREASEPENCIL':
-            layout.prop(brush, "color", text="")
+        layout.popover(
+            panel="MAT_PT_BrushColorSettings",
+            text="",
+            icon="SETTINGS"
+        )
             
 
     def draw(self, context):
@@ -106,12 +104,6 @@ def poll_brush_color_settings(context: Context):
         settings = self.paint_settings(context)
         brush = settings.brush
         if ps_ctx.ps_object.type == 'MESH':
-            row = col.row(align=True)
-            row.scale_y = 1.2
-            row.popover(
-                panel="MAT_PT_BrushColorSettings",
-                icon="SETTINGS"
-            )
             prop_owner = get_unified_settings(context, "use_unified_color")
             row = col.row()
             row.scale_y = ps_ctx.ps_settings.color_picker_scale
