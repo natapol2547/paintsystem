@@ -226,6 +226,13 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
             row = col.row()
             row.scale_y = ps_ctx.ps_settings.color_picker_scale
             self.prop_unified_color_picker(row, context, brush, "color", value_slider=True)
+            # Color cards: primary + secondary swatches with related actions
+            sub_row = col.row(align=True)
+            sub_row.scale_y = 1.0
+            self.prop_unified_color(sub_row, context, brush, "color", text="")
+            self.prop_unified_color(sub_row, context, brush, "secondary_color", text="")
+            sub_row.operator("paint.brush_colors_flip", icon='FILE_REFRESH', text="")
+            sub_row.operator("paint_system.color_sampler", icon='EYEDROPPER', text="")
             if ps_ctx.ps_settings.show_more_color_picker_settings:
                 if not context.preferences.view.color_picker_type == "SQUARE_SV":
                     col.prop(ps_ctx.ps_scene_data, "hue", text="Hue")
@@ -242,14 +249,15 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
                 except Exception:
                     pass
                 try:
-                    header, panel = col.panel("paintsystem_color_history_palette", default_closed=True)
+                    # Always show Color History and Palette cards expanded under the color wheel
+                    header, panel = col.panel("paintsystem_color_history_palette", default_closed=False)
                     header.label(text="Color History")
                     if panel:
                         if not ps_ctx.ps_scene_data.color_history_palette:
                             panel.label(text="No color history yet")
                         else:
                             panel.template_palette(ps_ctx.ps_scene_data, "color_history_palette", color=True)
-                    header, panel = col.panel("paintsystem_color_palette", default_closed=True)
+                    header, panel = col.panel("paintsystem_color_palette", default_closed=False)
                     header.label(text="Color Palette")
                     panel.template_ID(settings, "palette", new="palette.new")
                     if panel and settings.palette:
