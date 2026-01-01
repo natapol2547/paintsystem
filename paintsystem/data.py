@@ -1404,18 +1404,6 @@ class Layer(BaseNestedListItem):
             
         return warnings
     
-    def link_layer_data(self, layer: "Layer"):
-        for prop in layer.bl_rna.properties:
-            pid = getattr(prop, 'identifier', '')
-            if not pid or getattr(prop, 'is_readonly', False):
-                continue
-            if pid in {"name", "uid", "id", "order", "parent_id", "layer_name"}:
-                continue
-            value = getattr(layer, pid)
-            if getattr(self, pid) == value:
-                continue
-            setattr(self, pid, value)
-    
     def ensure_empty_object(self):
         context = bpy.context
         ps_ctx = parse_context(context)
@@ -1446,6 +1434,9 @@ class Layer(BaseNestedListItem):
             self.empty_object.name = f"{self.layer_name} ({self.uid[:8]}) Empty"
             self.ensure_empty_object()
     
+    def link_layer_data(self, layer: "Layer"):
+        self.apply_properties(layer, self, ignore_props=["name", "uid", "id", "order", "parent_id", "layer_name"])
+    
     def unlink_layer_data(self):
         layer = self.get_layer_data()
         if is_layer_linked(self) and not self.is_linked:
@@ -1459,16 +1450,7 @@ class Layer(BaseNestedListItem):
     
     def copy_layer_data(self, layer: "Layer"):
         self.duplicate_layer_data(layer)
-        for prop in layer.bl_rna.properties:
-            pid = getattr(prop, 'identifier', '')
-            if not pid or getattr(prop, 'is_readonly', False):
-                continue
-            if pid in {"name", "uid", "node_tree", "image", "empty_object", "type", "id", "order", "parent_id", "layer_name"}:
-                continue
-            value = getattr(layer, pid)
-            if getattr(self, pid) == value:
-                continue
-            setattr(self, pid, value)
+        self.apply_properties(layer, self, ignore_props=["name", "uid", "node_tree", "image", "empty_object", "type", "id", "order", "parent_id", "layer_name"])
     
     def get_layer_data(self) -> "Layer":
         if self.is_linked:
@@ -1519,6 +1501,36 @@ class Layer(BaseNestedListItem):
             # TODO: The following causes some issue when undoing
             if self.node_tree:
                 bpy.data.node_groups.remove(self.node_tree)
+    
+    def apply_properties(self, from_layer: "Layer", to_layer: "Layer", ignore_props: list[str] = []):
+        retry_props = []
+        for prop in from_layer.bl_rna.properties:
+            pid = getattr(prop, 'identifier', '')
+            if not pid or getattr(prop, 'is_readonly', False):
+                continue
+            if pid in ignore_props:
+                continue
+            value = getattr(from_layer, pid)
+            try:
+                setattr(to_layer, pid, value)
+            except Exception as e:
+                retry_props.append(pid)
+        # If some properties failed, force update_node_tree first and then apply the properties again
+        failed_props = []
+        if retry_props:
+            print(f"Warning: Could not apply properties {retry_props} for {to_layer.name}, retrying...")
+            original_auto_update_node_tree = bool(to_layer.auto_update_node_tree)
+            to_layer.auto_update_node_tree = False
+            to_layer.update_node_tree(bpy.context)
+            for pid in retry_props:
+                value = getattr(from_layer, pid)
+                try:
+                    setattr(to_layer, pid, value)
+                except Exception as e:
+                    failed_props.append(pid)
+            to_layer.auto_update_node_tree = original_auto_update_node_tree
+        if failed_props:
+            print(f"Warning: Could not apply properties {failed_props} for {to_layer.name}")
     
     @property
     def modifies_color_data(self) -> bool:
