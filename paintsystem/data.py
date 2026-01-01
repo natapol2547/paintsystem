@@ -1656,27 +1656,6 @@ class Layer(BaseNestedListItem):
             to_layer.auto_update_node_tree = original_auto_update_node_tree
         if failed_props:
             print(f"Warning: Could not apply properties {failed_props} for {to_layer.name}")
-
-    def create_layer_mask(self, context: Context, layer_mask_name: str, layer_mask_type: str, **kwargs):
-        layer_mask = self.layer_masks.add()
-        layer_mask.name = layer_mask_name
-        layer_mask.layer_name = layer_mask_name
-        layer_mask.type = layer_mask_type if layer_mask_type in {'IMAGE', 'TEXTURE'} else 'IMAGE'
-        if not is_valid_uuidv4(layer_mask.uid):
-            layer_mask.uid = str(uuid.uuid4())
-        if not layer_mask.node_tree:
-            layer_mask.node_tree = bpy.data.node_groups.new(
-                name=f"PS_Mask ({layer_mask_name})",
-                type='ShaderNodeTree'
-            )
-        for key, value in kwargs.items():
-            setattr(layer_mask, key, value)
-        if layer_mask.type not in {'IMAGE', 'TEXTURE'}:
-            layer_mask.type = 'IMAGE'
-        if layer_mask.uid:
-            layer_mask.node_tree.name = f"PS Mask {layer_mask_name} ({layer_mask.uid[:8]})"
-        self.update_node_tree(context)
-        return layer_mask
     
     @property
     def modifies_color_data(self) -> bool:
