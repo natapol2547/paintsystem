@@ -523,6 +523,7 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
         # Override parent execute to control multiple_objects based on apply_to_all_objects
         self.multiple_objects = self.apply_to_all_objects
         return super().execute(context)
+
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
@@ -821,7 +822,7 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
                     obj.select_set(True)
                 if objects_with_material and context.view_layer.objects.active not in objects_with_material:
                     context.view_layer.objects.active = objects_with_material[0]
-        
+
         # Set group name to material name
         if mat:
             base_name = mat.name
@@ -910,7 +911,7 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
             if not self.apply_to_all_objects:
                 info_row = box.row()
                 info_row.label(text="Will only affect current object", icon='INFO')
-        
+
         box = layout.box()
         row = box.row()
         row.alignment = "CENTER"
@@ -939,6 +940,7 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
         row.alignment = "CENTER"
         row.label(text="Setup Settings:", icon="NODETREE")
         box.prop(self, "group_name", text="Setup Name", icon='NODETREE')
+
 classes = (
     PAINTSYSTEM_OT_NewGroup,
     PAINTSYSTEM_OT_DeleteGroup,
