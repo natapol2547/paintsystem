@@ -281,6 +281,17 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
             row.scale_x = 2
             row.scale_y = 2
             row.operator("paint_system.new_group", text="Add Paint System", icon="ADD")
+            
+            # Check if material has a Principled BSDF to offer conversion
+            if ps_ctx.active_material and ps_ctx.active_material.use_nodes:
+                from ..utils.nodes import find_node
+                principled = find_node(ps_ctx.active_material.node_tree, {'bl_idname': 'ShaderNodeBsdfPrincipled'})
+                if principled is not None:
+                    box = layout.box()
+                    box.label(text="Convert Existing Material:", icon="MATERIAL")
+                    row = box.row()
+                    row.scale_y = 1.5
+                    row.operator("paint_system.convert_material_to_ps", text="Convert to Paint System", icon="FILE_REFRESH")
             return
         # layout.label(text="Welcome to the Paint System!")
         # layout.operator("paint_system.new_image_layer", text="Create New Image Layer")
