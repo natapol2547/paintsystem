@@ -492,6 +492,16 @@ def draw_paint_system_material(self, context):
         row.operator("paint_system.new_group", icon='ADD', text="")
         row.operator("paint_system.delete_group", icon='REMOVE', text="")
         row.operator("paint_system.sync_names", icon='FILE_REFRESH', text="")
+    elif ps_ctx.active_material and ps_ctx.active_material.use_nodes:
+        # Check if material has a Principled BSDF to offer conversion
+        from ..utils.nodes import find_node
+        principled = find_node(ps_ctx.active_material.node_tree, {'bl_idname': 'ShaderNodeBsdfPrincipled'})
+        if principled is not None:
+            box = layout.box()
+            box.label(text="Convert to Paint System:", icon_value=get_icon("sunflower"))
+            row = box.row()
+            scale_content(context, row, 1.3, 1.2)
+            row.operator("paint_system.convert_material_to_ps", text="Convert Material", icon="FILE_REFRESH")
 
 classes = (
     MAT_PT_BrushTooltips,
