@@ -638,7 +638,7 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
                 channel_name='Emission',
                 channel_type='COLOR',
                 use_alpha=False,
-                color_space='SRGB'
+                color_space='COLOR'
             )
             channel_setups.append({
                 'channel': channel,
