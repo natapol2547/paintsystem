@@ -94,7 +94,7 @@ class PSUVOptionsMixin():
     use_paint_system_uv: BoolProperty(
         name="Use Paint System UV",
         description="Use the Paint System UV",
-        default=True,
+        default=False,
         update=update_use_paint_system_uv,
         options={'SKIP_SAVE'}
     )
