@@ -447,60 +447,6 @@ class PAINTSYSTEM_OT_DuplicatePaintSystemData(PSContextMixin, MultiMaterialOpera
         return {'FINISHED'}
 
 
-class PAINTSYSTEM_OT_ToggleTransformGizmos(Operator):
-    bl_idname = "paint_system.toggle_transform_gizmos"
-    bl_label = "Toggle Transform Gizmos"
-    bl_options = {'REGISTER'}
-    bl_description = "Toggle transform gizmos on/off with state memory for paint mode"
-
-    def execute(self, context):
-        space = context.area.spaces[0] if context.area and context.area.spaces else None
-        if not space or space.type != 'VIEW_3D':
-            return {'CANCELLED'}
-        
-        wm = context.window_manager
-        obj = context.active_object
-        
-        # Determine current gizmo state
-        gizmos_enabled = (space.show_gizmo_object_translate or
-                         space.show_gizmo_object_rotate or
-                         space.show_gizmo_object_scale)
-        
-        # Treat paint, sculpt, vertex/weight paint, and GP draw modes the same for gizmos
-        paint_like_modes = {
-            'PAINT_TEXTURE',
-            'SCULPT',
-            'PAINT_VERTEX',
-            'PAINT_WEIGHT',
-            'PAINT_GPENCIL',
-            'PAINT_GPENCIL_LEGACY',
-            'PAINT_GREASE_PENCIL',
-        }
-        in_paint_mode = obj and obj.mode in paint_like_modes
-        
-        if in_paint_mode:
-            # Store current gizmo state before entering paint mode
-            wm["ps_gizmo_translate"] = space.show_gizmo_object_translate
-            wm["ps_gizmo_rotate"] = space.show_gizmo_object_rotate
-            wm["ps_gizmo_scale"] = space.show_gizmo_object_scale
-            # Keep gizmos disabled during paint mode
-            space.show_gizmo_object_translate = False
-            space.show_gizmo_object_rotate = False
-            space.show_gizmo_object_scale = False
-        else:
-            # Not in paint mode - toggle gizmos normally
-            new_state = not gizmos_enabled
-            space.show_gizmo_object_translate = new_state
-            space.show_gizmo_object_rotate = new_state
-            space.show_gizmo_object_scale = new_state
-        
-        # Redraw the viewport
-        for area in context.screen.areas:
-            if area.type == 'VIEW_3D':
-                area.tag_redraw()
-        
-        return {'FINISHED'}
-
 def split_area(context: bpy.types.Context, direction: str = 'VERTICAL', factor: float = 0.55) -> bpy.types.Area | None:
     screen = context.screen
     old_areas = set(screen.areas)
@@ -619,9 +565,45 @@ classes = (
     PAINTSYSTEM_OT_AddCameraPlane,
     PAINTSYSTEM_OT_HidePaintingTips,
     PAINTSYSTEM_OT_DuplicatePaintSystemData,
-    PAINTSYSTEM_OT_ToggleTransformGizmos,
     PAINTSYSTEM_OT_ToggleImageEditor,
     PAINTSYSTEM_OT_FocusPSNode,
 )
 
-register, unregister = register_classes_factory(classes)
+addon_keymaps = []
+
+_register, _unregister = register_classes_factory(classes)
+
+def register():
+    """Register operators with idempotent error handling."""
+    try:
+        _register()
+    except ValueError as e:
+        if "already registered" in str(e):
+            print(f"Paint System: Operators already registered (module reload): {e}")
+        else:
+            raise
+    
+    wm = bpy.context.window_manager
+    kc = wm.keyconfigs.addon if hasattr(wm, "keyconfigs") else None
+    if kc:
+        km = kc.keymaps.new(name="3D View", space_type='VIEW_3D')
+        kmi = km.keymap_items.new(
+            PAINTSYSTEM_OT_ColorSample.bl_idname, 'I', 'PRESS', repeat=True)
+        addon_keymaps.append((km, kmi))
+        kmi = km.keymap_items.new(
+            PAINTSYSTEM_OT_ToggleBrushEraseAlpha.bl_idname, type='E', value='PRESS')
+        addon_keymaps.append((km, kmi))
+
+def unregister():
+    """Unregister operators with idempotent error handling."""
+    for km, kmi in addon_keymaps:
+        try:
+            km.keymap_items.remove(kmi)
+        except Exception as e:
+            print(f"Paint System: Error removing keymap: {e}")
+    addon_keymaps.clear()
+    
+    try:
+        _unregister()
+    except Exception as e:
+        print(f"Paint System: Error unregistering operators: {e}")
