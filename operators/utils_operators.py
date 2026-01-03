@@ -437,7 +437,15 @@ addon_keymaps = []
 _register, _unregister = register_classes_factory(classes)
 
 def register():
-    _register()
+    """Register operators with idempotent error handling."""
+    try:
+        _register()
+    except ValueError as e:
+        if "already registered" in str(e):
+            print(f"Paint System: Operators already registered (module reload): {e}")
+        else:
+            raise
+    
     wm = bpy.context.window_manager
     kc = wm.keyconfigs.addon
     if kc:
@@ -449,7 +457,15 @@ def register():
         addon_keymaps.append((km, kmi))
 
 def unregister():
+    """Unregister operators with idempotent error handling."""
     for km, kmi in addon_keymaps:
-        km.keymap_items.remove(kmi)
+        try:
+            km.keymap_items.remove(kmi)
+        except Exception as e:
+            print(f"Paint System: Error removing keymap: {e}")
     addon_keymaps.clear()
-    _unregister()
+    
+    try:
+        _unregister()
+    except Exception as e:
+        print(f"Paint System: Error unregistering operators: {e}")
