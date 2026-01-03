@@ -677,7 +677,7 @@ def register():
             raise
 
     wm = bpy.context.window_manager
-    kc = wm.keyconfigs.addon
+    kc = wm.keyconfigs.addon if hasattr(wm, "keyconfigs") else None
     if kc:
         km = kc.keymaps.new(name="3D View", space_type='VIEW_3D')
         kmi = km.keymap_items.new(
