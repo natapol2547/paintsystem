@@ -234,7 +234,6 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
             self.prop_unified_color(sub_row, context, brush, "color", text="")
             self.prop_unified_color(sub_row, context, brush, "secondary_color", text="")
             sub_row.operator("paint.brush_colors_flip", icon='FILE_REFRESH', text="")
-            sub_row.operator("paint_system.color_sampler", icon='EYEDROPPER', text="")
             if ps_ctx.ps_settings.show_more_color_picker_settings:
                 hsv_col = col.column(align=True)
                 if not context.preferences.view.color_picker_type == "SQUARE_SV":
