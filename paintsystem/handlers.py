@@ -196,6 +196,7 @@ def color_history_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph
 def transform_gizmo_mode_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph = None):
     """Automatically disable transform gizmos in paint-like modes,
     and restore based on stored preferences when exiting paint modes.
+    and restore based on stored preferences when exiting paint modes.
     """
     try:
         obj = bpy.context.object
