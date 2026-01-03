@@ -190,14 +190,12 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
         layout.label(icon_value=get_icon('color'))
 
     def draw_header_preset(self, context):
-        ps_ctx = self.parse_context(context)
         layout = self.layout
-        settings = self.paint_settings(context)
-        brush = settings.brush
-        if ps_ctx.ps_object.type == 'MESH':
-            self.prop_unified_color(layout, context, brush, "color", text="")
-        elif ps_ctx.ps_object.type == 'GREASEPENCIL':
-            layout.prop(brush, "color", text="")
+        layout.popover(
+            panel="MAT_PT_BrushColorSettings",
+            text="",
+            icon="SETTINGS"
+        )
             
 
     def draw(self, context):
@@ -207,21 +205,22 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
         settings = self.paint_settings(context)
         brush = settings.brush
         if ps_ctx.ps_object.type == 'MESH':
-            row = col.row(align=True)
-            row.scale_y = 1.2
-            row.popover(
-                panel="MAT_PT_BrushColorSettings",
-                icon="SETTINGS"
-            )
             prop_owner = get_unified_settings(context, "use_unified_color")
             row = col.row()
             row.scale_y = ps_ctx.ps_settings.color_picker_scale
             self.prop_unified_color_picker(row, context, brush, "color", value_slider=True)
+            # Color cards: primary + secondary swatches with related actions
+            sub_row = col.row(align=True)
+            sub_row.scale_y = 1.0
+            self.prop_unified_color(sub_row, context, brush, "color", text="")
+            self.prop_unified_color(sub_row, context, brush, "secondary_color", text="")
+            sub_row.operator("paint.brush_colors_flip", icon='FILE_REFRESH', text="")
             if ps_ctx.ps_settings.show_more_color_picker_settings:
+                hsv_col = col.column(align=True)
                 if not context.preferences.view.color_picker_type == "SQUARE_SV":
-                    col.prop(ps_ctx.ps_scene_data, "hue", text="Hue")
-                col.prop(ps_ctx.ps_scene_data, "saturation", text="Saturation")
-                col.prop(ps_ctx.ps_scene_data, "value", text="Value")
+                    hsv_col.prop(ps_ctx.ps_scene_data, "hue", text="Hue")
+                hsv_col.prop(ps_ctx.ps_scene_data, "saturation", text="Saturation")
+                hsv_col.prop(ps_ctx.ps_scene_data, "value", text="Value")
             if ps_ctx.ps_settings.show_hex_color:
                 row = col.row()
                 row.prop(ps_ctx.ps_scene_data, "hex_color", text="Hex")
@@ -233,14 +232,15 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
                 except Exception:
                     pass
                 try:
-                    header, panel = col.panel("paintsystem_color_history_palette", default_closed=True)
+                    # Always show Color History and Palette cards expanded under the color wheel
+                    header, panel = col.panel("paintsystem_color_history_palette", default_closed=False)
                     header.label(text="Color History")
                     if panel:
                         if not ps_ctx.ps_scene_data.color_history_palette:
                             panel.label(text="No color history yet")
                         else:
                             panel.template_palette(ps_ctx.ps_scene_data, "color_history_palette", color=True)
-                    header, panel = col.panel("paintsystem_color_palette", default_closed=True)
+                    header, panel = col.panel("paintsystem_color_palette", default_closed=False)
                     header.label(text="Color Palette")
                     panel.template_ID(settings, "palette", new="palette.new")
                     if panel and settings.palette:
@@ -368,12 +368,12 @@ class MAT_PT_TexPaintRMBMenu(PSContextMixin, Panel, UnifiedPaintPanel):
             sub_col.prop(ps_ctx.ps_scene_data, "saturation", text="Saturation")
             sub_col.prop(ps_ctx.ps_scene_data, "value", text="Value")
 
-        # Palette selection and history remain with color settings
-        # if show_palette:
-        #     color_col.separator()
-        #     color_col.template_ID(settings, "palette", new="palette.new")
-        #     if settings.palette:
-        #         color_col.template_palette(settings, "palette", color=True)
+        # Palette selection (optional based on preferences)
+        if show_palette:
+            color_col.separator()
+            color_col.template_ID(settings, "palette", new="palette.new")
+            if settings.palette:
+                color_col.template_palette(settings, "palette", color=True)
 
         if show_brush_controls:
             # Brush settings container
