@@ -611,6 +611,14 @@ _register, _unregister = register_classes_factory(classes)
 
 def register():
     """Register operators with idempotent error handling."""
+    # Defensive cleanup in case Blender kept classes from a previous load
+    # (notably in CI where the addon may be enabled twice within one process).
+    for cls in classes:
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception:
+            # Fine if it was not registered yet.
+            pass
     try:
         _register()
     except ValueError as e:
