@@ -167,7 +167,7 @@ class PaintSystemPreferences(AddonPreferences):
         rmb_box.label(text="Texture Paint Right Click Menu", icon='MOUSE_RMB')
         rmb_box.prop(self, "color_picker_scale_rmb", text="Color Wheel Scale")
         rmb_box.prop(self, "show_hsv_sliders_rmb", text="Show HSV sliders in RMB popover")
-        # rmb_box.prop(self, "show_active_palette_rmb", text="Show Active Palette in RMB popover")
+        rmb_box.prop(self, "show_active_palette_rmb", text="Show Active Palette in RMB popover")
         rmb_box.prop(self, "show_brush_settings_rmb", text="Show Brush Controls in RMB popover")
         
         # Version check settings
