@@ -19,12 +19,12 @@ class PaintSystemPreferences(AddonPreferences):
     show_hex_color: BoolProperty(
         name="Show Hex Color",
         description="Show hex color in the color picker settings",
-        default=False
+        default=True
     )
     show_more_color_picker_settings: BoolProperty(
         name="Show More Color Picker Settings",
         description="Show more color picker settings",
-        default=False
+        default=True
     )
 
     use_compact_design: BoolProperty(
@@ -71,7 +71,7 @@ class PaintSystemPreferences(AddonPreferences):
     show_hsv_sliders_rmb: BoolProperty(
         name="Show Hue/Saturation/Value sliders (RMB)",
         description="Show HSV sliders under the color wheel in the Texture Paint right-click popover",
-        default=False
+        default=True
     )
     show_active_palette_rmb: BoolProperty(
         name="Show Active Palette (RMB)",
