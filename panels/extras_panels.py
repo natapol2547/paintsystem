@@ -224,12 +224,12 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
             self.prop_unified_color(sub_row, context, brush, "color", text="")
             self.prop_unified_color(sub_row, context, brush, "secondary_color", text="")
             sub_row.operator("paint.brush_colors_flip", icon='FILE_REFRESH', text="")
-            sub_row.operator("paint_system.color_sampler", icon='EYEDROPPER', text="")
             if ps_ctx.ps_settings.show_more_color_picker_settings:
+                hsv_col = col.column(align=True)
                 if not context.preferences.view.color_picker_type == "SQUARE_SV":
-                    col.prop(ps_ctx.ps_scene_data, "hue", text="Hue")
-                col.prop(ps_ctx.ps_scene_data, "saturation", text="Saturation")
-                col.prop(ps_ctx.ps_scene_data, "value", text="Value")
+                    hsv_col.prop(ps_ctx.ps_scene_data, "hue", text="Hue")
+                hsv_col.prop(ps_ctx.ps_scene_data, "saturation", text="Saturation")
+                hsv_col.prop(ps_ctx.ps_scene_data, "value", text="Value")
             if ps_ctx.ps_settings.show_hex_color:
                 row = col.row()
                 row.prop(ps_ctx.ps_scene_data, "hex_color", text="Hex")
@@ -377,12 +377,12 @@ class MAT_PT_TexPaintRMBMenu(PSContextMixin, Panel, UnifiedPaintPanel):
             sub_col.prop(ps_ctx.ps_scene_data, "saturation", text="Saturation")
             sub_col.prop(ps_ctx.ps_scene_data, "value", text="Value")
 
-        # Palette selection and history remain with color settings
-        # if show_palette:
-        #     color_col.separator()
-        #     color_col.template_ID(settings, "palette", new="palette.new")
-        #     if settings.palette:
-        #         color_col.template_palette(settings, "palette", color=True)
+        # Palette selection (optional based on preferences)
+        if show_palette:
+            color_col.separator()
+            color_col.template_ID(settings, "palette", new="palette.new")
+            if settings.palette:
+                color_col.template_palette(settings, "palette", color=True)
 
         if show_brush_controls:
             # Brush settings container
