@@ -242,6 +242,7 @@ class MAT_MT_PaintSystemMergeAndExport(PSContextMixin, Menu):
         if not ps_ctx.ps_settings.use_legacy_ui:
             layout.operator("paint_system.export_all_images", text="Export All Channels", icon='EXPORT')
 
+
 class MAT_PT_Layers(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_Layers'
     bl_space_type = "VIEW_3D"
