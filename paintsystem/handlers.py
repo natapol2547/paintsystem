@@ -190,74 +190,103 @@ def color_history_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph
 @bpy.app.handlers.persistent
 def transform_gizmo_mode_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph = None):
     """Automatically disable transform gizmos in paint-like modes,
-    and restore based on stored preferences otherwise.
+    and restore based on stored preferences when exiting paint modes.
     """
     try:
         obj = bpy.context.object
-        area = bpy.context.area
+        screen = bpy.context.screen
     except Exception:
         return
-    if not area or area.type != 'VIEW_3D':
+    
+    if not screen:
         return
-    space = area.spaces[0]
+    
+    # Get all VIEW_3D spaces
+    view3d_spaces = []
+    for area in screen.areas:
+        if area.type == 'VIEW_3D':
+            for space in area.spaces:
+                if space.type == 'VIEW_3D':
+                    view3d_spaces.append(space)
+                    break
+    
+    if not view3d_spaces:
+        return
 
     paint_like_modes = {
         'PAINT_TEXTURE',
         'SCULPT',
         'PAINT_VERTEX',
         'PAINT_WEIGHT',
-        'PAINT_GPENCIL',
-        'PAINT_GPENCIL_LEGACY',
         'PAINT_GREASE_PENCIL',
-        'SCULPT_GPENCIL',
+        'SCULPT_GREASE_PENCIL',
     }
-    in_paint_mode = obj and hasattr(obj, 'mode') and obj.mode in paint_like_modes
+    
+    current_mode = obj.mode if (obj and hasattr(obj, 'mode')) else None
+    in_paint_mode = current_mode in paint_like_modes
+    was_in_paint_mode = bpy.context.window_manager.get("ps_gizmo_in_paint_mode", False)
+    last_mode = bpy.context.window_manager.get("ps_gizmo_last_mode", None)
 
     wm = bpy.context.window_manager
     
-    # If user has manually toggled gizmos off, don't interfere
+    # If user has manually toggled gizmos off via the toggle button, don't interfere
     if wm.get("ps_gizmo_toggled_off", False):
         return
     
-    if in_paint_mode:
-        # Disable transform overlays while painting
-        # Always capture current states before disabling so we remember what to restore
-        current_t = bool(getattr(space, "show_gizmo_object_translate", False))
-        current_r = bool(getattr(space, "show_gizmo_object_rotate", False))
-        current_s = bool(getattr(space, "show_gizmo_object_scale", False))
-        
-        # Only save if gizmos are currently on (don't overwrite with "off" state)
-        if current_t or current_r or current_s:
-            wm["ps_gizmo_translate"] = current_t
-            wm["ps_gizmo_rotate"] = current_r
-            wm["ps_gizmo_scale"] = current_s
-        
-        space.show_gizmo_object_translate = False
-        space.show_gizmo_object_rotate = False
-        space.show_gizmo_object_scale = False
-    elif obj and getattr(obj, 'mode', None) == 'EDIT':
-        # In Edit mode, ensure translate and rotate are enabled
-        space.show_gizmo_object_translate = True
-        space.show_gizmo_object_rotate = True
-        # For scale, only enable if it was saved as on
-        space.show_gizmo_object_scale = bool(wm.get("ps_gizmo_scale", False))
-    else:
-        # Restore according to exactly what was saved (don't use defaults)
-        # Only restore if something has been saved before
-        if wm.get("ps_gizmo_translate") is not None:
-            t = wm.get("ps_gizmo_translate", False)
-            r = wm.get("ps_gizmo_rotate", False)
-            s = wm.get("ps_gizmo_scale", False)
+    # Detect mode change
+    mode_changed = (last_mode != current_mode)
+    if mode_changed:
+        wm["ps_gizmo_last_mode"] = current_mode
+    
+    # Apply settings to all VIEW_3D spaces
+    for space in view3d_spaces:
+        if in_paint_mode:
+            # Entering or staying in paint mode - disable gizmos
+            # Save current state when entering paint mode
+            if mode_changed and not was_in_paint_mode:
+                current_t = bool(getattr(space, "show_gizmo_object_translate", False))
+                current_r = bool(getattr(space, "show_gizmo_object_rotate", False))
+                current_s = bool(getattr(space, "show_gizmo_object_scale", False))
+                
+                # Save pre-paint state
+                wm["ps_gizmo_pre_paint_translate"] = current_t
+                wm["ps_gizmo_pre_paint_rotate"] = current_r
+                wm["ps_gizmo_pre_paint_scale"] = current_s
+                wm["ps_gizmo_in_paint_mode"] = True
+            
+            # Turn off all gizmos while in paint mode
+            space.show_gizmo_object_translate = False
+            space.show_gizmo_object_rotate = False
+            space.show_gizmo_object_scale = False
         else:
-            # Initialize defaults only once
-            t, r, s = True, True, False
-            wm["ps_gizmo_translate"] = t
-            wm["ps_gizmo_rotate"] = r
-            wm["ps_gizmo_scale"] = s
-        
-        space.show_gizmo_object_translate = bool(t)
-        space.show_gizmo_object_rotate = bool(r)
-        space.show_gizmo_object_scale = bool(s)
+            # Not in paint mode
+            # If we were in paint mode and are now exiting, restore the pre-paint state
+            if mode_changed and was_in_paint_mode:
+                t = wm.get("ps_gizmo_pre_paint_translate", True)
+                r = wm.get("ps_gizmo_pre_paint_rotate", True)
+                s = wm.get("ps_gizmo_pre_paint_scale", False)
+                
+                space.show_gizmo_object_translate = bool(t)
+                space.show_gizmo_object_rotate = bool(r)
+                space.show_gizmo_object_scale = bool(s)
+                
+                wm["ps_gizmo_in_paint_mode"] = False
+            elif not was_in_paint_mode:
+                # Not in paint mode and never was - use persistent user preferences
+                if wm.get("ps_gizmo_translate") is not None:
+                    t = wm.get("ps_gizmo_translate", True)
+                    r = wm.get("ps_gizmo_rotate", True)
+                    s = wm.get("ps_gizmo_scale", False)
+                else:
+                    # Initialize defaults only once
+                    t, r, s = True, True, False
+                    wm["ps_gizmo_translate"] = t
+                    wm["ps_gizmo_rotate"] = r
+                    wm["ps_gizmo_scale"] = s
+                
+                space.show_gizmo_object_translate = bool(t)
+                space.show_gizmo_object_rotate = bool(r)
+                space.show_gizmo_object_scale = bool(s)
 
 @bpy.app.handlers.persistent
 def paint_system_object_update(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph = None):
