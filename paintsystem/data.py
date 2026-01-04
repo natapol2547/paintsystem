@@ -322,9 +322,13 @@ def update_active_group(self, context):
 def find_channels_containing_layer(check_layer: "Layer") -> list["Channel"]:
     """Find all channels that reference *check_layer* (directly or via link)."""
     channels = []
-    for _mat, _grp, channel, layer in iter_all_layers():
-        if layer == check_layer or layer.linked_layer_uid == check_layer.uid:
-            channels.append(channel)
+    for material in bpy.data.materials:
+        if hasattr(material, 'ps_mat_data'):
+            for group in material.ps_mat_data.groups:
+                for channel in group.channels:
+                    for layer in channel.layers:
+                        if layer == check_layer or layer.linked_layer_uid == check_layer.uid:
+                            channels.append(channel)
     return channels
 
 def get_node_from_nodetree(node_tree: NodeTree, identifier: str) -> Node | None:
@@ -890,23 +894,8 @@ class Layer(BaseNestedListItem):
     ref_layer_id: StringProperty()
     
     def update_name(self, context):
-        if self.updating_name_flag:
-            return
-        self.updating_name_flag = True
-        if self.layer_name != self.name:
-            self.layer_name = self.name
-
-        prefs = get_preferences(context)
-        if getattr(prefs, "automatic_name_syncing", True):
-            material = find_material_for_layer(self)
-            if material:
-                new_name = ensure_layer_name_prefix(self.name, material.name)
-                if new_name != self.name:
-                    self.name = new_name
-                    self.layer_name = new_name
-            if self.type == 'IMAGE' and self.image:
-                self.image.name = self.name
-        self.updating_name_flag = False
+        if self.name != self.name:
+            self.name = self.name
         self.update_node_tree(context)
     
     name: StringProperty(
@@ -914,31 +903,6 @@ class Layer(BaseNestedListItem):
         description="Layer name",
         default="Layer",
         update=update_name
-    )
-    updating_name_flag: BoolProperty(
-        default=False,
-        options={'SKIP_SAVE'}  # Don't save this flag in the .blend file
-    )
-    
-    def get_display_name(self):
-        """Return only the suffix part of the name (after underscore) for UI display"""
-        if '_' in self.name:
-            return self.name.split('_', 1)[1]
-        return self.name
-    
-    def set_display_name(self, value):
-        """Set the layer name preserving the material prefix"""
-        if '_' in self.name:
-            prefix = self.name.split('_', 1)[0]
-            self.name = f"{prefix}_{value}"
-        else:
-            self.name = value
-    
-    display_name: StringProperty(
-        name="Name",
-        description="Layer name without prefix",
-        get=get_display_name,
-        set=set_display_name
     )
     
     def update_node_tree(self, context):
@@ -959,7 +923,7 @@ class Layer(BaseNestedListItem):
         
         # Create node tree if it doesn't exist
         if not self.node_tree and not self.is_linked:
-            node_tree = bpy.data.node_groups.new(name=f"PS_Layer ({self.layer_name})", type='ShaderNodeTree')
+            node_tree = bpy.data.node_groups.new(name=f"PS_Layer ({self.name})", type='ShaderNodeTree')
             self.node_tree = node_tree
             expected_input = [
                 ExpectedSocket(name="Clip", socket_type="NodeSocketBool"),
@@ -975,16 +939,64 @@ class Layer(BaseNestedListItem):
             ]
             ensure_sockets(node_tree, expected_input, "INPUT")
             ensure_sockets(node_tree, expected_output, "OUTPUT")
+        if self.name:
+            self.node_tree.name = f"PS {self.name} ({self.uid[:8]})"
         
-        if self.layer_name:
-            self.node_tree.name = f"PS {self.layer_name} ({self.uid[:8]})"
-
-        # Generate UUID if it doesn't exist or is invalid
-        if not is_valid_uuidv4(self.uid):
-            self.uid = str(uuid.uuid4())
+        if self.coord_type == "DECAL":
+            if not self.empty_object:
+                self.ensure_empty_object()
+                self.empty_object.empty_display_type = 'SINGLE_ARROW'
+            elif self.empty_object.name not in context.view_layer.objects:
+                add_empty_to_collection(context, self.empty_object)
         
-        # Create node tree based on layer type
-        layer_graph = PSNodeTreeBuilder.create_layer_graph(self, context)
+        match self.type:
+            case "IMAGE":
+                if self.image:
+                    self.image.name = self.name
+                layer_graph = create_image_graph(self)
+            case "FOLDER":
+                layer_graph = create_folder_graph(self)
+            case "SOLID_COLOR":
+                layer_graph = create_solid_graph(self)
+            case "ATTRIBUTE":
+                layer_graph = create_attribute_graph(self)
+            case "ADJUSTMENT":
+                layer_graph = create_adjustment_graph(self)
+            case "GRADIENT":
+                if self.gradient_type in ('LINEAR', 'RADIAL', 'FAKE_LIGHT'):
+                    if not self.empty_object:
+                        self.ensure_empty_object()
+                        if self.gradient_type == 'LINEAR':
+                            self.empty_object.empty_display_type = 'SINGLE_ARROW'
+                        elif self.gradient_type == 'RADIAL':
+                            self.empty_object.empty_display_type = 'SPHERE'
+                        elif self.gradient_type == 'FAKE_LIGHT':
+                            self.empty_object.location += Vector((0, 0, 2))
+                            self.empty_object.rotation_euler = Euler((3*math.pi/4, math.pi/4, 0))
+                            self.empty_object.empty_display_type = 'SINGLE_ARROW'
+                    elif self.empty_object.name not in context.view_layer.objects:
+                        add_empty_to_collection(context, self.empty_object)
+                layer_graph = create_gradient_graph(self)
+            case "RANDOM":
+                layer_graph = create_random_graph(self)
+            case "NODE_GROUP":
+                layer_graph = create_custom_graph(self)
+            case "TEXTURE":
+                layer_graph = create_texture_graph(self)
+            case "GEOMETRY":
+                layer_graph = create_geometry_graph(self)
+            case _:
+                raise ValueError(f"Invalid layer type: {self.type}")
+        
+        # Clean up
+        if self.empty_object and self.type not in ["GRADIENT", "IMAGE", "TEXTURE", "FAKE_LIGHT"]:
+            collection = get_paint_system_collection(context)
+            if self.empty_object.name in collection.objects:
+                collection.objects.unlink(self.empty_object)
+        elif self.type == "IMAGE" and self.empty_object and self.coord_type != "DECAL":
+            collection = get_paint_system_collection(context)
+            if self.empty_object.name in collection.objects:
+                collection.objects.unlink(self.empty_object)
 
         if not self.enabled:
             layer_graph.link("group_input", "group_output", "Color", "Color")
@@ -1072,8 +1084,8 @@ class Layer(BaseNestedListItem):
     uid: StringProperty()
     
     def update_layer_name(self, context):
-        if self.layer_name != self.name:
-            self.name = self.layer_name
+        if self.name != self.name:
+            self.name = self.name
         self.update_node_tree(context)
     
     layer_name: StringProperty(

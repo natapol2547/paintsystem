@@ -113,23 +113,5 @@ def update_layer_version(layer_parent_map: dict[Layer, LayerParent]):
 
 def update_layer_name(layer_parent_map: dict[Layer, LayerParent]):
     for layer, layer_parent in layer_parent_map.items():
-        if layer.layer_name != layer.name:
-            layer.name = layer.layer_name
-
-def update_library_nodetree_version():
-    if bpy.path.basename(bpy.context.blend_data.filepath) == "library2.blend":
-        return
-    ps_nodetrees = []
-    for node_tree in bpy.data.node_groups:
-        if node_tree.name.startswith(".PS"):
-            if node_tree.name.endswith(" (TEMP)"):
-                bpy.data.node_groups.remove(node_tree)
-                continue
-            if node_tree.name not in LIBRARY_NODE_TREE_VERSIONS:
-                continue
-            ps_nodetrees.append(node_tree)
-    for node_tree in ps_nodetrees:
-        target_version = LIBRARY_NODE_TREE_VERSIONS[node_tree.name]
-        if get_nodetree_version(node_tree) != target_version:
-            print(f"Updating library nodetree {node_tree.name} to version {target_version}")
-            get_library_nodetree(node_tree.name, force_append=True)
+        if layer.name != layer.name:
+            layer.name = layer.name
