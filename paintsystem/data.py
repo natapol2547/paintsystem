@@ -966,10 +966,10 @@ class Layer(BaseNestedListItem):
         # Make sure blend mode is not PASSTHROUGH with non-folder layers
         if self.blend_mode == "PASSTHROUGH" and self.type != "FOLDER":
             self.blend_mode = "MIX"
-        
-        # Create node tree if it doesn't exist
-        if not self.node_tree and not self.is_linked:
-            node_tree = bpy.data.node_groups.new(name=f"PS_Layer ({self.layer_name})", type='ShaderNodeTree')
+
+        # Ensure node tree
+        if not self.node_tree:
+            node_tree = bpy.data.node_groups.new(name=f"PS_Layer ({self.name})", type='ShaderNodeTree')
             self.node_tree = node_tree
             expected_input = [
                 ExpectedSocket(name="Clip", socket_type="NodeSocketBool"),
@@ -1008,7 +1008,7 @@ class Layer(BaseNestedListItem):
         ]
         ensure_sockets(self.node_tree, expected_input, "INPUT")
         ensure_sockets(self.node_tree, expected_output, "OUTPUT")
-        
+
         # Update node tree name
         if self.name:
             try:
