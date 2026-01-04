@@ -1,6 +1,6 @@
 import bpy
 
-from .versioning import get_layer_parent_map, migrate_global_layer_data, migrate_blend_mode, migrate_source_node, migrate_socket_names, update_layer_version
+from .versioning import get_layer_parent_map, migrate_global_layer_data, migrate_blend_mode, migrate_source_node, migrate_socket_names, update_layer_name, update_layer_version
 from .version_check import get_latest_version
 from .data import sort_actions, parse_context, get_all_layers, is_valid_uuidv4
 from .image import save_image
@@ -68,6 +68,7 @@ def load_paint_system_data(scene: bpy.types.Scene):
     migrate_source_node(layer_parent_map)
     migrate_socket_names(layer_parent_map)
     update_layer_version(layer_parent_map)
+    update_layer_name(layer_parent_map)
 
     # As layers in ps_scene_data is not used anymore, we can remove it in the future
     ps_scene_data = getattr(bpy.context.scene, 'ps_scene_data', None)

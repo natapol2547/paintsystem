@@ -670,7 +670,7 @@ class PAINTSYSTEM_OT_ConvertToImageLayer(BakeOperator):
         return {'FINISHED'}
 
 def apply_merged_image_to_layer(merged_layer: "Layer", image: Image, uv_map_name: str):
-    merged_layer.layer_name = merged_layer.layer_name + " Merged"
+    merged_layer.name = merged_layer.name + " Merged"
     merged_layer.type = "IMAGE"
     merged_layer.coord_type = "UV"
     merged_layer.uv_map_name = uv_map_name

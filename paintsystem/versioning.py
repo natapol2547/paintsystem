@@ -111,3 +111,7 @@ def update_layer_version(layer_parent_map: dict[Layer, LayerParent]):
             except Exception as e:
                 print(f"Error updating layer {layer.name}: {e}")
 
+def update_layer_name(layer_parent_map: dict[Layer, LayerParent]):
+    for layer, layer_parent in layer_parent_map.items():
+        if layer.name != layer.name:
+            layer.name = layer.name

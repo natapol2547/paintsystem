@@ -77,7 +77,7 @@ class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSImageCreateMixin, MultiMaterialO
         """Get the next image name from the active channel"""
         ps_ctx = self.parse_context(context)
         if ps_ctx.active_channel:
-            return get_next_unique_name("Image Layer", [layer.name for layer in ps_ctx.active_channel.layers])
+            return get_next_unique_name("Image", [layer.name for layer in ps_ctx.active_channel.layers])
 
     def process_material(self, context):
         self.store_coord_type(context)
@@ -623,7 +623,7 @@ class PAINTSYSTEM_OT_DeleteItem(PSContextMixin, MultiMaterialOperator):
         layout = self.layout
         unlinked_layer = ps_ctx.unlinked_layer
         layout.label(
-            text=f"Delete '{unlinked_layer.layer_name}' ?", icon='ERROR')
+            text=f"Delete '{unlinked_layer.name}' ?", icon='ERROR')
         layout.label(
             text="Click OK to delete, or cancel to keep the layer")
 

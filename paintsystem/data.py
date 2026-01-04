@@ -299,7 +299,6 @@ def find_channels_containing_layer(check_layer: "Layer") -> list["Channel"]:
                     for layer in channel.layers:
                         if layer == check_layer or layer.linked_layer_uid == check_layer.uid:
                             channels.append(channel)
-    # print(f"Found {len(channels)} channels containing layer {check_layer.layer_name}")
     return channels
 
 def get_node_from_nodetree(node_tree: NodeTree, identifier: str) -> Node | None:
@@ -797,11 +796,16 @@ class Layer(BaseNestedListItem):
     # Deprecated
     ref_layer_id: StringProperty()
     
-    # Deprecated. Use layer_name instead.
+    def update_name(self, context):
+        if self.name != self.name:
+            self.name = self.name
+        self.update_node_tree(context)
+    
     name: StringProperty(
         name="Name",
         description="Layer name",
         default="Layer",
+        update=update_name
     )
     
     def update_node_tree(self, context):
@@ -822,7 +826,7 @@ class Layer(BaseNestedListItem):
             self.blend_mode = "MIX"
         
         if not self.node_tree and not self.is_linked:
-            node_tree = bpy.data.node_groups.new(name=f"PS_Layer ({self.layer_name})", type='ShaderNodeTree')
+            node_tree = bpy.data.node_groups.new(name=f"PS_Layer ({self.name})", type='ShaderNodeTree')
             self.node_tree = node_tree
             expected_input = [
                 ExpectedSocket(name="Clip", socket_type="NodeSocketBool"),
@@ -838,8 +842,8 @@ class Layer(BaseNestedListItem):
             ]
             ensure_sockets(node_tree, expected_input, "INPUT")
             ensure_sockets(node_tree, expected_output, "OUTPUT")
-        if self.layer_name:
-            self.node_tree.name = f"PS {self.layer_name} ({self.uid[:8]})"
+        if self.name:
+            self.node_tree.name = f"PS {self.name} ({self.uid[:8]})"
         
         if self.coord_type == "DECAL":
             if not self.empty_object:
@@ -850,16 +854,8 @@ class Layer(BaseNestedListItem):
         
         match self.type:
             case "IMAGE":
-                # if not self.image:
-                #     if self.coord_type == 'UV':
-                #         ps_ctx = PSContextMixin.parse_context(context)
-                #         uv_layer = ps_ctx.ps_object.data.uv_layers.get(self.uv_map_name)
-                #         use_udim_tiles = get_udim_tiles(uv_layer) != {1001}
-                #         self.image = create_ps_image(self.layer_name, use_udim_tiles=use_udim_tiles, uv_layer=uv_layer)
-                #     else:
-                #         self.image = create_ps_image(self.layer_name)
                 if self.image:
-                    self.image.name = self.layer_name
+                    self.image.name = self.name
                 layer_graph = create_image_graph(self)
             case "FOLDER":
                 layer_graph = create_folder_graph(self)
@@ -933,13 +929,6 @@ class Layer(BaseNestedListItem):
         
         update_active_image(self, context)
     
-    # Not used anymore
-    def update_layer_name(self, context):
-        """Update the layer name to ensure uniqueness."""
-        new_name = get_next_unique_name(self.layer_name, [layer.layer_name for layer in context.scene.ps_scene_data.layers if layer != self])
-        if new_name != self.layer_name:
-            self.layer_name = new_name
-        self.update_node_tree(context)
             
     def find_node(self, identifier: str) -> Node | None:
         self = self.get_layer_data()
@@ -993,10 +982,15 @@ class Layer(BaseNestedListItem):
     
     uid: StringProperty()
     
+    def update_layer_name(self, context):
+        if self.name != self.name:
+            self.name = self.name
+        self.update_node_tree(context)
+    
     layer_name: StringProperty(
         name="Name",
         description="Layer name",
-        update=update_node_tree
+        update=update_layer_name
     )
     updating_name_flag: BoolProperty(
         default=False, 
@@ -1407,7 +1401,7 @@ class Layer(BaseNestedListItem):
     def ensure_empty_object(self):
         context = bpy.context
         ps_ctx = parse_context(context)
-        empty_name = f"{self.layer_name} ({self.uid[:8]}) Empty"
+        empty_name = f"{self.name} ({self.uid[:8]}) Empty"
         if empty_name in bpy.data.objects:
             empty_object = bpy.data.objects[empty_name]
             empty_object.parent = ps_ctx.ps_object
@@ -1431,7 +1425,7 @@ class Layer(BaseNestedListItem):
             self.image = image.copy()
         if layer.empty_object:
             self.empty_object = layer.empty_object.copy()
-            self.empty_object.name = f"{self.layer_name} ({self.uid[:8]}) Empty"
+            self.empty_object.name = f"{self.name} ({self.uid[:8]}) Empty"
             self.ensure_empty_object()
     
     def link_layer_data(self, layer: "Layer"):
@@ -1659,9 +1653,6 @@ class Channel(BaseNestedListManager):
             return self.get_parent_layer_id(parent_layer)
         return parent_layer.id
     
-    def get_item_name(self, item):
-        return item.layer_name if item else "root"
-    
     def update_node_tree(self, context:Context):
         if not self.node_tree:
             return
@@ -1831,7 +1822,6 @@ class Channel(BaseNestedListManager):
             )
         layer.auto_update_node_tree = False
         layer.type = layer_type
-        layer.layer_name = layer_name
         layer.uid = str(uuid.uuid4())
         for key, value in kwargs.items():
             setattr(layer, key, value)
@@ -1843,9 +1833,9 @@ class Channel(BaseNestedListManager):
                     if layer.coord_type == 'UV':
                         ps_ctx = parse_context(context)
                         use_udim_tiles = get_udim_tiles(ps_ctx.ps_object, layer.uv_map_name) != {1001}
-                        layer.image = create_ps_image(layer.layer_name, use_udim_tiles=use_udim_tiles, objects=[ps_ctx.ps_object], uv_layer_name=layer.uv_map_name)
+                        layer.image = create_ps_image(layer.name, use_udim_tiles=use_udim_tiles, objects=[ps_ctx.ps_object], uv_layer_name=layer.uv_map_name)
                     else:
-                        layer.image = create_ps_image(layer.layer_name)
+                        layer.image = create_ps_image(layer.name)
         
         # Update active index
         if update_active_index:
@@ -1876,7 +1866,7 @@ class Channel(BaseNestedListManager):
         item_id = layer.id
         order = int(layer.order)
         parent_id = int(layer.parent_id)
-        print(f"Deleting layer {layer.layer_name} with id {item_id} and order {order} and parent_id {parent_id}")
+        print(f"Deleting layer {layer.name} with id {item_id} and order {order} and parent_id {parent_id}")
         def on_delete(item: "Layer"):
             item.delete_layer_data()
         if item_id != -1 and self.remove_item_and_children(item_id, on_delete):
