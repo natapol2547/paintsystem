@@ -96,7 +96,7 @@ class MAT_PT_UL_LayerList(PSContextMixin, UIList):
             main_row.prop(linked_item, "display_name", text="", emboss=False)
 
             row = main_row.row(align=True)
-            row.alignment = 'RIGHT'
+            row.prop(linked_item, "name", text="", emboss=False)
             if linked_item.is_clip:
                 row.label(icon="SELECT_INTERSECT")
             if linked_item.lock_layer:
