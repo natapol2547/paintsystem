@@ -88,13 +88,12 @@ class MAT_PT_UL_LayerList(PSContextMixin, UIList):
             level = active_channel.get_item_level_from_id(item.id)
             main_row = layout.row(align=True)
             warnings = item.get_layer_warnings(context)
-                # main_row.label(text="\n".join(warnings), icon='ERROR')
+            # main_row.label(text="\n".join(warnings), icon='ERROR')
             # Check if parent of the current item is enabled
             parent_item = active_channel.get_item_by_id(
                 item.parent_id)
             if parent_item and not parent_item.enabled:
                 main_row.enabled = False
-
             row = main_row.row(align=True)
             for i in range(level):
                 if i == level - 1:
