@@ -93,7 +93,7 @@ def get_library_nodetree(tree_name: str, library_filename: str = LIBRARY_FILENAM
         # Remap users to the new tree
         existing_tree.user_remap(appended_tree)
         bpy.data.node_groups.remove(existing_tree)
-    
+
     # Clean up any leftover TEMP node trees matching ".PS ... (TEMP)" pattern
     temp_pattern = re.compile(r'^\.PS .+ \(TEMP\)$')
     temp_trees_to_remove = [
