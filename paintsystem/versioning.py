@@ -1,6 +1,7 @@
 import bpy
 from bpy.types import Material
 
+from .graph.common import LIBRARY_NODE_TREE_VERSIONS, get_library_nodetree
 from .graph.basic_layers import get_layer_version_for_type
 from .graph.nodetree_builder import get_nodetree_version
 from .data import get_legacy_global_layer, Layer, Group, Channel
@@ -115,3 +116,15 @@ def update_layer_name(layer_parent_map: dict[Layer, LayerParent]):
     for layer, layer_parent in layer_parent_map.items():
         if layer.layer_name != layer.name:
             layer.name = layer.layer_name
+
+def update_library_nodetree_version():
+    ps_nodetrees = []
+    for node_tree in bpy.data.node_groups:
+        if node_tree.name.startswith(".PS"):
+            ps_nodetrees.append(node_tree)
+    for node_tree in ps_nodetrees:
+        print(f"Checking library nodetree {node_tree.name}")
+        target_version = LIBRARY_NODE_TREE_VERSIONS.get(node_tree.name, 0)
+        if get_nodetree_version(node_tree) != target_version:
+            print(f"Updating library nodetree {node_tree.name} to version {target_version}")
+            get_library_nodetree(node_tree.name, force_append=True)

@@ -1,6 +1,6 @@
 import bpy
 
-from .versioning import get_layer_parent_map, migrate_global_layer_data, migrate_blend_mode, migrate_source_node, migrate_socket_names, update_layer_name, update_layer_version
+from .versioning import get_layer_parent_map, migrate_global_layer_data, migrate_blend_mode, migrate_source_node, migrate_socket_names, update_layer_name, update_layer_version, update_library_nodetree_version
 from .version_check import get_latest_version
 from .data import sort_actions, parse_context, get_all_layers, is_valid_uuidv4
 from .image import save_image
@@ -8,11 +8,17 @@ from .graph.basic_layers import get_layer_version_for_type
 import time
 from .graph.nodetree_builder import get_nodetree_version
 import uuid
-from .donations import get_donation_info
+
+def get_ps_scene_data(scene: bpy.types.Scene):
+    if not hasattr(scene, 'ps_scene_data'):
+        return None
+    return scene.ps_scene_data
 
 @bpy.app.handlers.persistent
-def frame_change_pre(scene):
-    if not hasattr(scene, 'ps_scene_data'):
+def frame_change_pre(scene: bpy.types.Scene):
+    scene = bpy.context.scene
+    ps_scene_data = get_ps_scene_data(scene)
+    if not ps_scene_data:
         return
     update_task = {}
     for layer in get_all_layers():
@@ -41,14 +47,15 @@ def frame_change_pre(scene):
             layer.enabled = enabled
 
 
-def load_paint_system_data(scene: bpy.types.Scene):
+def load_paint_system_data():
     print(f"Loading Paint System data...")
     start_time = time.time()
-    if not hasattr(scene, 'ps_scene_data'):
+    ps_scene_data = get_ps_scene_data(bpy.context.scene)
+    if not ps_scene_data:
         return
     
     # Global Layer Versioning. Will be removed in the future.
-    for global_layer in scene.ps_scene_data.layers:
+    for global_layer in ps_scene_data.layers:
         target_version = get_layer_version_for_type(global_layer.type)
         if get_nodetree_version(global_layer.node_tree) != target_version:
             print(f"Updating layer {global_layer.name} to version {target_version}")
@@ -69,9 +76,9 @@ def load_paint_system_data(scene: bpy.types.Scene):
     migrate_socket_names(layer_parent_map)
     update_layer_version(layer_parent_map)
     update_layer_name(layer_parent_map)
+    update_library_nodetree_version()
 
     # As layers in ps_scene_data is not used anymore, we can remove it in the future
-    ps_scene_data = getattr(bpy.context.scene, 'ps_scene_data', None)
     if ps_scene_data and hasattr(ps_scene_data, 'layers') and len(ps_scene_data.layers) > 0:
         # print(f"Removing ps_scene_data")
         ps_scene_data.layers.clear()
@@ -85,16 +92,16 @@ def load_paint_system_data(scene: bpy.types.Scene):
 def load_post(scene):
     
     # Ensure color history palette is created
-    if not hasattr(scene, 'ps_scene_data'):
+    ps_scene_data = get_ps_scene_data(bpy.context.scene)
+    if not ps_scene_data:
         return
-    ps_scene_data = scene.ps_scene_data
     if not ps_scene_data.color_history_palette:
         palette_name = "Paint System History"
         palette = bpy.data.palettes.get(palette_name)
         if not palette:
             palette = bpy.data.palettes.new(palette_name)
     
-    load_paint_system_data(scene)
+    load_paint_system_data()
     # Check for donation info
     # get_donation_info()
     # if donation_info:
@@ -132,9 +139,9 @@ def refresh_image(scene: bpy.types.Scene):
 
 @bpy.app.handlers.persistent
 def color_history_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph = None):
-    if not hasattr(scene, 'ps_scene_data'):
+    ps_scene_data = get_ps_scene_data(bpy.context.scene)
+    if not ps_scene_data:
         return
-    ps_scene_data = scene.ps_scene_data
     if depsgraph and not depsgraph.id_type_updated('IMAGE'):
         return
     # Color History
@@ -190,7 +197,7 @@ def paint_system_object_update(scene: bpy.types.Scene, depsgraph: bpy.types.Deps
     except: 
         return
     
-    if not obj or not hasattr(scene, 'ps_scene_data'):
+    if not obj or not get_ps_scene_data(bpy.context.scene):
         return
     if depsgraph and not depsgraph.id_type_updated('OBJECT'):
         return

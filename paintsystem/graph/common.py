@@ -13,6 +13,10 @@ import bpy
 LIBRARY_FILENAME = "library2.blend"
 DEFAULT_PS_UV_MAP_NAME = "PS_UVMap"
 
+LIBRARY_NODE_TREE_VERSIONS = {
+    ".PS Projection": 1,
+}
+
 def get_layer_blend_type(layer: Layer) -> str:
     """Get the blend mode of the global layer"""
     blend_mode = layer.blend_mode
@@ -34,7 +38,7 @@ def _resolve_library_path(filename: str = LIBRARY_FILENAME) -> Path:
     return folder_root / filename
 
 
-def get_library_nodetree(tree_name: str, library_filename: str = LIBRARY_FILENAME) -> bpy.types.NodeTree:
+def get_library_nodetree(tree_name: str, library_filename: str = LIBRARY_FILENAME, force_append: bool = False) -> bpy.types.NodeTree:
     """
     Return a `bpy.types.NodeTree` by name, appending it from the given library if needed.
 
@@ -52,17 +56,21 @@ def get_library_nodetree(tree_name: str, library_filename: str = LIBRARY_FILENAM
         FileNotFoundError: If the library file cannot be found.
         ValueError: If the requested node tree name does not exist in the library.
     """
-    # 1) Check if the node tree already exists in the current .blend
+    # Check if the node tree already exists in the current .blend
     existing_tree = bpy.data.node_groups.get(tree_name)
     if existing_tree is not None:
-        return existing_tree
+        if force_append:
+            # Rename the existing tree temprorary
+            existing_tree.name = f"{existing_tree.name} (TEMP)"
+        else:
+            return existing_tree
 
-    # 2) Resolve path to the library file
+    # Resolve path to the library file
     library_path = _resolve_library_path(library_filename)
     if not library_path.exists():
         raise FileNotFoundError(f"Library file not found: {library_path}")
 
-    # 3) Inspect the library for the node tree, then append it
+    # Inspect the library for the node tree, then append it
     library_path_str = str(library_path)
     with bpy.data.libraries.load(library_path_str, link=False) as (data_from, data_to):
         if tree_name not in data_from.node_groups:
@@ -72,17 +80,14 @@ def get_library_nodetree(tree_name: str, library_filename: str = LIBRARY_FILENAM
             )
         data_to.node_groups = [tree_name]
 
-    # 4) Return the newly appended node tree (now present in bpy.data.node_groups)
+    # Return the newly appended node tree (now present in bpy.data.node_groups)
     appended_tree: Optional[bpy.types.NodeTree] = bpy.data.node_groups.get(tree_name)
-    if appended_tree is None:
-        # Safety: In case Blender renames on conflict (shouldn't happen because we early-return if exists)
-        # fallback to the last appended group if present
-        if len(bpy.data.node_groups) > 0:
-            appended_tree = bpy.data.node_groups[-1]
-        else:
-            raise RuntimeError(
-                f"Unexpected error: Node tree '{tree_name}' was not appended from '{library_filename}'."
-            )
+    
+    if existing_tree and force_append:
+        # Remap the users to the new tree
+        existing_tree.user_remap(appended_tree)
+        bpy.data.node_groups.remove(existing_tree)
+
     return appended_tree
 
 def get_library_object(object_name: str, library_filename: str = LIBRARY_FILENAME) -> bpy.types.Object:
