@@ -113,5 +113,5 @@ def update_layer_version(layer_parent_map: dict[Layer, LayerParent]):
 
 def update_layer_name(layer_parent_map: dict[Layer, LayerParent]):
     for layer, layer_parent in layer_parent_map.items():
-        if layer.name != layer.name:
-            layer.name = layer.name
+        if layer.layer_name != layer.name:
+            layer.name = layer.layer_name
