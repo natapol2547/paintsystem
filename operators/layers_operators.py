@@ -1074,27 +1074,21 @@ class PAINTSYSTEM_OT_ProjectionViewReset(PSContextMixin, Operator):
                 location = mathutils.Vector(active_layer.projection_position)
                 rotation = mathutils.Euler(active_layer.projection_rotation, 'XYZ')
                 scale = mathutils.Vector((1.0, 1.0, 1.0))
-                
-                active_space = context.area.spaces.active
-                if active_space.type == 'VIEW_3D':
-                    region_3d = active_space.region_3d
-                    if region_3d:
-                        match region_3d.view_perspective:
-                            case 'PERSP':
-                                view_matrix = mathutils.Matrix.LocRotScale(location, rotation, scale)
-                                if active_layer.projection_space == "OBJECT":
-                                    view_matrix = ps_ctx.ps_object.matrix_world @ view_matrix
-                                view_matrix.invert()
-                                region_3d.view_matrix = view_matrix
-                            case "CAMERA":
-                                # Set active camera position and rotation 
-                                active_camera = bpy.context.scene.camera
-                                active_camera.location = location
-                                active_camera.rotation_euler = rotation
-                            case _:
-                                self.report({'WARNING'}, "This view perspective is not supported")
-                                return {'CANCELLED'}
-                        return {'FINISHED'}
+                match region_3d.view_perspective:
+                    case 'PERSP':
+                        view_matrix = mathutils.Matrix.LocRotScale(location, rotation, scale)
+                        if active_layer.projection_space == "OBJECT":
+                            view_matrix = ps_ctx.ps_object.matrix_world @ view_matrix
+                        view_matrix.invert()
+                        region_3d.view_matrix = view_matrix
+                    case "CAMERA":
+                        active_camera = bpy.context.scene.camera
+                        active_camera.location = location
+                        active_camera.rotation_euler = rotation
+                    case _:
+                        self.report({'WARNING'}, "This view perspective is not supported")
+                        return {'CANCELLED'}
+                return {'FINISHED'}
         return {'FINISHED'}
 
 classes = (
