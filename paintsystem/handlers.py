@@ -1,6 +1,6 @@
 import bpy
 
-from .versioning import get_layer_parent_map, migrate_global_layer_data, migrate_blend_mode, migrate_source_node, migrate_socket_names, update_layer_name, update_layer_version
+from .versioning import get_layer_parent_map, migrate_global_layer_data, migrate_blend_mode, migrate_source_node, migrate_socket_names, update_layer_name, update_layer_version, update_library_nodetree_version
 from .version_check import get_latest_version
 from .context import parse_context
 from .data import sort_actions, get_all_layers, is_valid_uuidv4, iter_all_layers, update_material_name
@@ -10,24 +10,10 @@ import time
 from .graph.nodetree_builder import get_nodetree_version
 import uuid
 
-_COLOR_HISTORY_PALETTE_NAME = "Paint System History"
-
-
 def get_ps_scene_data(scene: bpy.types.Scene):
     if not hasattr(scene, 'ps_scene_data'):
         return None
     return scene.ps_scene_data
-
-
-def ensure_color_history_palette(ps_scene_data) -> bpy.types.Palette:
-    """Return the colour-history palette, creating it if necessary."""
-    palette = ps_scene_data.color_history_palette
-    if not palette:
-        palette = bpy.data.palettes.get(_COLOR_HISTORY_PALETTE_NAME)
-        if not palette:
-            palette = bpy.data.palettes.new(_COLOR_HISTORY_PALETTE_NAME)
-        ps_scene_data.color_history_palette = palette
-    return palette
 
 @bpy.app.handlers.persistent
 def frame_change_pre(scene: bpy.types.Scene):
@@ -91,6 +77,7 @@ def load_paint_system_data():
     migrate_socket_names(layer_parent_map)
     update_layer_version(layer_parent_map)
     update_layer_name(layer_parent_map)
+    update_library_nodetree_version()
 
     # As layers in ps_scene_data is not used anymore, we can remove it in the future
     if ps_scene_data and hasattr(ps_scene_data, 'layers') and len(ps_scene_data.layers) > 0:
@@ -104,11 +91,23 @@ def load_paint_system_data():
 
 @bpy.app.handlers.persistent
 def load_post(scene):
+    
+    # Ensure color history palette is created
     ps_scene_data = get_ps_scene_data(bpy.context.scene)
     if not ps_scene_data:
         return
-    ensure_color_history_palette(ps_scene_data)
+    if not ps_scene_data.color_history_palette:
+        palette_name = "Paint System History"
+        palette = bpy.data.palettes.get(palette_name)
+        if not palette:
+            palette = bpy.data.palettes.new(palette_name)
+    
     load_paint_system_data()
+    # Check for donation info
+    # get_donation_info()
+    # if donation_info:
+    #     print(f"Donation info: {donation_info}")
+    # Check for version check
     get_latest_version()
 
 @bpy.app.handlers.persistent
