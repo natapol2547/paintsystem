@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Dict, List, Literal
 import re
+import mathutils
 import numpy as np
 import uuid
 from collections import Counter
@@ -1113,6 +1114,7 @@ class Layer(BaseNestedListItem):
         update=update_node_tree
     )
     def set_projection_view(self, context: Context):
+        ps_ctx = parse_context(context)
         active_space = context.area.spaces.active
         if active_space.type == 'VIEW_3D':
             region_3d = active_space.region_3d
@@ -1120,6 +1122,8 @@ class Layer(BaseNestedListItem):
                 match region_3d.view_perspective:
                     case 'PERSP':
                         view_mat = region_3d.view_matrix.copy()
+                        if self.projection_space == "OBJECT":
+                            view_mat = view_mat @ ps_ctx.ps_object.matrix_world
                         view_mat.invert()
                         loc, rot, sca = view_mat.decompose()
                         self.projection_position = loc
@@ -1130,8 +1134,12 @@ class Layer(BaseNestedListItem):
                         pass
                     case "CAMERA":
                         active_camera = bpy.context.scene.camera
-                        self.projection_position = active_camera.location
-                        self.projection_rotation = active_camera.rotation_euler
+                        view_mat = active_camera.matrix_world.copy()
+                        if self.projection_space == "OBJECT":
+                            view_mat = ps_ctx.ps_object.matrix_world.inverted() @ view_mat
+                        loc, rot, sca = view_mat.decompose()
+                        self.projection_position = loc
+                        self.projection_rotation = rot.to_euler()
                         self.projection_fov = active_camera.data.angle
                     case _:
                         pass
@@ -1305,6 +1313,16 @@ class Layer(BaseNestedListItem):
         default=40/180*math.pi,
         update=update_node_tree,
         subtype='ANGLE'
+    )
+    projection_space: EnumProperty(
+        items=[
+            ("WORLD", "World", "World Space Coordinates", "WORLD", 0),
+            ("OBJECT", "Object", "Object Space Coordinates", "OBJECT_DATA", 1),
+        ],
+        name="Projection Mode",
+        description="Projection mode",
+        default="WORLD",
+        update=update_node_tree
     )
     
     def update_blend_mode(self, context: Context):

@@ -177,7 +177,7 @@ class PSNodeTreeBuilder:
                 "proj_node",
                 "ShaderNodeGroup",
                 {"node_tree": proj_nt, "hide": True},
-                {"Vector": self._layer.projection_position, "Rotation": self._layer.projection_rotation, "FOV": self._layer.projection_fov},
+                {"Vector": self._layer.projection_position, "Rotation": self._layer.projection_rotation, "FOV": self._layer.projection_fov, "Object Space": self._layer.projection_space == "OBJECT"},
                 force_properties=True,
                 force_default_values=True
             )

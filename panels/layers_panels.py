@@ -763,6 +763,7 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                         proj_node = active_layer.find_node("proj_node")
                         if proj_node:
                             col.prop(proj_node.inputs["Scale"], "default_value", text="Scale")
+                            col.prop(active_layer, "projection_space", text="Space")
                             col.use_property_split = False
                             header, panel = col.panel("proj_node_panel", default_closed=True)
                             header.prop(proj_node.inputs["Enable"], "default_value", text="Normal Falloff")

@@ -1068,6 +1068,8 @@ class PAINTSYSTEM_OT_ProjectionViewReset(PSContextMixin, Operator):
                 rotation = mathutils.Euler(active_layer.projection_rotation, 'XYZ').to_quaternion()
                 scale = mathutils.Vector((1.0, 1.0, 1.0))
                 view_matrix = mathutils.Matrix.LocRotScale(location, rotation, scale)
+                if active_layer.projection_space == "OBJECT":
+                    view_matrix = ps_ctx.ps_object.matrix_world @ view_matrix
                 view_matrix.invert()
                 region_3d.view_matrix = view_matrix
         return {'FINISHED'}
