@@ -631,22 +631,43 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     box = transform_panel.box()
                     ps_ctx = self.parse_context(context)
                     active_layer = ps_ctx.active_layer
-                    if effective_coord_type not in {'OBJECT', 'CAMERA', 'WINDOW', 'REFLECTION', 'POSITION', 'GENERATED'}:
-                        col = box.column()
-                        header_row = col.row(align=True)
-                        if active_layer.coord_type == 'AUTO':
-                            header_row.label(text="UV")
-                            header_row.prop_search(active_layer, "uv_map_name", text="",
-                                                   search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
-                        else:
-                            header_row.prop(active_layer, "coord_type", text="")
-                            if effective_coord_type == 'UV':
-                                header_row.prop_search(active_layer, "uv_map_name", text="",
-                                                       search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
-                        if ps_ctx.active_layer.type == "IMAGE" and ps_ctx.active_layer.image:
-                            header_row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
-                        line_separator(col)
-                        if effective_coord_type == 'DECAL':
+                    panel.enabled = not active_layer.lock_layer
+                    box = panel.box()
+                    col = box.column()
+                    if active_layer.type == 'IMAGE':
+                        if active_layer.coord_type not in ['UV', 'AUTO']:
+                            info_box = col.box()
+                            info_box.alert = True
+                            info_col = info_box.column(align=True)
+                            info_col.label(text="Painting may not work", icon='ERROR')
+                    row = col.row(align=True)
+                    row.prop(active_layer, "coord_type", text="Coord Type")
+                    if active_layer.coord_type in ['UV', 'AUTO']:
+                            row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
+                    if active_layer.coord_type == 'UV':
+                        col.prop_search(active_layer, "uv_map_name", text="UV Map",
+                                            search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
+                    elif active_layer.coord_type == 'DECAL':
+                        col.use_property_split = False
+                        empty_col = col.column(align=True)
+                        empty_col.prop(active_layer, "empty_object", text="")
+                        empty_col.operator("paint_system.select_empty", text="Select Empty", icon='OBJECT_ORIGIN')
+                        split = col.split(factor=0.35, align=True)
+                        split.prop(active_layer, "use_decal_depth_clip", text="Clip", toggle=1, icon='CHECKBOX_HLT' if active_layer.use_decal_depth_clip else 'CHECKBOX_DEHLT')
+                        decal_clip = active_layer.find_node("decal_depth_clip")
+                        if decal_clip:
+                            decal_clip_col = split.column(align=True)
+                            decal_clip_col.enabled = active_layer.use_decal_depth_clip
+                            decal_clip_col.prop(decal_clip.inputs[2], "default_value", text="Depth")
+                    elif active_layer.coord_type == 'PROJECT':
+                        proj_col = col.column(align=True)
+                        proj_col.scale_y = 2
+                        proj_col.operator("paint_system.projection_view_reset", text="View Current Projection", icon='CAMERA_DATA')
+                        col.operator("paint_system.set_projection_view", text="Set New Projection View", icon='FILE_REFRESH')
+                        proj_node = active_layer.find_node("proj_node")
+                        if proj_node:
+                            col.prop(proj_node.inputs["Scale"], "default_value", text="Scale")
+                            col.prop(active_layer, "projection_space", text="Space")
                             col.use_property_split = False
                             empty_col = col.column(align=True)
                             empty_col.prop(active_layer, "empty_object", text="")
