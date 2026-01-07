@@ -1,6 +1,6 @@
 import bpy
 from bpy.types import Menu, Operator
-from bpy.props import StringProperty, IntProperty, EnumProperty, BoolProperty, FloatProperty
+from bpy.props import FloatVectorProperty, StringProperty, IntProperty, EnumProperty, BoolProperty, FloatProperty
 from bpy.utils import register_classes_factory
 from .common import (
     PSContextMixin,
@@ -142,25 +142,39 @@ class PAINTSYSTEM_OT_FillImage(PSImageFilterMixin, Operator):
     bl_options = {'REGISTER', 'UNDO'}
     bl_description = "Fill the active image with current color"
     
+    color: FloatVectorProperty(name="Color", default=(1.0, 1.0, 1.0, 1.0), size=4, min=0.0, max=1.0, subtype='COLOR')
+    
     def execute(self, context):
         image = self.get_image(context)
         if not image:
             return {'CANCELLED'}
         # Replace every pixel with a transparent pixel
         pixels = numpy.empty(len(image.pixels), dtype=numpy.float32)
-        prop_owner = get_unified_settings(context, "use_unified_color")
-        color = prop_owner.color
-        
         # Fill the image with the current brush color
-        pixels[::4] = color[0]  # R
-        pixels[1::4] = color[1]  # G
-        pixels[2::4] = color[2]  # B
-        pixels[3::4] = 1.0  # A - full opacity
+        pixels[::4] = self.color[0]  # R
+        pixels[1::4] = self.color[1]  # G
+        pixels[2::4] = self.color[2]  # B
+        pixels[3::4] = self.color[3]  # A - full opacity
         
         image.pixels.foreach_set(pixels)
         image.update()
         image.update_tag()
         return {'FINISHED'}
+    
+    def invoke(self, context, event):
+        prop_owner = get_unified_settings(context, "use_unified_color")
+        if prop_owner:
+            self.color[0] = prop_owner.color[0]
+            self.color[1] = prop_owner.color[1]
+            self.color[2] = prop_owner.color[2]
+            self.color[3] = 1
+            return self.execute(context)
+        return context.window_manager.invoke_props_dialog(self, width=200)
+    
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text="Fill Color", icon='COLOR')
+        layout.prop(self, "color", text="")
 
 
 # Conditionally define PIL-dependent operators
