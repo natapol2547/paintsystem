@@ -4,8 +4,9 @@ from bpy.types import Material
 from .graph.common import LIBRARY_NODE_TREE_VERSIONS, get_library_nodetree
 from .graph.basic_layers import get_layer_version_for_type
 from .graph.nodetree_builder import get_nodetree_version
-from .data import get_legacy_global_layer, iter_all_layers, Layer, Group, Channel
+from .data import get_legacy_global_layer, Layer, Group, Channel
 from typing import TypedDict
+from .data import get_legacy_global_layer
 
 class LayerParent(TypedDict):
     mat: Material
@@ -13,11 +14,14 @@ class LayerParent(TypedDict):
     channel: Channel
 
 def get_layer_parent_map() -> dict[Layer, LayerParent]:
-    """Build a mapping from every layer to its parent material, group, and channel."""
-    return {
-        layer: LayerParent(mat=mat, group=group, channel=channel)
-        for mat, group, channel, layer in iter_all_layers()
-    }
+    layer_parent_map = {}
+    for mat in bpy.data.materials:
+        if hasattr(mat, 'ps_mat_data'):
+            for group in mat.ps_mat_data.groups:
+                for channel in group.channels:
+                    for layer in channel.layers:
+                        layer_parent_map[layer] = LayerParent(mat=mat, group=group, channel=channel)
+    return layer_parent_map
 
 def migrate_global_layer_data(layer_parent_map: dict[Layer, LayerParent]):
     seen_global_layers_map = {}
@@ -98,19 +102,6 @@ def migrate_socket_names(layer_parent_map: dict[Layer, LayerParent]):
             layer.auto_update_node_tree = True
             layer.update_node_tree(bpy.context)
 
-def migrate_texture_masks_to_image(layer_parent_map: dict[Layer, LayerParent]):
-    for layer, layer_parent in layer_parent_map.items():
-        if not hasattr(layer, "layer_masks"):
-            continue
-        has_migrated_mask = False
-        for layer_mask in layer.layer_masks:
-            if layer_mask.type == 'TEXTURE':
-                print(f"Migrating texture mask {layer_mask.name} on layer {layer.name} to image mask")
-                layer_mask.type = 'IMAGE'
-                has_migrated_mask = True
-        if has_migrated_mask:
-            layer.update_node_tree(bpy.context)
-
 def update_layer_version(layer_parent_map: dict[Layer, LayerParent]):
     for layer, layer_parent in layer_parent_map.items():
         # Updating layer to the target version
@@ -130,19 +121,12 @@ def update_layer_name(layer_parent_map: dict[Layer, LayerParent]):
             layer.name = layer.layer_name
 
 def update_library_nodetree_version():
-    if bpy.path.basename(bpy.context.blend_data.filepath) == "library2.blend":
-        return
     ps_nodetrees = []
     for node_tree in bpy.data.node_groups:
         if node_tree.name.startswith(".PS"):
-            if node_tree.name.endswith(" (TEMP)"):
-                bpy.data.node_groups.remove(node_tree)
-                continue
-            if node_tree.name not in LIBRARY_NODE_TREE_VERSIONS:
-                continue
             ps_nodetrees.append(node_tree)
     for node_tree in ps_nodetrees:
-        target_version = LIBRARY_NODE_TREE_VERSIONS[node_tree.name]
+        target_version = LIBRARY_NODE_TREE_VERSIONS.get(node_tree.name, 0)
         if get_nodetree_version(node_tree) != target_version:
             print(f"Updating library nodetree {node_tree.name} to version {target_version}")
             get_library_nodetree(node_tree.name, force_append=True)
