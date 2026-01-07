@@ -894,8 +894,8 @@ class Layer(BaseNestedListItem):
     ref_layer_id: StringProperty()
     
     def update_name(self, context):
-        if self.name != self.name:
-            self.name = self.name
+        if self.layer_name != self.name:
+            self.layer_name = self.name
         self.update_node_tree(context)
     
     name: StringProperty(
@@ -1084,8 +1084,8 @@ class Layer(BaseNestedListItem):
     uid: StringProperty()
     
     def update_layer_name(self, context):
-        if self.name != self.name:
-            self.name = self.name
+        if self.layer_name != self.name:
+            self.name = self.layer_name
         self.update_node_tree(context)
     
     layer_name: StringProperty(
