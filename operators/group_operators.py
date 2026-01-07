@@ -306,7 +306,7 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
         else:
             self.group_name = "New Group"
         self.get_coord_type(context)
-        if ps_ctx.active_material and node_tree_has_complex_setup(ps_ctx.active_material.node_tree):
+        if ps_ctx.active_material and node_tree_has_complex_setup(ps_ctx.active_material.node_tree) and "EEVEE" in bpy.context.scene.render.engine:
             self.template = 'PAINT_OVER'
         if ps_ctx.ps_object.mode == 'EDIT':
             bpy.ops.object.mode_set(mode='OBJECT')
