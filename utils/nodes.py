@@ -1,6 +1,6 @@
 import bpy
 from bpy.types import Node, NodeTree, NodeSocket, Context
-from bpy_extras.node_utils import find_base_socket_type, connect_sockets
+from bpy_extras.node_utils import find_base_socket_type
 from ..custom_icons import get_icon_from_socket_type
 
 def traverse_connected_nodes(node: Node, input: bool = True, output: bool = False) -> set[Node]:
@@ -110,45 +110,6 @@ def find_node(node_tree: NodeTree, properties: dict, connected_to_output: bool =
 
     return None
 
-
-def capture_group_links(group_nodes: list[Node]) -> dict[Node, dict[str, list[dict[str, NodeSocket]]]]:
-    relink_map = {}
-    for node_group in group_nodes:
-        input_links = []
-        output_links = []
-        for input_socket in node_group.inputs[:]:
-            for link in input_socket.links:
-                input_links.append({
-                    'from_socket': link.from_socket,
-                    'dest_name': getattr(input_socket, "name", None),
-                })
-        for output_socket in node_group.outputs[:]:
-            for link in output_socket.links:
-                output_links.append({
-                    'to_socket': link.to_socket,
-                    'src_name': getattr(link.from_socket, "name", None),
-                })
-        relink_map[node_group] = {
-            'input_links': input_links,
-            'output_links': output_links,
-        }
-    return relink_map
-
-
-def restore_group_links(relink_map: dict[Node, dict[str, list[dict[str, NodeSocket]]]], target_node_tree: NodeTree) -> None:
-    for node_group, links in relink_map.items():
-        node_group.node_tree = target_node_tree
-        for link in links['input_links']:
-            dest_name = link.get('dest_name')
-            from_socket = link.get('from_socket')
-            if dest_name and dest_name in node_group.inputs and from_socket:
-                connect_sockets(from_socket, node_group.inputs[dest_name])
-        for link in links['output_links']:
-            src_name = link.get('src_name')
-            to_socket = link.get('to_socket')
-            if src_name and src_name in node_group.outputs and to_socket:
-                connect_sockets(node_group.outputs[src_name], to_socket)
-
 def get_nodetree_socket_enum(node_tree: NodeTree, in_out: str = 'INPUT', favor_socket_name: str = None, include_none: bool = False, none_at_start: bool = True):
     socket_items = []
     count = 0
@@ -245,7 +206,4 @@ def find_socket_on_node(node: Node, name: str, in_out: str = 'INPUT', properties
     return None
 
 def is_in_nodetree(context: Context) -> bool:
-    space_data = getattr(context, "space_data", None)
-    if not space_data:
-        return False
-    return space_data.type == 'NODE_EDITOR' and len(space_data.path) > 1
+    return context.space_data.type == 'NODE_EDITOR' and len(context.space_data.path) > 1
