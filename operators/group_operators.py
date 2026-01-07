@@ -1,6 +1,6 @@
 import bpy
 from bpy.props import BoolProperty, EnumProperty
-from bpy.types import Node, NodeTree
+from bpy.types import Node, NodeTree, Operator
 from bpy.utils import register_classes_factory
 from bpy_extras.node_utils import connect_sockets, find_base_socket_type
 from mathutils import Vector
@@ -11,7 +11,11 @@ from ..paintsystem.graph.common import get_library_nodetree
 
 from ..paintsystem.data import TEMPLATE_ENUM
 from ..utils.nodes import (
+    dissolve_nodes,
+    find_connected_node,
     find_node,
+    find_node_on_socket,
+    find_nodes,
     get_material_output,
     transfer_connection,
     traverse_connected_nodes,
@@ -364,7 +368,7 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
                      text="Use Standard View Transform")
 
 
-class PAINTSYSTEM_OT_DeleteGroup(PSContextMixin, MultiMaterialOperator):
+class PAINTSYSTEM_OT_DeleteGroup(PSContextMixin, Operator):
     """Delete the selected group in the Paint System"""
     bl_idname = "paint_system.delete_group"
     bl_label = "Delete Paint System"
@@ -375,9 +379,36 @@ class PAINTSYSTEM_OT_DeleteGroup(PSContextMixin, MultiMaterialOperator):
         ps_ctx = cls.parse_context(context)
         return ps_ctx.active_group is not None
 
-    def process_material(self, context):
+    def execute(self, context):
         ps_ctx = self.parse_context(context)
         ps_mat_data = ps_ctx.ps_mat_data
+        active_group = ps_ctx.active_group
+        node_tree = ps_ctx.active_material.node_tree
+        match active_group.template:
+            case 'BASIC':
+                for group_node in find_nodes(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree}):
+                    nodes = [group_node]
+                    shader_to_rgb = find_connected_node(group_node, {'bl_idname': 'ShaderNodeShaderToRGB'})
+                    if shader_to_rgb:
+                        nodes.append(shader_to_rgb)
+                    mix_shader = find_connected_node(group_node, {'bl_idname': 'ShaderNodeMixShader'})
+                    if mix_shader:
+                        nodes.append(mix_shader)
+                        transparent_node = find_connected_node(mix_shader, {'bl_idname': 'ShaderNodeBsdfTransparent'})
+                        if transparent_node:
+                            nodes.append(transparent_node)
+                        mat_output = find_connected_node(mix_shader, {'bl_idname': 'ShaderNodeOutputMaterial'})
+                        if mat_output:
+                            nodes.append(mat_output)
+                    dissolve_nodes(node_tree, nodes)
+            case 'PBR':
+                for group_node in find_nodes(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree}):
+                    nodes = [group_node]
+                dissolve_nodes(active_group.node_tree, active_group.node_tree.nodes)
+            case 'PAINT_OVER':
+                dissolve_nodes(active_group.node_tree, active_group.node_tree.nodes)
+            case 'NORMAL':
+                dissolve_nodes(active_group.node_tree, active_group.node_tree.nodes)
         lm = ListManager(ps_mat_data, 'groups', ps_mat_data, 'active_index')
         lm.remove_active_item()
         redraw_panel(context)

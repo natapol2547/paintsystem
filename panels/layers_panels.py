@@ -367,7 +367,7 @@ class MAT_PT_Layers(PSContextMixin, Panel):
                 col.scale_x = 1.2
                 col.operator("wm.call_menu", text="", icon_value=get_icon('layer_add')).name = "MAT_MT_AddLayerMenu"
                 col.menu("MAT_MT_LayerMenu",
-                        text="", icon='COLLAPSEMENU')
+                        text="", icon='DOWNARROW_HLT')
                 col.separator()
                 col.operator("paint_system.delete_item",
                                 text="", icon_value=get_icon('trash'))
@@ -382,7 +382,7 @@ class MAT_PT_Layers(PSContextMixin, Panel):
                 col.operator("paint_system.new_folder_layer",
                      icon_value=get_icon('folder'), text="")
                 col.menu("MAT_MT_LayerMenu",
-                        text="", icon='COLLAPSEMENU')
+                        text="", icon='DOWNARROW_HLT')
                 line_separator(col)
                 col.operator("paint_system.delete_item",
                                 text="", icon_value=get_icon('trash'))

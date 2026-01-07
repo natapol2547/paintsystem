@@ -128,3 +128,52 @@ def get_node_socket_enum(node: Node, in_out: str = 'INPUT', favor_socket_name: s
         socket_items.append(('_NONE_', 'None', '', 'BLANK1', count))
         count += 1
     return socket_items
+
+def dissolve_nodes(node_tree: NodeTree, nodes: list[Node]):
+    start_node = None
+    end_node = None
+    start_node_input = None
+    end_node_output = None
+    print(f"Dissolving nodes: {nodes}")
+    for node in nodes:
+        print(f"Checking node: {node.name}")
+        for input_socket in node.inputs:
+            for link in input_socket.links:
+                print(f"Checking link: {link.from_node.name}")
+                if link.from_node not in nodes:
+                    print(f"Found start node: {link.from_node.name}")
+                    start_node = link.from_node
+                    start_node_input = input_socket
+                    break
+        for output_socket in node.outputs:
+            for link in output_socket.links:
+                print(f"Checking link: {link.to_node.name} in {nodes}")
+                if link.to_node not in nodes:
+                    print(f"Found end node: {link.to_node.name}")
+                    end_node = link.to_node
+                    end_node_output = output_socket
+                    break
+        if start_node and end_node:
+            break
+    if start_node and end_node and start_node_input and end_node_output:
+        node_tree.links.new(start_node_input, end_node_output)
+    for node in nodes:
+        node_tree.nodes.remove(node)
+
+def find_node_on_socket(socket: NodeSocket, properties: dict) -> Node | None:
+    for link in socket.links:
+        node = link.to_node if socket.is_output else link.from_node
+        if all(hasattr(node, prop) and getattr(node, prop) == value for prop, value in properties.items()):
+            return node
+    return None
+
+def find_connected_node(node: Node, properties: dict) -> Node | None:
+    for input_socket in node.inputs:
+        input_node = find_node_on_socket(input_socket, properties)
+        if input_node:
+            return input_node
+    for output_socket in node.outputs:
+        output_node = find_node_on_socket(output_socket, properties)
+        if output_node:
+            return output_node
+    return None
