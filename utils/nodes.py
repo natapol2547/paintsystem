@@ -235,14 +235,3 @@ def find_connected_node(node: Node, properties: dict) -> Node | None:
         if output_node:
             return output_node
     return None
-
-def find_socket_on_node(node: Node, name: str, in_out: str = 'INPUT', properties: dict = {}) -> NodeSocket | None:
-    properties['name'] = name
-    sockets = [socket for socket in (node.inputs if in_out == 'INPUT' else node.outputs) if socket.enabled]
-    for socket in sockets:
-        if all(hasattr(socket, prop) and getattr(socket, prop) == value for prop, value in properties.items()):
-            return socket
-    return None
-
-def is_in_nodetree(context: Context) -> bool:
-    return context.space_data.type == 'NODE_EDITOR' and len(context.space_data.path) > 1
