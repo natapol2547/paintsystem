@@ -298,8 +298,33 @@ class MAT_PT_Layers(PSContextMixin, Panel):
             )
 
             
-            col = row.column(align=True)
-            draw_layer_sidebar(col, ps_ctx.ps_settings.use_legacy_ui)
+            if ps_ctx.ps_settings.use_legacy_ui:
+                col = row.column(align=True)
+                col.scale_x = 1.2
+                col.operator("wm.call_menu", text="", icon_value=get_icon('layer_add')).name = "MAT_MT_AddLayerMenu"
+                col.menu("MAT_MT_LayerMenu",
+                        text="", icon='DOWNARROW_HLT')
+                col.separator()
+                col.operator("paint_system.delete_item",
+                                text="", icon_value=get_icon('trash'))
+                col.separator()
+                col.operator("paint_system.move_up", icon="TRIA_UP", text="")
+                col.operator("paint_system.move_down", icon="TRIA_DOWN", text="")
+            else:
+                # main_row
+                col = row.column(align=True)
+                col.scale_x = 1.2
+                col.operator("wm.call_menu", text="", icon_value=get_icon('layer_add')).name = "MAT_MT_AddLayerMenu"
+                col.operator("paint_system.new_folder_layer",
+                     icon_value=get_icon('folder'), text="")
+                col.menu("MAT_MT_LayerMenu",
+                        text="", icon='DOWNARROW_HLT')
+                line_separator(col)
+                col.operator("paint_system.delete_item",
+                                text="", icon_value=get_icon('trash'))
+                line_separator(col)
+                col.operator("paint_system.move_up", icon="TRIA_UP", text="")
+                col.operator("paint_system.move_down", icon="TRIA_DOWN", text="")
 
 
 def get_image(context) -> bpy.types.Image:

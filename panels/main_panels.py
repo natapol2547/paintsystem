@@ -194,6 +194,16 @@ class MAT_PT_PaintSystemMaterialSettings(PSContextMixin, Panel):
             row.operator("paint_system.new_group", icon='ADD', text="")
             row.operator("wm.call_menu", text="", icon="REMOVE").name = "MAT_MT_DeleteGroupMenu"
 
+class MAT_MT_PaintSystemMaterialSettingsMenu(PSContextMixin, Menu):
+    bl_label = "Material Settings Menu"
+    bl_idname = "MAT_MT_PaintSystemMaterialSettingsMenu"
+
+    def draw(self, context):
+        layout = self.layout
+        col = layout.column(align=True)
+        col.operator("paint_system.new_group", icon='ADD', text="Add Group")
+        col.operator("paint_system.delete_group", icon='REMOVE', text="Delete Group")
+
 class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_PaintSystemMainPanel'
     bl_space_type = "VIEW_3D"
@@ -206,12 +216,10 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
         ps_ctx = self.parse_context(context)
         row = layout.row(align=True)
         if ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.groups:
-            groups = ps_ctx.ps_mat_data.groups
-            if len(groups) > 1:
-                row.popover("MAT_PT_PaintSystemGroups", text="", icon="NODETREE")
-            if context.mode == 'OBJECT' and not is_uv_edit_active(context):
-                row.operator("paint_system.new_group", icon='ADD', text="")
-            row.operator("wm.call_menu", text="", icon="REMOVE").name = "MAT_MT_DeleteGroupMenu"
+            # row.operator("wm.call_menu", text="", icon="PREFERENCES").name = "MAT_MT_PaintSystemMaterialSettingsMenu"
+            # row.menu("MAT_MT_PaintSystemMaterialSettingsMenu", text="", icon="PREFERENCES")
+            row.operator("paint_system.new_group", icon='ADD', text="")
+            row.operator("paint_system.delete_group", icon='REMOVE', text="")
         else:
             row.popover("MAT_PT_Support", icon="FUND", text="Wah!")
     
@@ -332,6 +340,7 @@ classes = (
     MAT_PT_PaintSystemMaterialSettings,
     MATERIAL_UL_PaintSystemGroups,
     MAT_MT_PaintSystemMaterialSelectMenu,
+    MAT_MT_PaintSystemMaterialSettingsMenu,
     MAT_PT_PaintSystemMainPanel,
     MAT_PT_PaintSystemGroups,
     MAT_MT_DeleteGroupMenu,
