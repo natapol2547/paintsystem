@@ -123,7 +123,6 @@ def update_library_nodetree_version():
         if node_tree.name.startswith(".PS"):
             ps_nodetrees.append(node_tree)
     for node_tree in ps_nodetrees:
-        print(f"Checking library nodetree {node_tree.name}")
         target_version = LIBRARY_NODE_TREE_VERSIONS.get(node_tree.name, 0)
         if get_nodetree_version(node_tree) != target_version:
             print(f"Updating library nodetree {node_tree.name} to version {target_version}")
