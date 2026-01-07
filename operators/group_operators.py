@@ -182,7 +182,7 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
                     channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
                 
                 right_most_node = get_right_most_node(mat_node_tree)
-                node_group, mix_shader = create_basic_setup(mat_node_tree, node_tree, right_most_node.location if right_most_node else Vector((0, 0)))
+                node_group, mix_shader = create_basic_setup(mat_node_tree, node_tree, right_most_node.location + Vector((right_most_node.width + 50, 0)) if right_most_node else Vector((0, 0)))
                 mat_output = mat_node_tree.nodes.new(type='ShaderNodeOutputMaterial')
                 mat_output.location = mix_shader.location + Vector((200, 0))
                 mat_output.is_active_output = True
