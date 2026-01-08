@@ -24,12 +24,12 @@ class PaintSystemPreferences:
     version_check_interval_minutes: int = 0
     update_state: str = 'UNAVAILABLE'
 
-def get_preferences(context) -> PaintSystemPreferences:
-    """Get the Paint System preferences"""
-    ps = addon_package()
-    # Be robust across classic add-ons and new Extensions, and during early init
-    try:
-        return context.preferences.addons[ps].preferences
-    except Exception:
-        # Fallback: return a safe default so UI can render without crashing
-        return PaintSystemPreferences()
+# def get_preferences(context) -> PaintSystemPreferences:
+#     """Get the Paint System preferences"""
+#     ps = addon_package()
+#     # Be robust across classic add-ons and new Extensions, and during early init
+#     try:
+#         return context.preferences.addons[ps].preferences
+#     except Exception:
+#         # Fallback: return a safe default so UI can render without crashing
+#         return PaintSystemPreferences()
