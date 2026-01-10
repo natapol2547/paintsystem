@@ -24,10 +24,6 @@ class PaintSystemPreferences:
     version_check_interval_minutes: int = 0
     update_state: str = 'UNAVAILABLE'
     preferred_coord_type: str = 'UNDETECTED'
-    show_opacity_in_layer_list: bool = True
-    use_panel_quick_access: bool = False
-    automatic_name_sync: bool = True
-    automatic_name_syncing: bool = True
 
 def get_preferences(context) -> PaintSystemPreferences:
     """Get the Paint System preferences"""
