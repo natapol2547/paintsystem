@@ -172,13 +172,12 @@ class PSUVOptionsMixin:
         ps_ctx = PSContextMixin.parse_context(context)
         row = layout.row(align=True)
         row.label(text="Coordinate System", icon_value=get_icon('transform'))
-        row.prop(self, "use_paint_system_uv", text="Auto UV", toggle=1)
+        row.prop(self, "use_paint_system_uv", text="Use AUTO UV?", toggle =1)
         if self.use_paint_system_uv:
             info_box = layout.box()
             if not ps_ctx.ps_object.data.uv_layers.get(DEFAULT_PS_UV_MAP_NAME):
                 info_box.alert = True
-                info_box.label(text="UV: " + DEFAULT_PS_UV_MAP_NAME, icon='ERROR')
-                info_box.label(text="A new UV map will be created", icon='INFO')
+                info_box.label(text="Will create a new UV Map: " + DEFAULT_PS_UV_MAP_NAME, icon='ERROR')
             else:
                 info_box.label(text="UV: " + DEFAULT_PS_UV_MAP_NAME, icon='INFO')
             return
