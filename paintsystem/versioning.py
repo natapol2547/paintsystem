@@ -104,6 +104,8 @@ def migrate_socket_names(layer_parent_map: dict[Layer, LayerParent]):
 def update_layer_version(layer_parent_map: dict[Layer, LayerParent]):
     for layer, layer_parent in layer_parent_map.items():
         # Updating layer to the target version
+        if not layer.node_tree:
+            continue
         target_version = get_layer_version_for_type(layer.type)
         if get_nodetree_version(layer.node_tree) != target_version:
             print(f"Updating layer {layer.name} to version {target_version}")
