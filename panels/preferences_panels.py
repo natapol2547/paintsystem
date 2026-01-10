@@ -40,6 +40,17 @@ class PaintSystemPreferences(AddonPreferences):
         min=0.5,
         max=3.0
     )
+    
+    preferred_coord_type: EnumProperty(
+        name="Preferred Coordinate Type",
+        description="Preferred coordinate type",
+        items=(
+            ('AUTO', 'Auto UV', ''),
+            ('UV', 'UV', ''),
+            ('UNDETECTED', 'Undetected', ''),
+        ),
+        default='UNDETECTED',
+    )
 
     color_picker_scale_rmb: FloatProperty(
         name="RMB Color Wheel Scale",

@@ -23,6 +23,7 @@ class PaintSystemPreferences:
     version_check_interval_hours: int = 0
     version_check_interval_minutes: int = 0
     update_state: str = 'UNAVAILABLE'
+    preferred_coord_type: str = 'UNDETECTED'
 
 def get_preferences(context) -> PaintSystemPreferences:
     """Get the Paint System preferences"""

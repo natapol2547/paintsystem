@@ -136,6 +136,11 @@ class PSUVOptionsMixin():
         if self.use_paint_system_uv:
             self.coord_type = 'AUTO'
             self.uv_map_name = DEFAULT_PS_UV_MAP_NAME
+            # User decided to use auto coord type
+            ps_ctx.ps_settings.preferred_coord_type = "AUTO"
+        elif self.coord_type == 'UV':
+            # User decided to use UV coord type
+            ps_ctx.ps_settings.preferred_coord_type = "UV"
         if ps_ctx.active_group:
             ps_ctx.active_group.coord_type = self.coord_type
             ps_ctx.active_group.uv_map_name = self.uv_map_name
@@ -144,6 +149,14 @@ class PSUVOptionsMixin():
         """Get the coord_type from the active channel and set it on the operator"""
         ps_ctx = PSContextMixin.parse_context(context)
         self.checked_coord_type = True
+        self.uv_map_name = self.get_default_uv_map_name(context)
+        if ps_ctx.ps_settings.preferred_coord_type != 'UNDETECTED':
+            if ps_ctx.ps_settings.preferred_coord_type == 'AUTO':
+                self.use_paint_system_uv = True
+            else:
+                self.use_paint_system_uv = False
+            self.coord_type = ps_ctx.ps_settings.preferred_coord_type
+            return
         if ps_ctx.active_channel:
             past_coord_type = ps_ctx.active_group.coord_type
             if past_coord_type == 'AUTO':
@@ -152,19 +165,19 @@ class PSUVOptionsMixin():
                 self.use_paint_system_uv = False
                 self.coord_type = past_coord_type
             past_uv_map_name = ps_ctx.active_group.uv_map_name
-            self.uv_map_name = past_uv_map_name if past_uv_map_name else self.get_default_uv_map_name(context)
-        else:
-            self.uv_map_name = self.get_default_uv_map_name(context)
+            if past_uv_map_name:
+                self.uv_map_name = past_uv_map_name
             
     def select_coord_type_ui(self, layout, context, show_warning=True):
         ps_ctx = PSContextMixin.parse_context(context)
         row = layout.row(align=True)
-        row.label(text="Coordinate Type", icon='UV')
+        row.label(text="Coordinate System", icon_value=get_icon('transform'))
         row.prop(self, "use_paint_system_uv", text="Use AUTO UV?", toggle =1)
         if self.use_paint_system_uv:
             info_box = layout.box()
             if not ps_ctx.ps_object.data.uv_layers.get(DEFAULT_PS_UV_MAP_NAME):
-                info_box.label(text="Will create UV Map: " + DEFAULT_PS_UV_MAP_NAME, icon='ERROR')
+                info_box.alert = True
+                info_box.label(text="Will create a new UV Map: " + DEFAULT_PS_UV_MAP_NAME, icon='ERROR')
             else:
                 info_box.label(text="Using UV Map: " + DEFAULT_PS_UV_MAP_NAME, icon='INFO')
             return
