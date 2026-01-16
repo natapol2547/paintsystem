@@ -481,9 +481,8 @@ def ensure_sockets(node_tree: NodeTree, expected_sockets: List[ExpectedSocket], 
                 socket.name = expected_sockets[idx].name
     
     # ensure socket type
+    output_sockets = [socket for socket in nt_sockets if socket.item_type == "SOCKET" and socket.in_out == in_out]
     for idx, socket in enumerate(output_sockets):
-        if socket.socket_type != expected_sockets[idx].socket_type:
-            socket.socket_type = expected_sockets[idx].socket_type
         
         if hasattr(socket, "subtype"):
             expected_subtype = "FACTOR" if expected_sockets[idx].use_max_min else "NONE"
@@ -494,6 +493,12 @@ def ensure_sockets(node_tree: NodeTree, expected_sockets: List[ExpectedSocket], 
             else:
                 socket.min_value = -1e39
                 socket.max_value = 1e39
+        
+        if hasattr(socket, "hide_value"):
+            socket.hide_value = expected_sockets[idx].hide_value
+        
+        if socket.socket_type != expected_sockets[idx].socket_type:
+            socket.socket_type = expected_sockets[idx].socket_type
 
 def get_udim_tiles(object: bpy.types.Object, uv_layer_name: str):
     uv_layer = object.data.uv_layers.get(uv_layer_name)
