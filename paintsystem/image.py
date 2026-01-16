@@ -50,10 +50,15 @@ class ImageTiles:
 def save_image(image: Image, force_save: bool = False):
     if not image.is_dirty and not force_save:
         return
-    if image.packed_file or image.filepath == '':
+    try:
+        if image.packed_file or image.filepath == '':
+            image.pack()
+        else:
+            image.save()
+    except Exception as e:
+        print(f"Failed to save image {image.name}: {e}. Use packing instead.")
+        image.filepath_raw = ''
         image.pack()
-    else:
-        image.save()
 
 def temp_save_image(image):
     """Save image to temporary directory, ensuring all UDIM tiles are saved."""

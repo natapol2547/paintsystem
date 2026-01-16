@@ -511,6 +511,7 @@ class PAINTSYSTEM_OT_QuickEdit(PSContextMixin, Operator):
         
         image = active_layer.image
         active_layer.edit_external_mode = 'IMAGE_EDIT'
+        save_image(image, force_save=True)
         
         # Check if image needs to be saved
         if image_needs_save(image):
@@ -654,7 +655,17 @@ class PAINTSYSTEM_OT_ReloadImage(PSContextMixin, Operator):
         if not active_layer.external_image:
             self.report({'ERROR'}, "No external image found")
             return {'CANCELLED'}
-        active_layer.external_image.reload()
+        # Find the image file if saved locally
+        if active_layer.external_image.filepath_raw:
+            image_file = active_layer.external_image.filepath_raw
+        else:
+            image_file = active_layer.external_image.filepath
+        if os.path.exists(image_file):
+            active_layer.external_image.reload()
+        else:
+            active_layer.external_image = None
+            self.report({'ERROR'}, "Image file not found")
+            return {'CANCELLED'}
         return {'FINISHED'}
 
 
