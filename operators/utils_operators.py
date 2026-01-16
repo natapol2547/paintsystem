@@ -148,22 +148,21 @@ class PAINTSYSTEM_OT_ToggleBrushEraseAlpha(Operator):
         return {'FINISHED'}
 
 
-class PAINTSYSTEM_OT_ColorSampler(PSContextMixin, Operator):
+class PAINTSYSTEM_OT_ColorSample(PSContextMixin, Operator):
     """Sample the color under the mouse cursor"""
-    bl_idname = "paint_system.color_sampler"
-    bl_label = "Color Sampler"
+    bl_idname = "paint_system.color_sample"
+    bl_label = "Color Sample"
 
     x: IntProperty()
     y: IntProperty()
     
     @classmethod
     def poll(cls, context):
-        return context.area.type == 'VIEW_3D' and context.mode == 'PAINT_TEXTURE'
+        return context.mode == 'PAINT_TEXTURE'
 
     def execute(self, context):
         if is_newer_than(4,4):
             bpy.ops.paint.sample_color('INVOKE_DEFAULT', merged=True, palette=False)
-            context.scene.ps_scene_data.update_hsv_color(context)
             return {'FINISHED'}
 
         x, y = self.x, self.y
@@ -436,7 +435,7 @@ classes = (
     PAINTSYSTEM_OT_NewMaterial,
     PAINTSYSTEM_OT_IsolateChannel,
     PAINTSYSTEM_OT_ToggleBrushEraseAlpha,
-    PAINTSYSTEM_OT_ColorSampler,
+    PAINTSYSTEM_OT_ColorSample,
     PAINTSYSTEM_OT_OpenPaintSystemPreferences,
     PAINTSYSTEM_OT_FlipNormals,
     PAINTSYSTEM_OT_RecalculateNormals,
@@ -446,10 +445,4 @@ classes = (
     PAINTSYSTEM_OT_ToggleTransformGizmos,
 )
 
-_register, _unregister = register_classes_factory(classes)
-
-def register():
-    _register()
-
-def unregister():
-    _unregister()
+register, unregister = register_classes_factory(classes)

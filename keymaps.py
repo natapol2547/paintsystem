@@ -106,9 +106,8 @@ def register() -> None:
             kc,
             name='3D View',
             space_type='VIEW_3D',
-            idname='paint_system.color_sampler',
+            idname='paint_system.color_sample',
             key='I',
-            repeat=True,
         )
         _add_keymap_entry(
             kc,
