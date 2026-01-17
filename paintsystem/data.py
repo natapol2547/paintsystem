@@ -1713,16 +1713,6 @@ class Channel(BaseNestedListManager):
         node_builder.add_node("group_input", "NodeGroupInput")
         node_builder.add_node("group_output", "NodeGroupOutput")
         
-        if self.bake_image:
-            node_builder.add_node("uv_map", "ShaderNodeUVMap", {"uv_map": self.bake_uv_map}, force_properties=True)
-            node_builder.add_node("bake_image", "ShaderNodeTexImage", {"image": self.bake_image})
-            node_builder.link("uv_map", "bake_image", "UV", "Vector")
-            if self.use_bake_image:
-                node_builder.link("bake_image", "group_output", "Color", "Color")
-                node_builder.link("bake_image", "group_output", "Alpha", "Alpha")
-                node_builder.compile()
-                return
-        
         flattened_unlinked_layers = self.flattened_unlinked_layers
         @dataclass
         class PreviousLayer:
@@ -1744,8 +1734,8 @@ class Channel(BaseNestedListManager):
         node_builder.link("alpha_clamp_end", "group_output", "Result", "Alpha")
         previous_dict[-1] = PreviousLayer(color_name="group_output", color_socket="Color", alpha_name="alpha_clamp_end", alpha_socket="Value")
         
+        previous_data = previous_dict.get(-1)
         if self.type == "VECTOR" and not self.disable_output_transform:
-            previous_data = previous_dict.get(-1)
             if self.output_vector_space != "NONE" and self.use_space_transform:
                 node_builder.add_node("vector_transform_output", "ShaderNodeVectorTransform", {"vector_type": self.vector_type, "convert_from": 'WORLD' if self.normalize_input else self.vector_space, "convert_to": self.output_vector_space}, force_properties=True)
                 node_builder.link("vector_transform_output", previous_data.color_name, "Vector", previous_data.color_socket)
@@ -1756,6 +1746,16 @@ class Channel(BaseNestedListManager):
                 node_builder.link("normal_map", previous_data.color_name, "Normal", previous_data.color_socket)
                 previous_data.color_name = "normal_map"
                 previous_data.color_socket = "Color"
+        
+        if self.bake_image:
+            node_builder.add_node("uv_map", "ShaderNodeUVMap", {"uv_map": self.bake_uv_map}, force_properties=True)
+            node_builder.add_node("bake_image", "ShaderNodeTexImage", {"image": self.bake_image})
+            node_builder.link("uv_map", "bake_image", "UV", "Vector")
+            if self.use_bake_image:
+                node_builder.link("bake_image", previous_data.color_name, "Color", previous_data.color_socket)
+                node_builder.link("bake_image", "group_output", "Alpha", "Alpha")
+                node_builder.compile()
+                return
             
         if len(flattened_unlinked_layers) > 0:
             for unlinked_layer in flattened_unlinked_layers:
