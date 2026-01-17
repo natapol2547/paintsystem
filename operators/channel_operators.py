@@ -1,7 +1,8 @@
 import bpy
+from bpy.props import EnumProperty
 
 # ---
-from ..paintsystem.data import CHANNEL_TYPE_ENUM, COLOR_SPACE_ENUM
+from ..paintsystem.data import CHANNEL_TEMPLATE_ENUM, CHANNEL_TYPE_ENUM, COLOR_SPACE_ENUM
 from ..utils import get_next_unique_name
 from .common import MultiMaterialOperator, PSContextMixin
 from ..paintsystem.list_manager import ListManager
@@ -12,6 +13,12 @@ class PAINTSYSTEM_OT_AddChannel(PSContextMixin, MultiMaterialOperator):
     bl_idname = "paint_system.add_channel"
     bl_label = "Add Channel"
     bl_options = {'REGISTER', 'UNDO'}
+    
+    template: EnumProperty(
+        name="Template",
+        items=[("CUSTOM", "Custom", "Custom"), *CHANNEL_TEMPLATE_ENUM],
+        default="CUSTOM"
+    )
     
     def get_unique_channel_name(self, context):
         """Set a unique name for the new channel."""
@@ -75,24 +82,29 @@ class PAINTSYSTEM_OT_AddChannel(PSContextMixin, MultiMaterialOperator):
     
     def process_material(self, context):
         ps_ctx = self.parse_context(context)
-        ps_ctx.active_group.create_channel(
-            context, 
-            channel_name=self.channel_name, 
-            channel_type=self.channel_type, 
-            color_space=self.color_space, 
-            use_alpha=self.use_alpha, 
-            normalize_input=self.normalize_input, 
-            # world_to_object_normal=self.world_to_object_normal, 
-            use_max_min=self.use_max_min,
-            factor_min=self.factor_min,
-            factor_max=self.factor_max,
-            vector_space="OBJECT" if self.channel_type == "VECTOR" else "NONE"
-            )
+        if self.template == "CUSTOM":
+            ps_ctx.active_group.create_channel(
+                context, 
+                channel_name=self.channel_name, 
+                channel_type=self.channel_type, 
+                color_space=self.color_space, 
+                use_alpha=self.use_alpha, 
+                normalize_input=self.normalize_input, 
+                # world_to_object_normal=self.world_to_object_normal, 
+                use_max_min=self.use_max_min,
+                factor_min=self.factor_min,
+                factor_max=self.factor_max,
+                vector_space="OBJECT"
+                )
+        else:
+            ps_ctx.active_group.create_channel_template(context, template=self.template)
         redraw_panel(context)
         return {'FINISHED'}
     
     def invoke(self, context, event):
         """Invoke the operator to create a new channel."""
+        if self.template != "CUSTOM":
+            return self.execute(context)
         self.channel_name = self.get_unique_channel_name(context)
         return context.window_manager.invoke_props_dialog(self)
     

@@ -3,6 +3,8 @@ from bpy.types import UIList, Menu
 from bpy.utils import register_classes_factory
 from bpy.types import Panel
 from bpy_extras.node_utils import find_base_socket_type
+
+from ..paintsystem.data import CHANNEL_TEMPLATE_ENUM
 from .common import (
     PSContextMixin,
     get_icon_from_channel,
@@ -141,7 +143,12 @@ class MAT_PT_ChannelsPanel(PSContextMixin, Panel):
             rows=max(len(ps_ctx.active_group.channels), 4),
         )
         col = row.column(align=True)
-        col.operator("paint_system.add_channel", icon='ADD', text="")
+        
+        available_templates = [template for template in CHANNEL_TEMPLATE_ENUM if not any(channel.name == template[1] for channel in ps_ctx.active_group.channels)]
+        if available_templates:
+            col.operator("wm.call_menu", icon='ADD', text="").name = "MAT_MT_AddChannelMenu"
+        else:
+            col.operator("paint_system.add_channel", icon='ADD', text="").template = "CUSTOM"
         col.operator("paint_system.delete_channel", icon='REMOVE', text="")
         col.operator("paint_system.move_channel_up", icon='TRIA_UP', text="")
         col.operator("paint_system.move_channel_down", icon='TRIA_DOWN', text="")
@@ -176,7 +183,6 @@ class MAT_PT_ChannelsSettings(PSContextMixin, Panel):
             return
         box = col.box()
         col = box.column()
-        col.label(text="Channel Settings:", icon="SETTINGS")
         col.use_property_split = True
         col.use_property_decorate = False
         col.prop(active_channel, "type", text="Type")
@@ -189,22 +195,54 @@ class MAT_PT_ChannelsSettings(PSContextMixin, Panel):
                 if socket.enabled and len(socket.links) == 0:
                     col.prop(socket, "default_value", text="Alpha")
         if active_channel.type == "VECTOR":
+            col.prop(active_channel, "default_value", text="Default Value")
             box = col.box()
-            col = box.column()
-            col.use_property_split = False
-            col.prop(active_channel, "vector_space", text="")
-            # col.prop(active_channel, "world_to_object_normal", text="World to Object Input")
-            col.prop(active_channel, "normalize_input", text="Normalize Input")
+            box.use_property_split = False
+            header, panel = box.panel("vector_space_settings_panel", default_closed=True)
+            header.prop(active_channel, "use_space_transform", text="Use Space Transform")
+            if panel:
+                panel.use_property_split = True
+                panel.enabled = active_channel.use_space_transform
+                panel.prop(active_channel, "vector_type", text="Vector Type", expand=True)
+                panel.prop(active_channel, "input_vector_space", text="Input Space")
+                row = panel.row(align=True)
+                row.prop(active_channel, "vector_space", text="Painting Space")
+                row.prop(active_channel, "normalize_input", text="", icon="NORMALS_VERTEX_FACE")
+                panel.prop(active_channel, "output_vector_space", text="Output Space")
         if active_channel.type == "FLOAT":
             float_box = col.box()
             col = float_box.column()
-            col.label(text="Float Input Settings:", icon="SETTINGS")
             col.use_property_split = False
             col.prop(active_channel, "use_max_min")
             if active_channel.use_max_min:
                 col.prop(active_channel, "factor_min")
                 col.prop(active_channel, "factor_max")
 
+class MAT_MT_AddChannelMenu(PSContextMixin, Menu):
+    bl_label = "Add Channel"
+    bl_idname = "MAT_MT_AddChannelMenu"
+
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_group is not None
+
+    def draw(self, context):
+        layout = self.layout
+        
+        if layout.operator_context == 'EXEC_REGION_WIN':
+            layout.operator_context = 'INVOKE_REGION_WIN'
+        layout.operator_context = 'INVOKE_REGION_WIN'
+        
+        ps_ctx = self.parse_context(context)
+        col = layout.column()
+        col.operator("paint_system.add_channel", text="Custom Channel", icon_value=get_icon('channels')).template = "CUSTOM"
+        col.separator()
+        available_templates = [template for template in CHANNEL_TEMPLATE_ENUM if not any(channel.name == template[1] for channel in ps_ctx.active_group.channels)]
+        if available_templates:
+            col.label(text="Templates")
+            for template in available_templates:
+                col.operator("paint_system.add_channel", text=template[1], icon_value=template[3]).template = template[0]
 
 classes = (
     MAT_MT_PaintSystemChannelsMergeAndExport,
@@ -212,6 +250,7 @@ classes = (
     MAT_PT_ChannelsSelect,
     MAT_PT_ChannelsPanel,
     MAT_PT_ChannelsSettings,
+    MAT_MT_AddChannelMenu,
 )
 
 register, unregister = register_classes_factory(classes)

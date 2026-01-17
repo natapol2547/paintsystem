@@ -203,40 +203,19 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
                 node_group = mat_node_tree.nodes.new(type='ShaderNodeGroup')
                 node_group.node_tree = node_tree
                 node_group.location = principled_node.location + Vector((-200, 0))
-                connect_sockets(principled_node.outputs[0], material_output.inputs[0])
-
+                # Check if principled_node is not connected to anything
+                if len(principled_node.outputs[0].links) == 0:
+                    connect_sockets(principled_node.outputs[0], material_output.inputs[0])
                 if self.pbr_add_color:
-                    channel = new_group.create_channel(context, channel_name='Color', channel_type='COLOR', use_alpha=True)
-                    color_connected = transfer_connection(mat_node_tree, principled_node.inputs['Base Color'], node_group.inputs['Color'])
-                    transfer_connection(mat_node_tree, principled_node.inputs['Alpha'], node_group.inputs['Color Alpha'])
-                    if self.add_layers:
-                        if not color_connected:
-                            channel.create_layer(context, layer_name='Solid Color', layer_type='SOLID_COLOR')
-                        channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
-                    connect_sockets(node_group.outputs['Color'], principled_node.inputs['Base Color'])
-                    connect_sockets(node_group.outputs['Color Alpha'], principled_node.inputs['Alpha'])
-
+                    new_group.create_channel_template(context, "COLOR", add_layers=self.add_layers)
                 if self.pbr_add_metallic:
-                    channel = new_group.create_channel(context, channel_name='Metallic', channel_type='FLOAT', use_alpha=False, use_max_min=True, color_space='NONCOLOR')
-                    transfer_connection(mat_node_tree, principled_node.inputs['Metallic'], node_group.inputs['Metallic'])
-                    connect_sockets(node_group.outputs['Metallic'], principled_node.inputs['Metallic'])
+                    new_group.create_channel_template(context, "METALLIC", add_layers=self.add_layers)
                 if self.pbr_add_roughness:
-                    channel = new_group.create_channel(context, channel_name='Roughness', channel_type='FLOAT', use_alpha=False, use_max_min=True, color_space='NONCOLOR')
-                    transfer_connection(mat_node_tree, principled_node.inputs['Roughness'], node_group.inputs['Roughness'])
-                    connect_sockets(node_group.outputs['Roughness'], principled_node.inputs['Roughness'])
+                    new_group.create_channel_template(context, "ROUGHNESS", add_layers=self.add_layers)
                 if self.pbr_add_normal:
-                    channel = new_group.create_channel(context, channel_name='Normal', channel_type='VECTOR', use_alpha=False, normalize_input=True, color_space='NONCOLOR')
-                    normal_connected =transfer_connection(mat_node_tree, principled_node.inputs['Normal'], node_group.inputs['Normal'])
-                    connect_sockets(node_group.outputs['Normal'], principled_node.inputs['Normal'])
-                    if self.add_layers:
-                        if not normal_connected:
-                            channel.create_layer(context, layer_name='Object Normal', layer_type='GEOMETRY', geometry_type='OBJECT_NORMAL', normalize_normal=True)
-                        channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
-                    norm_map_node = mat_node_tree.nodes.new(type='ShaderNodeNormalMap')
-                    norm_map_node.location = node_group.location + Vector((0, -300))
-                    norm_map_node.space = 'OBJECT'
-                    connect_sockets(node_group.outputs['Normal'], norm_map_node.inputs[1])
-                    connect_sockets(norm_map_node.outputs[0], principled_node.inputs['Normal'])
+                    new_group.create_channel_template(context, "NORMAL", add_layers=self.add_layers)
+                ps_ctx = self.parse_context(context)
+                ps_ctx.active_group.active_index = 0
                 ps_ctx = self.parse_context(context)
                 ps_ctx.active_group.active_index = 0
 
@@ -281,16 +260,16 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
                 node_group = mat_node_tree.nodes.new(type='ShaderNodeGroup')
                 node_group.node_tree = node_tree
                 node_group.location = right_most_node.location + Vector((200, 0))
-                norm_map_node = mat_node_tree.nodes.new(type='ShaderNodeNormalMap')
-                norm_map_node.location = node_group.location + Vector((200, 0))
-                norm_map_node.space = 'OBJECT'
+                normal_map_node = mat_node_tree.nodes.new(type='ShaderNodeNormalMap')
+                normal_map_node.location = node_group.location + Vector((200, 0))
+                normal_map_node.space = 'OBJECT'
                 diffuse_node = mat_node_tree.nodes.new(type='ShaderNodeBsdfDiffuse')
-                diffuse_node.location = norm_map_node.location + Vector((200, 0))
+                diffuse_node.location = normal_map_node.location + Vector((200, 0))
                 mat_output = mat_node_tree.nodes.new(type='ShaderNodeOutputMaterial')
                 mat_output.location = diffuse_node.location + Vector((200, 0))
                 mat_output.is_active_output = True
-                connect_sockets(node_group.outputs['Normal'], norm_map_node.inputs[1])
-                connect_sockets(norm_map_node.outputs[0], diffuse_node.inputs['Normal'])
+                connect_sockets(node_group.outputs['Normal'], normal_map_node.inputs[1])
+                connect_sockets(normal_map_node.outputs[0], diffuse_node.inputs['Normal'])
                 connect_sockets(diffuse_node.outputs[0], mat_output.inputs[0])
             case _:
                 channel = new_group.create_channel(context, channel_name='Color', channel_type='COLOR', use_alpha=True)
@@ -345,27 +324,27 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
             box = layout.box()
             self.select_coord_type_ui(box, context) 
         box = layout.box()
-        row = box.row()
-        row.alignment = "CENTER"
-        row.label(text="Advanced Settings:", icon="TOOL_SETTINGS")
-        split = box.split(factor=0.4)
-        split.label(text="Group Name:")
-        split.prop(self, "group_name", text="", icon='NODETREE')
-        if self.template in ['BASIC']:
-            box.prop(self, "use_alpha_blend", text="Use Smooth Alpha")
-            if self.use_alpha_blend:
-                warning_box = box.box()
-                warning_box.alert = True
-                row = warning_box.row()
-                row.label(icon='ERROR')
-                col = row.column(align=True)
-                col.label(text="Warning: Smooth Alpha (Alpha Blend)")
-                col.label(text="may cause sorting artifacts.")
-            box.prop(self, "disable_show_backface",
-                     text="Use Backface Culling")
-        if self.template == 'BASIC' and context.scene.view_settings.view_transform != 'Standard':
-            box.prop(self, "set_view_transform",
-                     text="Use Standard View Transform")
+        header, panel = box.panel("advanced_settings_panel", default_closed=True)
+        header.label(text="Advanced Settings:", icon="TOOL_SETTINGS")
+        if panel:
+            split = panel.split(factor=0.4)
+            split.label(text="Group Name:")
+            split.prop(self, "group_name", text="", icon='NODETREE')
+            if self.template in ['BASIC']:
+                panel.prop(self, "use_alpha_blend", text="Use Smooth Alpha")
+                if self.use_alpha_blend:
+                    warning_box = panel.box()
+                    warning_box.alert = True
+                    row = warning_box.row()
+                    row.label(icon='ERROR')
+                    col = row.column(align=True)
+                    col.label(text="Warning: Smooth Alpha (Alpha Blend)")
+                    col.label(text="may cause transparency artifacts.")
+                panel.prop(self, "disable_show_backface",
+                        text="Use Backface Culling")
+            if self.template == 'BASIC' and context.scene.view_settings.view_transform != 'Standard':
+                panel.prop(self, "set_view_transform",
+                        text="Use Standard View Transform")
 
 
 class PAINTSYSTEM_OT_DeleteGroup(PSContextMixin, Operator):
@@ -373,6 +352,13 @@ class PAINTSYSTEM_OT_DeleteGroup(PSContextMixin, Operator):
     bl_idname = "paint_system.delete_group"
     bl_label = "Delete Paint System"
     bl_options = {'REGISTER', 'UNDO'}
+    
+    bake_channels: BoolProperty(
+        name="Bake Channels",
+        description="Bake the channels",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
 
     @classmethod
     def poll(cls, context):
@@ -384,6 +370,8 @@ class PAINTSYSTEM_OT_DeleteGroup(PSContextMixin, Operator):
         ps_mat_data = ps_ctx.ps_mat_data
         active_group = ps_ctx.active_group
         node_tree = ps_ctx.active_material.node_tree
+        if self.bake_channels:
+            pass
         match active_group.template:
             case 'BASIC':
                 for group_node in find_nodes(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree}):
@@ -404,7 +392,7 @@ class PAINTSYSTEM_OT_DeleteGroup(PSContextMixin, Operator):
             case 'PBR':
                 for group_node in find_nodes(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree}):
                     nodes = [group_node]
-                dissolve_nodes(active_group.node_tree, active_group.node_tree.nodes)
+                    dissolve_nodes(active_group.node_tree, nodes)
             case 'PAINT_OVER':
                 dissolve_nodes(active_group.node_tree, active_group.node_tree.nodes)
             case 'NORMAL':
@@ -421,7 +409,14 @@ class PAINTSYSTEM_OT_DeleteGroup(PSContextMixin, Operator):
     def draw(self, context):
         layout = self.layout
         ps_ctx = self.parse_context(context)
-        layout.label(text=f"Are you sure you want to delete '{ps_ctx.active_group.name}' Group?")
+        box = layout.box()
+        col = box.column(align=True)
+        col.alert = True
+        col.label(text="Danger Zone!", icon="ERROR")
+        col.label(text=f"Are you sure you want to delete Paint System?", icon="BLANK1")
+        if self.bake_channels:
+            box = layout.box()
+            
 
 
 class PAINTSYSTEM_OT_MoveGroup(PSContextMixin, MultiMaterialOperator):

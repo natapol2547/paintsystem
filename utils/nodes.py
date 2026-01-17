@@ -51,21 +51,30 @@ def transfer_connection(node_tree: NodeTree, source_socket: NodeSocket, target_s
         return True
     else:
         # Copy the value from source socket to target socket
-        target_socket.default_value = source_socket.default_value
-    return False
+        try:
+            target_socket.default_value = source_socket.default_value
+        except Exception as e:
+            print(f"Failed to transfer connection from {source_socket.name} ({source_socket.type}) to {target_socket.name} ({target_socket.type}): {e}")
+            return False
+        return True
 
 def find_nodes(node_tree: NodeTree, properties: dict) -> list[Node]:
     node = get_material_output(node_tree)
     nodes = traverse_connected_nodes(node)
     return [node for node in nodes if all(hasattr(node, prop) and getattr(node, prop) == value for prop, value in properties.items())]
 
-def find_node(node_tree: NodeTree, properties: dict) -> Node | None:
-    start_node = get_material_output(node_tree)
-    if not start_node:
-        return None
-
+def find_node(node_tree: NodeTree, properties: dict, connected_to_output: bool = True) -> Node | None:
     visited = set()
-    stack = [start_node]
+    
+    if connected_to_output:
+        start_node = get_material_output(node_tree)
+        if not start_node:
+            return None
+
+        stack = [start_node]
+    else:
+        start_node = None
+        stack = list(node_tree.nodes)
     
     while stack:
         curr_node = stack.pop()
@@ -177,3 +186,12 @@ def find_connected_node(node: Node, properties: dict) -> Node | None:
         if output_node:
             return output_node
     return None
+
+def find_socket_on_node(node: Node, name: str, in_out: str = 'INPUT', properties: dict = {}) -> NodeSocket | None:
+    properties['name'] = name
+    sockets = [socket for socket in (node.inputs if in_out == 'INPUT' else node.outputs) if socket.enabled]
+    for socket in sockets:
+        if all(hasattr(socket, prop) and getattr(socket, prop) == value for prop, value in properties.items()):
+            return socket
+    return None
+    
