@@ -783,9 +783,10 @@ class PAINTSYSTEM_OT_MergeDown(BakeOperator):
         # Store original blend modes
         original_active_blend_mode = get_layer_blend_type(active_layer)
         original_below_blend_mode = get_layer_blend_type(below_layer)
-        
-        # Set both layers to MIX for proper blending
-        set_layer_blend_type(active_layer, 'MIX')
+
+        # Keep the active (top) layer blend mode so effects like MULTIPLY are baked.
+        # Force the base layer to MIX because it has no layers below during merge bake.
+        set_layer_blend_type(active_layer, original_active_blend_mode)
         set_layer_blend_type(below_layer, 'MIX')
         
         # Bake both layers into the new image
@@ -905,9 +906,10 @@ class PAINTSYSTEM_OT_MergeUp(BakeOperator):
         original_active_blend_mode = get_layer_blend_type(active_layer)
         original_above_blend_mode = get_layer_blend_type(above_layer)
 
-        # Set both layers to MIX for proper blending
+        # Keep the above (top) layer blend mode so effects like MULTIPLY are baked.
+        # Force the base layer to MIX because it has no layers below during merge bake.
         set_layer_blend_type(active_layer, 'MIX')
-        set_layer_blend_type(above_layer, 'MIX')
+        set_layer_blend_type(above_layer, original_above_blend_mode)
 
         # Bake both layers into the new image
         active_channel.bake(context, ps_ctx.active_material, image, self.uv_map_name, use_group_tree=False, force_alpha=True)
