@@ -123,6 +123,9 @@ def update_library_nodetree_version():
     ps_nodetrees = []
     for node_tree in bpy.data.node_groups:
         if node_tree.name.startswith(".PS"):
+            if node_tree.name.endswith(" (TEMP)"):
+                bpy.data.node_groups.remove(node_tree)
+                continue
             ps_nodetrees.append(node_tree)
     for node_tree in ps_nodetrees:
         target_version = LIBRARY_NODE_TREE_VERSIONS.get(node_tree.name, 0)
