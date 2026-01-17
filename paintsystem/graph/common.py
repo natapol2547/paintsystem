@@ -74,17 +74,13 @@ def get_library_nodetree(tree_name: str, library_filename: str = LIBRARY_FILENAM
     # Inspect the library for the node tree, then append it
     library_path_str = str(library_path)
     with bpy.data.libraries.load(library_path_str, link=False) as (data_from, data_to):
-        if tree_name not in data_from.node_groups:
-            raise ValueError(
-                f"Node tree '{tree_name}' not found in '{library_filename}'.\n"
-                f"Available: {list(data_from.node_groups)}"
-            )
-        data_to.node_groups = [tree_name]
+        if tree_name in data_from.node_groups:
+            data_to.node_groups = [tree_name]
 
     # Return the newly appended node tree (now present in bpy.data.node_groups)
     appended_tree: Optional[bpy.types.NodeTree] = bpy.data.node_groups.get(tree_name)
     
-    if existing_tree and force_append:
+    if appended_tree and existing_tree and force_append:
         # Remap the users to the new tree
         existing_tree.user_remap(appended_tree)
         bpy.data.node_groups.remove(existing_tree)
