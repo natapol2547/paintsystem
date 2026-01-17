@@ -178,16 +178,6 @@ class MAT_PT_PaintSystemMaterialSettings(PSContextMixin, Panel):
             row.operator("paint_system.new_group", icon='ADD', text="")
             row.operator("wm.call_menu", text="", icon="REMOVE").name = "MAT_MT_DeleteGroupMenu"
 
-class MAT_MT_PaintSystemMaterialSettingsMenu(PSContextMixin, Menu):
-    bl_label = "Material Settings Menu"
-    bl_idname = "MAT_MT_PaintSystemMaterialSettingsMenu"
-
-    def draw(self, context):
-        layout = self.layout
-        col = layout.column(align=True)
-        col.operator("paint_system.new_group", icon='ADD', text="Add Group")
-        col.operator("paint_system.delete_group", icon='REMOVE', text="Delete Group")
-
 class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_PaintSystemMainPanel'
     bl_space_type = "VIEW_3D"
@@ -199,12 +189,7 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
         layout = self.layout
         ps_ctx = self.parse_context(context)
         row = layout.row(align=True)
-        if ps_ctx.ps_mat_data is None:
-            return
-        groups = ps_ctx.ps_mat_data.groups
-        if ps_ctx.ps_mat_data and groups:
-            if len(groups) > 1:
-                row.popover("MAT_PT_PaintSystemGroups", text="", icon="NODETREE")
+        if ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.groups:
             row.operator("paint_system.new_group", icon='ADD', text="")
             row.operator("wm.call_menu", text="", icon="REMOVE").name = "MAT_MT_DeleteGroupMenu"
         else:
@@ -258,9 +243,9 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
                 row = box.row()
                 scale_content(context, row)
                 row.operator("paint_system.open_extension_preferences", text="Update Paint System", icon="FILE_REFRESH")
-            # elif update_state == 'LOADING':
-            #     box = layout.box()
-            #     box.label(text="Checking for updates...", icon="INFO")
+            elif update_state == 'LOADING':
+                box = layout.box()
+                box.label(text="Checking for updates...", icon="INFO")
         if ps_ctx.ps_settings and not ps_ctx.ps_settings.use_legacy_ui and ps_ctx.active_channel:
             toggle_paint_mode_ui(layout, context)
         ob = ps_ctx.ps_object
@@ -318,7 +303,6 @@ classes = (
     MAT_PT_PaintSystemMaterialSettings,
     MATERIAL_UL_PaintSystemGroups,
     MAT_MT_PaintSystemMaterialSelectMenu,
-    MAT_MT_PaintSystemMaterialSettingsMenu,
     MAT_PT_PaintSystemMainPanel,
     MAT_PT_PaintSystemGroups,
     MAT_MT_DeleteGroupMenu,

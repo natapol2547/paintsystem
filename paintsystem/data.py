@@ -553,9 +553,6 @@ def ensure_paint_system_uv_map(context: bpy.types.Context):
     # Get the active object
     ps_object = parse_context(context).ps_object
     
-    if not ps_object:
-        return
-    
     if ps_object.data.uv_layers.get(DEFAULT_PS_UV_MAP_NAME):
         return
 
@@ -845,7 +842,7 @@ class Layer(BaseNestedListItem):
         # Make sure blend mode is not PASSTHROUGH with non-folder layers
         if self.blend_mode == "PASSTHROUGH" and self.type != "FOLDER":
             self.blend_mode = "MIX"
-
+        
         # Ensure node tree
         if not self.node_tree:
             node_tree = bpy.data.node_groups.new(name=f"PS_Layer ({self.name})", type='ShaderNodeTree')
@@ -866,7 +863,7 @@ class Layer(BaseNestedListItem):
         ]
         ensure_sockets(self.node_tree, expected_input, "INPUT")
         ensure_sockets(self.node_tree, expected_output, "OUTPUT")
-
+        
         # Update node tree name
         if self.name:
             self.node_tree.name = f"PS {self.name} ({self.uid[:8]})"
@@ -1228,7 +1225,7 @@ class Layer(BaseNestedListItem):
         self.update_node_tree(context)
     type: EnumProperty(
         items=LAYER_TYPE_ENUM,
-        default='BLANK',
+        default='IMAGE',
         update=update_type
     )
     lock_layer: BoolProperty(
@@ -1440,9 +1437,9 @@ class Layer(BaseNestedListItem):
         # If no layer below
         if not below_layer or active_channel.get_parent_layer_id(below_layer, ignore_passthrough=True) != active_channel.get_parent_layer_id(self, ignore_passthrough=True):
             if blend_mode != 'MIX':
-                warnings.append("Blend mode is not MIX. Use Folder with Passthrough blend mode or move the layer")
+                warnings.append("Blend mode is not MIX and there is no layer below")
             if layer_data.type == "ADJUSTMENT":
-                warnings.append("Adjustment disabled. Use Folder with Passthrough blend mode or move the layer")
+                warnings.append("Adjustment do not work without a layer below")
             
         return warnings
     
@@ -1652,8 +1649,6 @@ def ps_bake(context, objects: list[Object], mat: Material, uv_layer, bake_image,
     cycles_settings = save_cycles_settings()
     # Switch to Cycles if needed
     
-    orig_view_transform = str(context.scene.view_settings.view_transform)
-    
     node_tree = mat.node_tree
     
     image_node = node_tree.nodes.new(type='ShaderNodeTexImage')
@@ -1666,7 +1661,6 @@ def ps_bake(context, objects: list[Object], mat: Material, uv_layer, bake_image,
         }
         if context.scene.render.engine != 'CYCLES':
             context.scene.render.engine = 'CYCLES'
-        context.scene.view_settings.view_transform = "Standard"
         cycles = context.scene.cycles
         cycles.device = 'GPU' if use_gpu else 'CPU'
         cycles.samples = 1
@@ -1688,93 +1682,9 @@ def ps_bake(context, objects: list[Object], mat: Material, uv_layer, bake_image,
     # Delete bake nodes
     node_tree.nodes.remove(image_node)
     
-    context.scene.view_settings.view_transform = orig_view_transform
-    
     restore_cycles_settings(cycles_settings)
 
     return bake_image
-
-def vector_transform(node_builder: NodeTreeBuilder, color_name: str, color_socket: str, convert_from: str, convert_to: str, normalize_input: bool, normalize_output: bool, vector_type: str, tangent_uv: str= "UVMap"):
-    """Transform the vector output of the channel to the output vector space.
-
-    Args:
-        node_builder (NodeTreeBuilder): The node tree builder to add the nodes to.
-        color_name (str): The name of the color socket to transform.
-        color_socket (str): The socket of the color socket to transform.
-        convert_from (str): The input vector space. Can be "WORLD", "OBJECT", "TANGENT".
-        convert_to (str): The output vector space. Can be "WORLD", "OBJECT", "TANGENT".
-        normalize_input (bool): Whether to normalize the input vector.
-        normalize_output (bool): Whether to normalize the output vector.
-        vector_type (str): The type of the vector. Can be "POINT", "VECTOR", "NORMAL".
-        tangent_uv (str): The UV map to use for the tangent space.
-
-    Returns:
-        tuple[str, str]: The name and socket of the transformed vector.
-    """
-    output_name = None
-    output_socket = None
-    new_color_name = None
-    new_color_socket = None
-    is_output_tangent = convert_to == "TANGENT"
-    if convert_from == "TANGENT":
-        # Tangent space is already normalized
-        normalize_input = True
-    if is_output_tangent:
-        # Do not need to normalize output as the conversion from tangent space to tangent space is already normalized
-        normalize_output = True
-        # need to set convert_to to WORLD first before conversion
-        convert_to = "WORLD"
-    if normalize_input:
-        normal_map_name = node_builder.get_unique_identifier("normal_map")
-        node_builder.add_node(normal_map_name, "ShaderNodeNormalMap", {"space": convert_from, 'uv_map': tangent_uv}, force_properties=True)
-        if not output_name and not output_socket:
-            new_color_name = normal_map_name
-            new_color_socket = "Color"
-        else:
-            node_builder.link(output_name, normal_map_name, output_socket, "Normal")
-        output_name = normal_map_name
-        output_socket = "Normal"
-        convert_from = "WORLD"
-    if convert_from != convert_to:
-        vector_transform_name = node_builder.get_unique_identifier("vector_transform_output")
-        node_builder.add_node(vector_transform_name, "ShaderNodeVectorTransform", {"vector_type": vector_type, "convert_from": convert_from, "convert_to": convert_to}, force_properties=True)
-        if not output_name and not output_socket:
-            new_color_name = vector_transform_name
-            new_color_socket = "Vector"
-        else:
-            node_builder.link(output_name, vector_transform_name, output_socket, "Vector")
-        output_name = vector_transform_name
-        output_socket = "Vector"
-    if normalize_output:
-        if is_output_tangent:
-            tangent_norm_nt = get_library_nodetree(".PS Tangent Normal")
-            tangent_norm_name = node_builder.get_unique_identifier("tangent_normalize")
-            node_builder.add_node("tangent", "ShaderNodeTangent", {"direction_type": "UV_MAP", "uv_map": tangent_uv})
-            node_builder.add_node(tangent_norm_name, "ShaderNodeGroup", {"node_tree": tangent_norm_nt}, force_properties=True)
-            node_builder.link("tangent", tangent_norm_name, "Tangent", "Tangent")
-            if not output_name and not output_socket:
-                new_color_name = tangent_norm_name
-                new_color_socket = "Custom Normal"
-            else:
-                node_builder.link(output_name, tangent_norm_name, output_socket, "Custom Normal")
-            output_name = tangent_norm_name
-            output_socket = "Tangent Normal"
-        else:
-            normalize_name = node_builder.get_unique_identifier("normalize")
-            node_builder.add_node(normalize_name, "ShaderNodeVectorMath", {"operation": "MULTIPLY_ADD", "hide": True}, {1: (0.5, 0.5, 0.5), 2: (0.5, 0.5, 0.5)})
-            if not output_name and not output_socket:
-                new_color_name = normalize_name
-                new_color_socket = "Vector"
-            else:
-                node_builder.link(output_name, normalize_name, output_socket, "Vector")
-            output_name = normalize_name
-            output_socket = "Vector"
-    if output_name and output_socket:
-        node_builder.link(output_name, color_name, output_socket, color_socket)
-    else:
-        new_color_name = color_name
-        new_color_socket = color_socket
-    return new_color_name, new_color_socket
 
 class Channel(BaseNestedListManager):
     """A paint channel (e.g. Color, Roughness, Normal) that owns a hierarchy of layers.
@@ -1807,6 +1717,16 @@ class Channel(BaseNestedListManager):
         node_builder.add_node("group_input", "NodeGroupInput")
         node_builder.add_node("group_output", "NodeGroupOutput")
         
+        if self.bake_image:
+            node_builder.add_node("uv_map", "ShaderNodeUVMap", {"uv_map": self.bake_uv_map}, force_properties=True)
+            node_builder.add_node("bake_image", "ShaderNodeTexImage", {"image": self.bake_image})
+            node_builder.link("uv_map", "bake_image", "UV", "Vector")
+            if self.use_bake_image:
+                node_builder.link("bake_image", "group_output", "Color", "Color")
+                node_builder.link("bake_image", "group_output", "Alpha", "Alpha")
+                node_builder.compile()
+                return
+        
         flattened_unlinked_layers = self.flattened_unlinked_layers
         @dataclass
         class PreviousLayer:
@@ -1821,19 +1741,6 @@ class Channel(BaseNestedListManager):
             clip_color_socket: Optional[str] = None
             clip_alpha_socket: Optional[str] = None
             passthrough_id: Optional[int] = None
-        
-        def connect_passthrough(node_builder: NodeTreeBuilder, layer_identifier: str, previous_data: PreviousLayer):
-            if previous_data.passthrough_id:
-                passthrough_data = previous_dict.get(previous_data.passthrough_id, None)
-                if passthrough_data:
-                    node_builder.link(layer_identifier,
-                                    passthrough_data.color_name,
-                                    "Color",
-                                    passthrough_data.color_socket)
-                    node_builder.link(layer_identifier,
-                                    passthrough_data.alpha_name,
-                                    "Alpha", passthrough_data.alpha_socket)
-                    previous_data.passthrough_id = None
             
         previous_dict: Dict[int, PreviousLayer] = {}
         
@@ -1841,31 +1748,18 @@ class Channel(BaseNestedListManager):
         node_builder.link("alpha_clamp_end", "group_output", "Result", "Alpha")
         previous_dict[-1] = PreviousLayer(color_name="group_output", color_socket="Color", alpha_name="alpha_clamp_end", alpha_socket="Value")
         
-        previous_data = previous_dict.get(-1)
-        if self.type == "VECTOR" and self.use_space_transform_output and not self.disable_output_transform:
-            color_name, color_socket = vector_transform(
-                node_builder,
-                previous_data.color_name,
-                previous_data.color_socket,
-                self.bake_vector_space if self.use_bake_image else self.vector_space,
-                self.output_vector_space,
-                self.normalize_input,
-                False,
-                self.vector_type,
-                self.bake_uv_map if self.use_bake_image else self.tangent_uv_map
-            )
-            previous_data.color_name = color_name
-            previous_data.color_socket = color_socket
-        
-        if self.bake_image:
-            node_builder.add_node("uv_map", "ShaderNodeUVMap", {"uv_map": self.bake_uv_map}, force_properties=True)
-            node_builder.add_node("bake_image", "ShaderNodeTexImage", {"image": self.bake_image, "interpolation": "Closest"})
-            node_builder.link("uv_map", "bake_image", "UV", "Vector")
-            if self.use_bake_image:
-                node_builder.link("bake_image", previous_data.color_name, "Color", previous_data.color_socket)
-                node_builder.link("bake_image", "group_output", "Alpha", "Alpha")
-                node_builder.compile()
-                return
+        if self.type == "VECTOR" and not self.disable_output_transform:
+            previous_data = previous_dict.get(-1)
+            if self.output_vector_space != "NONE" and self.use_space_transform:
+                node_builder.add_node("vector_transform_output", "ShaderNodeVectorTransform", {"vector_type": self.vector_type, "convert_from": 'WORLD' if self.normalize_input else self.vector_space, "convert_to": self.output_vector_space}, force_properties=True)
+                node_builder.link("vector_transform_output", previous_data.color_name, "Vector", previous_data.color_socket)
+                previous_data.color_name = "vector_transform_output"
+                previous_data.color_socket = "Vector"
+            if self.normalize_input:
+                node_builder.add_node("normal_map", "ShaderNodeNormalMap", {"space": self.vector_space}, force_properties=True)
+                node_builder.link("normal_map", previous_data.color_name, "Normal", previous_data.color_socket)
+                previous_data.color_name = "normal_map"
+                previous_data.color_socket = "Color"
             
         if len(flattened_unlinked_layers) > 0:
             for unlinked_layer in flattened_unlinked_layers:
@@ -1876,10 +1770,12 @@ class Channel(BaseNestedListManager):
                 if unlinked_layer.parent_id != -1:
                     sample_id = self.get_parent_layer_id(unlinked_layer)
                 previous_data = previous_dict.get(sample_id, None)
+                if previous_data and previous_data.add_command and previous_data.add_command.properties.get("mute", False):
+                    previous_data.add_command.properties["mute"] = False
                 layer_identifier = unlinked_layer.uid
                 add_command = node_builder.add_node(
                     layer_identifier, "ShaderNodeGroup",
-                    {"node_tree": layer.node_tree},
+                    {"node_tree": layer.node_tree, "mute": layer.type == "ADJUSTMENT"},
                     {"Clip": layer.is_clip or layer.type == "ADJUSTMENT"},
                     force_properties=True,
                     force_default_values=True
@@ -1892,7 +1788,6 @@ class Channel(BaseNestedListManager):
                     node_builder.add_node(clip_nt_identifier, "ShaderNodeGroup", {"node_tree": clip_nt}, {"Color": (0, 0, 0, 1), "Alpha": 0}, force_default_values=True)
                     node_builder.link(clip_nt_identifier, previous_data.color_name, "Color", previous_data.color_socket)
                     node_builder.link(clip_nt_identifier, previous_data.alpha_name, "Alpha", previous_data.alpha_socket)
-                    connect_passthrough(node_builder, clip_nt_identifier, previous_data)
                     previous_data.color_name = clip_nt_identifier
                     previous_data.color_socket = "Color"
                     previous_data.alpha_name = clip_nt_identifier
@@ -1913,7 +1808,17 @@ class Channel(BaseNestedListManager):
                                 target_alpha,
                                 "Alpha",
                                 target_alpha_socket)
-                connect_passthrough(node_builder, layer_identifier, previous_data)
+                if previous_data.passthrough_id:
+                    passthrough_data = previous_dict.get(previous_data.passthrough_id, None)
+                    if passthrough_data:
+                        node_builder.link(layer_identifier,
+                                        passthrough_data.color_name,
+                                        "Color",
+                                        passthrough_data.color_socket)
+                        node_builder.link(layer_identifier,
+                                        passthrough_data.alpha_name,
+                                        "Alpha", passthrough_data.alpha_socket)
+                        previous_data.passthrough_id = None
                 if layer.blend_mode == "PASSTHROUGH":
                     previous_data.passthrough_id = unlinked_layer.id
                 if previous_data.clip_mode:
@@ -1936,20 +1841,17 @@ class Channel(BaseNestedListManager):
                 if previous_data.clip_mode and not layer.is_clip:
                     previous_data.clip_mode = False
         prev_layer = previous_dict[-1]
-        if self.type == "VECTOR" and self.use_space_transform_input:
-            color_name, color_socket = vector_transform(
-                node_builder,
-                prev_layer.color_name,
-                prev_layer.color_socket,
-                self.input_vector_space,
-                self.vector_space,
-                False,
-                self.normalize_input,
-                self.vector_type,
-                self.tangent_uv_map
-            )
-            prev_layer.color_name = color_name
-            prev_layer.color_socket = color_socket
+        if self.type == "VECTOR":
+            if self.normalize_input:
+                node_builder.add_node("normalize", "ShaderNodeVectorMath", {"operation": "MULTIPLY_ADD", "hide": True}, {1: (0.5, 0.5, 0.5), 2: (0.5, 0.5, 0.5)})
+                node_builder.link("normalize", prev_layer.color_name, "Vector", prev_layer.color_socket)
+                prev_layer.color_name = "normalize"
+                prev_layer.color_socket = "Vector"
+            if self.use_space_transform:
+                node_builder.add_node("vector_transform", "ShaderNodeVectorTransform", {"vector_type": self.vector_type, "convert_to": self.vector_space, "convert_from": self.input_vector_space}, force_properties=True)
+                node_builder.link("vector_transform", prev_layer.color_name, "Vector", prev_layer.color_socket)
+                prev_layer.color_name = "vector_transform"
+                prev_layer.color_socket = "Vector"
             if self.default_value != "NONE":
                 node_builder.add_node("vector_length", "ShaderNodeVectorMath", {"operation": "LENGTH"})
                 node_builder.add_node("compare", "ShaderNodeMath", {"operation": "COMPARE"}, {1: 0, 2: 0})
@@ -2088,8 +1990,7 @@ class Channel(BaseNestedListManager):
             force_alpha: bool = True, # Force to use alpha
             as_tangent_normal: bool = False, # Bake as tangent normal
             margin: int = 8, # Margin
-            margin_type: Literal['ADJACENT_FACES', 'EXTEND'] = "ADJACENT_FACES", # Margin type
-            disable_deform_modifiers: bool = False, # Disable deform modifiers
+            margin_type: Literal['ADJACENT_FACES', 'EXTEND'] = "ADJACENT_FACES" # Margin type
             ):
         """Bake the channel
 
@@ -2104,6 +2005,7 @@ class Channel(BaseNestedListManager):
         Raises:
             ValueError: If the node tree is not found
         """
+        
         node_tree = mat.node_tree
         if not node_tree:
             raise ValueError("Node tree not found")
@@ -2119,135 +2021,101 @@ class Channel(BaseNestedListManager):
         if force_alpha:
             orig_use_alpha = bool(self.use_alpha)
             self.use_alpha = True
-            
+        
+        ps_objects = ps_context.ps_objects
+        
+        material_output = get_material_output(node_tree)
+        surface_socket = material_output.inputs['Surface']
+        from_socket = surface_socket.links[0].from_socket if surface_socket.links else None
+        
+        # Bake as output of group ps if exists in the node tree
+        bake_node = None
+        to_be_deleted_nodes = []
+        color_output = None
+        alpha_output = None
+        
+        if not self.use_alpha:
+            # Use the value node set to 1 as alpha output
+            value_node = node_tree.nodes.new('ShaderNodeValue')
+            value_node.outputs['Value'].default_value = 1.0
+            alpha_output = value_node.outputs['Value']
+            to_be_deleted_nodes.append(value_node)
+        
+        if hasattr(mat, "ps_mat_data") and mat.ps_mat_data.groups and use_group_tree:
+            for group in mat.ps_mat_data.groups:
+                if group.node_tree and self.name in group.channels:
+                    bake_node = find_node(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': group.node_tree})
+                    color_output = bake_node.outputs[self.name]
+                    if self.use_alpha:
+                        alpha_output = bake_node.outputs[f'{self.name} Alpha']
+                    break
+        
+        if not bake_node:
+            # Use channel node group instead
+            bake_node = node_tree.nodes.new(type='ShaderNodeGroup')
+            bake_node.node_tree = self.node_tree
+            color_output = bake_node.outputs['Color']
+            if self.use_alpha:
+                alpha_output = bake_node.outputs['Alpha']
+            to_be_deleted_nodes.append(bake_node)
+        
         if as_tangent_normal:
-            orig_tangent_uv_map = str(self.tangent_uv_map)
-            self.tangent_uv_map = self.bake_uv_map
-            orig_output_vector_space = str(self.output_vector_space)
-            self.output_vector_space = "TANGENT"
-        else:
-            orig_disable_output_transform = bool(self.disable_output_transform)
-            self.disable_output_transform = True
-        try:
-            ps_objects = ps_context.ps_objects
-            
-            # Disable deform modifiers if requested
-            saved_modifier_states = []
-            if disable_deform_modifiers:
-                DEFORM_MODIFIER_TYPES = {
-                    'ARMATURE', 'CAST', 'CURVE', 'DISPLACE', 'HOOK', 'LAPLACIANDEFORM',
-                    'LATTICE', 'MESH_DEFORM', 'SHRINKWRAP', 'SIMPLE_DEFORM', 'SMOOTH',
-                    'CORRECTIVE_SMOOTH', 'LAPLACIANSMOOTH', 'SURFACE_DEFORM', 'WARP', 'WAVE'
-                }
-                for obj in ps_objects:
-                    for mod in obj.modifiers:
-                        if mod.type in DEFORM_MODIFIER_TYPES:
-                            saved_modifier_states.append((obj, mod.name, mod.show_render))
-                            mod.show_render = False
-            
-            material_output = get_material_output(node_tree)
-            surface_socket = material_output.inputs['Surface']
-            from_socket = surface_socket.links[0].from_socket if surface_socket.links else None
-            
-            # Bake as output of group ps if exists in the node tree
-            bake_node = None
-            to_be_deleted_nodes = []
-            color_output = None
-            alpha_output = None
-            
-            if not self.use_alpha:
-                # Use the value node set to 1 as alpha output
-                value_node = node_tree.nodes.new('ShaderNodeValue')
-                value_node.outputs['Value'].default_value = 1.0
-                alpha_output = value_node.outputs['Value']
-                to_be_deleted_nodes.append(value_node)
-            
-            if hasattr(mat, "ps_mat_data") and mat.ps_mat_data.groups and use_group_tree:
-                for group in mat.ps_mat_data.groups:
-                    if group.node_tree and self.name in group.channels:
-                        bake_node = find_node(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': group.node_tree})
-                        color_output = bake_node.outputs[self.name]
-                        if self.use_alpha:
-                            alpha_output = bake_node.outputs[f'{self.name} Alpha']
-                        break
-            
-            if not bake_node:
-                # Use channel node group instead
-                bake_node = node_tree.nodes.new(type='ShaderNodeGroup')
-                bake_node.node_tree = self.node_tree
-                color_output = bake_node.outputs['Color']
-                if self.use_alpha:
-                    alpha_output = bake_node.outputs['Alpha']
-                to_be_deleted_nodes.append(bake_node)
-            
-            # Bake image
-            connect_sockets(surface_socket, color_output)
-            temp_alpha_image = bake_image.copy()
-            bake_image = ps_bake(context, ps_objects, mat, uv_layer, bake_image, use_gpu, margin=margin, margin_type=margin_type)
-            
-            temp_alpha_image.colorspace_settings.name = 'Non-Color'
-            connect_sockets(surface_socket, alpha_output)
-            temp_alpha_image = ps_bake(context, ps_objects, mat, uv_layer, temp_alpha_image, use_gpu, margin=margin, margin_type=margin_type)
+            tangent_node = node_tree.nodes.new(type='ShaderNodeTangent')
+            tangent_node.direction_type = "UV_MAP"
+            tangent_node.uv_map = self.bake_uv_map
+            to_be_deleted_nodes.append(tangent_node)
+            tangent_norm_nt = get_library_nodetree(".PS Tangent Normal")
+            tangent_group = node_tree.nodes.new(type='ShaderNodeGroup')
+            tangent_group.node_tree = tangent_norm_nt
+            to_be_deleted_nodes.append(tangent_group)
+            connect_sockets(tangent_group.inputs['Custom Normal'], color_output)
+            connect_sockets(tangent_group.inputs['Tangent'], tangent_node.outputs['Tangent'])
+            color_output = tangent_group.outputs['Tangent Normal']
+        
+        # Bake image
+        connect_sockets(surface_socket, color_output)
+        temp_alpha_image = bake_image.copy()
+        bake_image = ps_bake(context, ps_objects, mat, uv_layer, bake_image, use_gpu, margin=margin, margin_type=margin_type)
+        
+        temp_alpha_image.colorspace_settings.name = 'Non-Color'
+        connect_sockets(surface_socket, alpha_output)
+        temp_alpha_image = ps_bake(context, ps_objects, mat, uv_layer, temp_alpha_image, use_gpu, margin=margin, margin_type=margin_type)
 
-            if bake_image and temp_alpha_image:
-                # pixels_bake = np.empty(len(bake_image.pixels), dtype=np.float32)
-                # pixels_temp_alpha = np.empty(len(temp_alpha_image.pixels), dtype=np.float32)
-                pixels_bake = blender_image_to_numpy(bake_image)
-                pixels_temp_alpha = blender_image_to_numpy(temp_alpha_image)
-                
-                if pixels_bake is None or pixels_temp_alpha is None:
-                    return
-                
-                # Process tiles - handle both UDIM and non-UDIM cases
-                temp_alpha_single = pixels_temp_alpha.get_single_tile()
-                
-                # Update alpha channel for each tile in bake_image
-                for tile_num in pixels_bake.tiles.keys():
-                    bake_tile = pixels_bake.tiles[tile_num]
-                    # Use corresponding tile if available, otherwise use single tile
-                    if tile_num in pixels_temp_alpha.tiles:
-                        temp_tile = pixels_temp_alpha.tiles[tile_num]
-                        bake_tile[:, :, 3] = temp_tile[:, :, 0]
-                    else:
-                        bake_tile[:, :, 3] = temp_alpha_single[:, :, 0]
-                
-                set_image_pixels(bake_image, pixels_bake)
-                save_image(bake_image)
-            bpy.data.images.remove(temp_alpha_image)
+        if bake_image and temp_alpha_image:
+            # pixels_bake = np.empty(len(bake_image.pixels), dtype=np.float32)
+            # pixels_temp_alpha = np.empty(len(temp_alpha_image.pixels), dtype=np.float32)
+            pixels_bake = blender_image_to_numpy(bake_image)
+            pixels_temp_alpha = blender_image_to_numpy(temp_alpha_image)
+            
+            if pixels_bake is None or pixels_temp_alpha is None:
+                return
+            
+            # Process tiles - handle both UDIM and non-UDIM cases
+            temp_alpha_single = pixels_temp_alpha.get_single_tile()
+            
+            # Update alpha channel for each tile in bake_image
+            for tile_num in pixels_bake.tiles.keys():
+                bake_tile = pixels_bake.tiles[tile_num]
+                # Use corresponding tile if available, otherwise use single tile
+                if tile_num in pixels_temp_alpha.tiles:
+                    temp_tile = pixels_temp_alpha.tiles[tile_num]
+                    bake_tile[:, :, 3] = temp_tile[:, :, 0]
+                else:
+                    bake_tile[:, :, 3] = temp_alpha_single[:, :, 0]
+            
+            set_image_pixels(bake_image, pixels_bake)
+            save_image(bake_image)
+        bpy.data.images.remove(temp_alpha_image)
 
-            for node in to_be_deleted_nodes:
-                node_tree.nodes.remove(node)
-            
-            # Restore surface socket
-            if from_socket:
-                connect_sockets(surface_socket, from_socket)
-            
-            if force_alpha:
-                self.use_alpha = orig_use_alpha
-                
-            if as_tangent_normal:
-                self.tangent_uv_map = orig_tangent_uv_map
-                self.output_vector_space = orig_output_vector_space
-            else:
-                self.disable_output_transform = orig_disable_output_transform
-            
-            # Restore deform modifiers
-            for obj, mod_name, orig_show_render in saved_modifier_states:
-                if mod_name in obj.modifiers:
-                    obj.modifiers[mod_name].show_render = orig_show_render
-        except Exception as e:
-            print(f"Error baking channel: {e}")
-            try:
-                self.use_alpha = orig_use_alpha
-                self.tangent_uv_map = orig_tangent_uv_map
-                self.output_vector_space = orig_output_vector_space
-                self.disable_output_transform = orig_disable_output_transform
-            except Exception as e:
-                print(f"Error restoring channel settings: {e}")
-            # Restore deform modifiers on error
-            for obj, mod_name, orig_show_render in saved_modifier_states:
-                if mod_name in obj.modifiers:
-                    obj.modifiers[mod_name].show_render = orig_show_render
+        for node in to_be_deleted_nodes:
+            node_tree.nodes.remove(node)
+        
+        # Restore surface socket
+        if from_socket:
+            connect_sockets(surface_socket, from_socket)
+        
+        if force_alpha:
+            self.use_alpha = orig_use_alpha
         
     @property
     def item_type(self):
@@ -2332,14 +2200,8 @@ class Channel(BaseNestedListManager):
         default=False,
         update=update_node_tree
     )
-    use_space_transform_input: BoolProperty(
-        name="Use Space Transform Input",
-        description="Use space transform for the channel",
-        default=True,
-        update=update_node_tree
-    )
-    use_space_transform_output: BoolProperty(
-        name="Use Space Transform Output",
+    use_space_transform: BoolProperty(
+        name="Use Space Transform",
         description="Use space transform for the channel",
         default=False,
         update=update_node_tree
@@ -2367,13 +2229,13 @@ class Channel(BaseNestedListManager):
         ],
         name="Vector Type",
         description="Type of the vector",
-        default='VECTOR',
+        default='NORMAL',
         update=update_node_tree
     )
     input_vector_space: EnumProperty(
         items=[
-            ('WORLD', "World", "World Space", "WORLD", 0),
-            ('OBJECT', "Object", "Object Space", "OBJECT_DATA", 1),
+            ('WORLD', "World Space", "World Space", "WORLD", 0),
+            ('OBJECT', "Object Space", "Object Space", "OBJECT", 1),
         ],
         name="Input Vector Space",
         description="Space of the input",
@@ -2382,9 +2244,8 @@ class Channel(BaseNestedListManager):
     )
     vector_space: EnumProperty(
         items=[
-            ('WORLD', "World", "World Space", "WORLD", 0),
-            ('OBJECT', "Object", "Object Space", "OBJECT_DATA", 1),
-            ('TANGENT', "Tangent", "Tangent Space", "MESH_DATA", 2)
+            ('WORLD', "World Space", "World Space", "WORLD", 0),
+            ('OBJECT', "Object Space", "Object Space", "OBJECT_DATA", 1),
         ],
         name="Vector Space",
         description="Space used when painting",
@@ -2393,25 +2254,20 @@ class Channel(BaseNestedListManager):
     )
     output_vector_space: EnumProperty(
         items=[
-            ('WORLD', "World", "World Space", "WORLD", 0),
-            ('OBJECT', "Object", "Object Space", "OBJECT_DATA", 1),
-            ('TANGENT', "Tangent", "Tangent Space", "MESH_DATA", 2)
+            ('WORLD', "World Space", "World Space", "WORLD", 0),
+            ('OBJECT', "Object Space", "Object Space", "OBJECT_DATA", 1),
+            ('TANGENT', "Tangent Space", "Tangent Space", "MESH_DATA", 2)
         ],
         name="Output Vector Space",
         description="Space of the output vector",
         default='WORLD',
         update=update_node_tree
     )
-    tangent_uv_map: StringProperty(
-        name="Tangent UV Map",
-        default="UVMap",
-        update=update_node_tree
-    )
     # Used when isolating the channel
     disable_output_transform: BoolProperty(
         name="Disable Output Transform",
         description="Disable the output transform for the channel",
-        default=True, # For legacy reasons, the default is True
+        default=False,
         update=update_node_tree
     )
     
@@ -2627,7 +2483,6 @@ class Group(PropertyGroup):
         context, 
         channel_name: str = "New Channel",
         channel_type: str = "COLOR",
-        disable_output_transform: bool = False, # Newly created channels are disabled by default
         **kwargs
     ):
         channels = self.channels
@@ -2637,7 +2492,6 @@ class Group(PropertyGroup):
         unique_name = get_next_unique_name(channel_name, [channel.name for channel in channels])
         new_channel.name = unique_name
         new_channel.type = channel_type
-        new_channel.disable_output_transform = disable_output_transform
         for key, value in kwargs.items():
             setattr(new_channel, key, value)
         new_channel.node_tree = node_tree
@@ -2663,20 +2517,16 @@ class Group(PropertyGroup):
                 channel = self.create_channel(context, channel_name='Color', channel_type='COLOR', use_alpha=True)
                 if node_group and to_node:
                     color_socket = find_socket_on_node(to_node, 'Base Color')
-                    # Color
                     if not color_socket:
                         color_socket = find_socket_on_node(to_node, 'Color')
-                    if color_socket:
-                        transfer_connection(mat_node_tree, color_socket, node_group.inputs['Color'])
-                        connect_sockets(node_group.outputs['Color'], color_socket)
-                    # Alpha
                     alpha_socket = find_socket_on_node(to_node, 'Alpha')
-                    if alpha_socket:
-                        transfer_connection(mat_node_tree, alpha_socket, node_group.inputs['Color Alpha'])
-                        connect_sockets(node_group.outputs['Color Alpha'], alpha_socket)
-                    else:
-                        # Disable alpha
-                        channel.use_alpha = False
+                    if color_socket:
+                        if not transfer_connection(mat_node_tree, color_socket, node_group.inputs['Color']):
+                            channel.create_layer(context, layer_name='Solid Color', layer_type='SOLID_COLOR')
+                        connect_sockets(node_group.outputs['Color'], color_socket)
+                        if alpha_socket:
+                            transfer_connection(mat_node_tree, alpha_socket, node_group.inputs['Color Alpha'])
+                            connect_sockets(node_group.outputs['Color Alpha'], alpha_socket)
                 if add_layers:
                     channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
                 return channel
@@ -2697,16 +2547,13 @@ class Group(PropertyGroup):
                         connect_sockets(node_group.outputs['Roughness'], roughness_socket)
                 return channel
             case "NORMAL":
-                socket_transferred = False
-                channel = self.create_channel(context, channel_name='Normal', channel_type='VECTOR', use_alpha=False, normalize_input=True, color_space='NONCOLOR', default_value='NORMAL', use_space_transform_input=True, use_space_transform_output=True)
+                channel = self.create_channel(context, channel_name='Normal', channel_type='VECTOR', use_alpha=False, normalize_input=True, color_space='NONCOLOR', default_value='NORMAL', use_space_transform=True)
                 if node_group and to_node:
                     normal_socket = find_socket_on_node(to_node, 'Normal')
                     if normal_socket:
-                        socket_transferred = transfer_connection(mat_node_tree, to_node.inputs['Normal'], node_group.inputs['Normal'])
+                        transfer_connection(mat_node_tree, to_node.inputs['Normal'], node_group.inputs['Normal'])
                         connect_sockets(node_group.outputs['Normal'], normal_socket)
                 if add_layers:
-                    if not socket_transferred:
-                        channel.create_layer(context, layer_name='Normal', layer_type='GEOMETRY', geometry_type='OBJECT_NORMAL', normalize_normal=True)
                     channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
             case _:
                 raise ValueError(f"Invalid template: {template}")
