@@ -1797,12 +1797,10 @@ class Channel(BaseNestedListManager):
                 if unlinked_layer.parent_id != -1:
                     sample_id = self.get_parent_layer_id(unlinked_layer)
                 previous_data = previous_dict.get(sample_id, None)
-                if previous_data and previous_data.add_command and previous_data.add_command.properties.get("mute", False):
-                    previous_data.add_command.properties["mute"] = False
                 layer_identifier = unlinked_layer.uid
                 add_command = node_builder.add_node(
                     layer_identifier, "ShaderNodeGroup",
-                    {"node_tree": layer.node_tree, "mute": layer.type == "ADJUSTMENT"},
+                    {"node_tree": layer.node_tree},
                     {"Clip": layer.is_clip or layer.type == "ADJUSTMENT"},
                     force_properties=True,
                     force_default_values=True
