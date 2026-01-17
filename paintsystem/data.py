@@ -2506,17 +2506,22 @@ class Group(PropertyGroup):
                 channel = self.create_channel(context, channel_name='Color', channel_type='COLOR', use_alpha=True)
                 if node_group and to_node:
                     color_socket = find_socket_on_node(to_node, 'Base Color')
+                    # Color
                     if not color_socket:
                         color_socket = find_socket_on_node(to_node, 'Color')
-                    alpha_socket = find_socket_on_node(to_node, 'Alpha')
                     if color_socket:
                         if not transfer_connection(mat_node_tree, color_socket, node_group.inputs['Color']):
                             channel.create_layer(context, layer_name='Solid Color', layer_type='SOLID_COLOR')
                         transfer_connection(mat_node_tree, color_socket, node_group.inputs['Color'])
                         connect_sockets(node_group.outputs['Color'], color_socket)
-                        if alpha_socket:
-                            transfer_connection(mat_node_tree, alpha_socket, node_group.inputs['Color Alpha'])
-                            connect_sockets(node_group.outputs['Color Alpha'], alpha_socket)
+                    # Alpha
+                    alpha_socket = find_socket_on_node(to_node, 'Alpha')
+                    if alpha_socket:
+                        transfer_connection(mat_node_tree, alpha_socket, node_group.inputs['Color Alpha'])
+                        connect_sockets(node_group.outputs['Color Alpha'], alpha_socket)
+                    else:
+                        # Disable alpha
+                        channel.use_alpha = False
                 if add_layers:
                     channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
                 return channel
