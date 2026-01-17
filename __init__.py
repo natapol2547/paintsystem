@@ -46,34 +46,10 @@ submodules = [
 _register, _unregister = register_submodule_factory(__name__, submodules)
 
 def register():
-    """Register the addon with idempotent error handling for module reloads."""
-    try:
-        load_icons()
-    except Exception as e:
-        print(f"Paint System: Error loading icons: {e}")
-    
-    try:
-        _register()
-    except ValueError as e:
-        # Handle case where classes are already registered (e.g., module reload in CI)
-        if "already registered" in str(e):
-            print(f"Paint System: Classes already registered (module reload): {e}")
-        else:
-            raise
-    except Exception as e:
-        print(f"Paint System: Registration error: {e}")
-        raise
+    load_icons()
+    _register()
     
 def unregister():
-    """Unregister the addon with idempotent error handling."""
-    try:
-        _unregister()
-    except Exception as e:
-        print(f"Paint System: Unregister error: {e}")
-    
-    try:
-        unload_icons()
-    except Exception as e:
-        print(f"Paint System: Error unloading icons: {e}")
-    
+    _unregister()
+    unload_icons()
     print("Paint System: Unregistered", __package__)
