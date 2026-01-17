@@ -497,6 +497,7 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                 # box.prop(active_layer, "use_onion_skinning", text="Use Onion Skinning")
             
         elif ps_ctx.ps_object.type == 'MESH':
+            layout.enabled = not ps_ctx.active_layer.lock_layer
             active_layer = ps_ctx.active_layer
             if not active_layer:
                 return
@@ -535,7 +536,6 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     if not ps_ctx.ps_settings.use_legacy_ui:
                         box = layout.box()
                     col = box.column()
-                    col.enabled = not active_layer.lock_layer
                     adjustment_node = active_layer.source_node
                     if adjustment_node:
                         col.label(text="Adjustment Settings:", icon='SHADERFX')
@@ -544,7 +544,6 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     if not ps_ctx.ps_settings.use_legacy_ui:
                         box = layout.box()
                     col = box.column()
-                    col.enabled = not active_layer.lock_layer
                     node_group = active_layer.source_node
                     inputs = [i for i in node_group.inputs if not i.is_linked and i.name not in (
                         'Color', 'Alpha')]
@@ -559,7 +558,6 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                         if not ps_ctx.ps_settings.use_legacy_ui:
                             box = layout.box()
                         col = box.column()
-                        col.enabled = not active_layer.lock_layer
                         col.use_property_split = True
                         col.use_property_decorate = False
                         if active_layer.empty_object and active_layer.empty_object.name in context.view_layer.objects:
@@ -576,7 +574,6 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     if not ps_ctx.ps_settings.use_legacy_ui:
                         box = layout.box()
                     col = box.column()
-                    col.enabled = not active_layer.lock_layer
                     rgb_node = active_layer.source_node
                     if rgb_node:
                         col.prop(rgb_node.outputs[0], "default_value", text="Color",
@@ -586,7 +583,6 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     if not ps_ctx.ps_settings.use_legacy_ui:
                         box = layout.box()
                     col = box.column()
-                    col.enabled = not active_layer.lock_layer
                     random_node = active_layer.find_node("add_2")
                     hue_math = active_layer.find_node("hue_multiply_add")
                     saturation_math = active_layer.find_node("saturation_multiply_add")
@@ -611,7 +607,6 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     if not ps_ctx.ps_settings.use_legacy_ui:
                         box = layout.box()
                     col = box.column()
-                    col.enabled = not active_layer.lock_layer
                     geometry_type = active_layer.geometry_type
                     if geometry_type == 'VECTOR_TRANSFORM':
                         geometry_node = active_layer.source_node
@@ -698,7 +693,6 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                 if panel:
                     box = panel.box()
                     col = box.column()
-                    col.enabled = not active_layer.lock_layer
                     col.use_property_decorate = False
                     col.use_property_split = True
                     draw_input_sockets(col, context, only_output=True)
@@ -721,7 +715,6 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     grid_col = grid.column()
                     grid_col.label(text="Alpha Output")
                     grid_col.prop(active_layer, "alpha_output_name", text="")
-                    col.enabled = not active_layer.lock_layer
                     attribute_node = active_layer.source_node
                     if attribute_node:
                         col.label(text="Attribute Settings:", icon='MESH_DATA')
@@ -735,7 +728,6 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     panel.use_property_decorate = False
                     ps_ctx = self.parse_context(context)
                     active_layer = ps_ctx.active_layer
-                    panel.enabled = not active_layer.lock_layer
                     box = panel.box()
                     col = box.column()
                     if active_layer.type == 'IMAGE':
@@ -794,6 +786,8 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                             panel.use_property_split = False
                             col = panel.column()
                             col.template_node_inputs(mapping_node)
+                else:
+                    header.prop(active_layer, "coord_type", text="")
             # Layer Actions Settings
             header, panel = layout.panel("layer_actions_settings_panel", default_closed=True)
             header.label(text="Actions", icon="KEYTYPE_KEYFRAME_VEC")
