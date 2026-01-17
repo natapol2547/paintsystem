@@ -1905,6 +1905,7 @@ def ps_bake(context, objects: list[Object], mat: Material, uv_layer, bake_image,
         }
         if context.scene.render.engine != 'CYCLES':
             context.scene.render.engine = 'CYCLES'
+        context.scene.view_settings.view_transform = "Standard"
         cycles = context.scene.cycles
         cycles.device = 'GPU' if use_gpu else 'CPU'
         cycles.samples = 1
@@ -2273,7 +2274,47 @@ class Channel(BaseNestedListManager):
         if force_alpha:
             orig_use_alpha = bool(self.use_alpha)
             self.use_alpha = True
-
+        
+        orig_disable_output_transform = bool(self.disable_output_transform)
+        self.disable_output_transform = True
+        
+        ps_objects = ps_context.ps_objects
+        
+        material_output = get_material_output(node_tree)
+        surface_socket = material_output.inputs['Surface']
+        from_socket = surface_socket.links[0].from_socket if surface_socket.links else None
+        
+        # Bake as output of group ps if exists in the node tree
+        bake_node = None
+        to_be_deleted_nodes = []
+        color_output = None
+        alpha_output = None
+        
+        if not self.use_alpha:
+            # Use the value node set to 1 as alpha output
+            value_node = node_tree.nodes.new('ShaderNodeValue')
+            value_node.outputs['Value'].default_value = 1.0
+            alpha_output = value_node.outputs['Value']
+            to_be_deleted_nodes.append(value_node)
+        
+        if hasattr(mat, "ps_mat_data") and mat.ps_mat_data.groups and use_group_tree:
+            for group in mat.ps_mat_data.groups:
+                if group.node_tree and self.name in group.channels:
+                    bake_node = find_node(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': group.node_tree})
+                    color_output = bake_node.outputs[self.name]
+                    if self.use_alpha:
+                        alpha_output = bake_node.outputs[f'{self.name} Alpha']
+                    break
+        
+        if not bake_node:
+            # Use channel node group instead
+            bake_node = node_tree.nodes.new(type='ShaderNodeGroup')
+            bake_node.node_tree = self.node_tree
+            color_output = bake_node.outputs['Color']
+            if self.use_alpha:
+                alpha_output = bake_node.outputs['Alpha']
+            to_be_deleted_nodes.append(bake_node)
+        
         if as_tangent_normal:
             orig_tangent_uv_map = str(self.tangent_uv_map)
             self.tangent_uv_map = self.bake_uv_map
@@ -2378,6 +2419,9 @@ class Channel(BaseNestedListManager):
 
             if orig_disable_output_transform:
                 self.disable_output_transform = orig_disable_output_transform
+        
+        if orig_disable_output_transform:
+            self.disable_output_transform = orig_disable_output_transform
         
         if orig_disable_output_transform:
             self.disable_output_transform = orig_disable_output_transform
