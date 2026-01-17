@@ -187,7 +187,9 @@ class PSUVOptionsMixin():
             # Warning that painting may not work as expected
                 box = layout.box()
                 box.alert = True
-                box.label(text="Painting may not work in this mode", icon='ERROR')
+                col = box.column(align=True)
+                col.label(text="Painting in 3D may not work", icon='ERROR')
+                col.label(text="Open Blender Image Editor to paint", icon='BLANK1')
         else:
             row = layout.row(align=True)
             row.prop_search(self, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="")
