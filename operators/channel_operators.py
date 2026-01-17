@@ -18,9 +18,8 @@ class PAINTSYSTEM_OT_AddChannel(PSContextMixin, MultiMaterialOperator):
     
     template: EnumProperty(
         name="Template",
-        items=ADD_CHANNEL_TEMPLATE_ENUM,
-        default="CUSTOM",
-        options={'SKIP_SAVE'}
+        items=[("CUSTOM", "Custom", "Custom"), *CHANNEL_TEMPLATE_ENUM],
+        default="CUSTOM"
     )
     
     def get_unique_channel_name(self, context):
@@ -86,7 +85,8 @@ class PAINTSYSTEM_OT_AddChannel(PSContextMixin, MultiMaterialOperator):
                 channel_type=self.channel_type, 
                 color_space=self.color_space, 
                 use_alpha=self.use_alpha, 
-                normalize_input=self.normalize_input,
+                normalize_input=self.normalize_input, 
+                # world_to_object_normal=self.world_to_object_normal, 
                 use_max_min=self.use_max_min,
                 factor_min=self.factor_min,
                 factor_max=self.factor_max,
