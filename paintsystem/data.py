@@ -1688,6 +1688,7 @@ def ps_bake(context, objects: list[Object], mat: Material, uv_layer, bake_image,
         }
         if context.scene.render.engine != 'CYCLES':
             context.scene.render.engine = 'CYCLES'
+        context.scene.view_settings.view_transform = "Standard"
         cycles = context.scene.cycles
         cycles.device = 'GPU' if use_gpu else 'CPU'
         cycles.samples = 1
@@ -2053,6 +2054,9 @@ class Channel(BaseNestedListManager):
             orig_use_alpha = bool(self.use_alpha)
             self.use_alpha = True
         
+        orig_disable_output_transform = bool(self.disable_output_transform)
+        self.disable_output_transform = True
+        
         ps_objects = ps_context.ps_objects
         
         material_output = get_material_output(node_tree)
@@ -2150,6 +2154,9 @@ class Channel(BaseNestedListManager):
 
         if orig_preview_channel:
             self.isolate_channel(context)
+        
+        if orig_disable_output_transform:
+            self.disable_output_transform = orig_disable_output_transform
         
     @property
     def item_type(self):
