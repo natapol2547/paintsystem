@@ -1136,6 +1136,7 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     box = transform_panel.box()
                     ps_ctx = self.parse_context(context)
                     active_layer = ps_ctx.active_layer
+                    box = transform_panel.box()
                     col = box.column()
                     header_row = col.row(align=True)
                     if active_layer.coord_type == 'AUTO':
