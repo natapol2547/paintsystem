@@ -623,7 +623,14 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                 if panel:
                     box = panel.box()
                     col = box.column()
-                    draw_socket_grid(col, active_layer, include_inputs=False)
+                    output_box = col.box()
+                    grid = output_box.grid_flow(columns=2, align=True, even_columns=True, row_major=True)
+                    grid_col = grid.column()
+                    grid_col.label(text="Color Output")
+                    grid_col.prop(active_layer, "color_output_name", text="")
+                    grid_col = grid.column()
+                    grid_col.label(text="Alpha Output")
+                    grid_col.prop(active_layer, "alpha_output_name", text="")
                     attribute_node = active_layer.source_node
                     if attribute_node:
                         col.label(text="Attribute Settings:", icon='MESH_DATA')
@@ -655,7 +662,6 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     box = transform_panel.box()
                     ps_ctx = self.parse_context(context)
                     active_layer = ps_ctx.active_layer
-                    panel.enabled = not active_layer.lock_layer
                     box = panel.box()
                     col = box.column()
                     if active_layer.type == 'IMAGE':
@@ -727,29 +733,15 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     
                     mapping_node = active_layer.find_node("mapping")
                     if mapping_node:
-                        col = box.column()
-                        col.label(text="Mapping Settings:", icon_value=get_icon('vector_socket'))
-                        col.use_property_split = False
-                        col.template_node_inputs(mapping_node)
+                        box = layout.box()
+                        header, panel = box.panel("mapping_panel")
+                        header.label(text="Mapping Settings:", icon_value=get_icon('vector_socket'))
+                        if panel:
+                            panel.use_property_split = False
+                            col = panel.column()
+                            col.template_node_inputs(mapping_node)
                 else:
-                    effective_coord_type = 'UV' if active_layer.coord_type == 'AUTO' else active_layer.coord_type
-                    if effective_coord_type == 'DECAL':
-                        row = layout.row(align=True)
-                        row.label(icon="BLANK1")
-                        row.operator("paint_system.select_empty", text="Select Empty", icon='OBJECT_ORIGIN')
-                    elif effective_coord_type == 'PROJECT':
-                        row = layout.row(align=True)
-                        row.label(icon="BLANK1")
-                        row.operator("paint_system.projection_view_reset", text="View Current Projection", icon='CAMERA_DATA')
-                        row.operator("paint_system.set_projection_view", text="", icon='FILE_REFRESH')
-                    elif effective_coord_type == 'PARALLAX':
-                        split = layout.split(factor=0.35, align=True)
-                        row = split.row(align=True)
-                        row.label(icon="BLANK1")
-                        row.prop(active_layer, "parallax_space", text="")
-                        parallax_node = active_layer.find_node("parallax")
-                        if parallax_node:
-                            split.prop(parallax_node.inputs["Depth"], "default_value", text="Depth")
+                    header.prop(active_layer, "coord_type", text="")
             # Layer Actions Settings
             header, panel = layout.panel("layer_actions_settings_panel", default_closed=True)
             header.label(text="Actions", icon="KEYTYPE_KEYFRAME_VEC")
