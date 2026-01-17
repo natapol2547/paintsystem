@@ -8,8 +8,6 @@ from .common import MultiMaterialOperator, PSContextMixin
 from ..paintsystem.list_manager import ListManager
 from .operators_utils import redraw_panel
 
-ADD_CHANNEL_TEMPLATE_ENUM = CHANNEL_TEMPLATE_ENUM + [("CUSTOM", "Custom", "Custom", "NONE", len(CHANNEL_TEMPLATE_ENUM))]
-
 class PAINTSYSTEM_OT_AddChannel(PSContextMixin, MultiMaterialOperator):
     """Create a new channel in the Paint System"""
     bl_idname = "paint_system.add_channel"
@@ -18,9 +16,8 @@ class PAINTSYSTEM_OT_AddChannel(PSContextMixin, MultiMaterialOperator):
     
     template: EnumProperty(
         name="Template",
-        items=ADD_CHANNEL_TEMPLATE_ENUM,
-        default="CUSTOM",
-        options={'SKIP_SAVE'}
+        items=[("CUSTOM", "Custom", "Custom"), *CHANNEL_TEMPLATE_ENUM],
+        default="CUSTOM"
     )
     
     def get_unique_channel_name(self, context):

@@ -66,7 +66,8 @@ def transfer_connection(node_tree: NodeTree, source_socket: NodeSocket, target_s
             target_socket.default_value = source_socket.default_value
         except Exception as e:
             print(f"Failed to transfer connection from {source_socket.name} ({source_socket.type}) to {target_socket.name} ({target_socket.type}): {e}")
-        return False
+            return False
+        return True
 
 def find_nodes(node_tree: NodeTree, properties: dict) -> list[Node]:
     node = get_material_output(node_tree)
