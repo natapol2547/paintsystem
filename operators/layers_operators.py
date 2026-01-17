@@ -52,7 +52,7 @@ class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSImageCreateMixin, MultiMaterialO
     image_name: StringProperty(
         name="Layer Name",
         description="Name of the new image layer",
-        default="Image Layer"
+        default="Image"
     )
     
     image_add_type: EnumProperty(
@@ -172,7 +172,7 @@ class PAINTSYSTEM_OT_NewSolidColor(PSContextMixin, MultiMaterialOperator):
     layer_name: StringProperty(
         name="Layer Name",
         description="Name of the new solid color layer",
-        default="Solid Color Layer"
+        default="Solid Color"
     )
 
     def process_material(self, context):
@@ -205,7 +205,7 @@ class PAINTSYSTEM_OT_NewAttribute(PSContextMixin, MultiMaterialOperator):
     layer_name: StringProperty(
         name="Layer Name",
         description="Name of the new attribute layer",
-        default="Attribute Layer"
+        default="Attribute"
     )
 
     def process_material(self, context):
@@ -251,7 +251,7 @@ class PAINTSYSTEM_OT_NewShader(PSContextMixin, MultiMaterialOperator):
     layer_name: StringProperty(
         name="Layer Name",
         description="Name of the new shader layer",
-        default="Shader Layer"
+        default="Shader"
     )
 
     def process_material(self, context):
@@ -274,7 +274,7 @@ class PAINTSYSTEM_OT_NewGradient(PSContextMixin, MultiMaterialOperator):
     layer_name: StringProperty(
         name="Layer Name",
         description="Name of the new gradient layer",
-        default="Gradient Layer"
+        default="Gradient"
     )
     
     gradient_type: EnumProperty(
@@ -370,7 +370,7 @@ class PAINTSYSTEM_OT_NewRandomColor(PSContextMixin, MultiMaterialOperator):
     layer_name: StringProperty(
         name="Layer Name",
         description="Name of the new random color layer",
-        default="Random Color Layer"
+        default="Random Color"
     )
     
     @classmethod
