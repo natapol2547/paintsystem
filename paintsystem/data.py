@@ -1885,9 +1885,6 @@ def vector_transform(node_builder: NodeTreeBuilder, color_name: str, color_socke
 class Channel(BaseNestedListManager):
     """A paint channel (e.g. Color, Roughness, Normal) that owns a hierarchy of layers.
     
-    Compiles its layer graph into a single node tree that can be used by a Group.
-    """
-    
     def get_parent_layer_id(self, layer: "Layer", ignore_passthrough: bool = False) -> int:
         if layer.parent_id == -1:
             return -1
