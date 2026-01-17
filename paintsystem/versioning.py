@@ -1,4 +1,4 @@
-import bpy
+﻿import bpy
 from bpy.types import Material
 
 from .graph.common import LIBRARY_NODE_TREE_VERSIONS, get_library_nodetree
@@ -151,4 +151,5 @@ def update_library_nodetree_version():
         if get_nodetree_version(node_tree) != target_version:
             logger.info(f"Updating library nodetree {node_tree.name} to version {target_version}")
             get_library_nodetree(node_tree.name, force_append=True)
+
 
