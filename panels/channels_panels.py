@@ -149,7 +149,26 @@ class MAT_PT_ChannelsPanel(PSContextMixin, Panel):
         ps_ctx = self.parse_context(context)
         if ps_ctx.ps_settings.use_legacy_ui:
             layout.menu("MAT_MT_PaintSystemChannelsMergeAndExport", icon="TEXTURE_DATA", text="Bake and Export")
-        draw_channels_list(context, layout)
+        row = layout.row()
+        row.template_list(
+            "PAINTSYSTEM_UL_channels", 
+            "",
+            ps_ctx.active_group,
+            "channels", 
+            ps_ctx.active_group,
+            "active_index",
+            rows=max(len(ps_ctx.active_group.channels), 4),
+        )
+        col = row.column(align=True)
+        
+        available_templates = [template for template in CHANNEL_TEMPLATE_ENUM if not any(channel.name == template[1] for channel in ps_ctx.active_group.channels)]
+        if available_templates:
+            col.operator("wm.call_menu", icon='ADD', text="").name = "MAT_MT_AddChannelMenu"
+        else:
+            col.operator("paint_system.add_channel", icon='ADD', text="").template = "CUSTOM"
+        col.operator("paint_system.delete_channel", icon='REMOVE', text="")
+        col.operator("paint_system.move_channel_up", icon='TRIA_UP', text="")
+        col.operator("paint_system.move_channel_down", icon='TRIA_DOWN', text="")
 
 
 class MAT_PT_ChannelsSettings(PSContextMixin, Panel):
@@ -199,26 +218,16 @@ class MAT_PT_ChannelsSettings(PSContextMixin, Panel):
             box = col.box()
             box.use_property_split = False
             header, panel = box.panel("vector_space_settings_panel", default_closed=True)
-            header.label(text="Vector Transform")
+            header.prop(active_channel, "use_space_transform", text="Use Space Transform")
             if panel:
-                row = panel.row(align=True)
-                row.prop(active_channel, "use_space_transform_input", text="Transform Input", toggle=1)
-                row.prop(active_channel, "use_space_transform_output", text="Transform Output", toggle=1)
                 panel.use_property_split = True
+                panel.enabled = active_channel.use_space_transform
                 panel.prop(active_channel, "vector_type", text="Vector Type", expand=True)
+                panel.prop(active_channel, "input_vector_space", text="Input Space")
                 row = panel.row(align=True)
-                row.enabled = active_channel.use_space_transform_input
-                row.prop(active_channel, "input_vector_space", text="Input Space")
-                row = panel.row(align=True)
-                row.enabled = active_channel.use_space_transform_output or active_channel.use_space_transform_input
-                row.prop(active_channel, "vector_space", text="Layer Space")
-                if active_channel.vector_space != "TANGENT":
-                    row.prop(active_channel, "normalize_input", text="", icon="NORMALS_VERTEX_FACE")
-                row = panel.row(align=True)
-                row.enabled = active_channel.use_space_transform_output
-                row.prop(active_channel, "output_vector_space", text="Output Space")
-                if active_channel.vector_space == "TANGENT" or active_channel.output_vector_space == "TANGENT":
-                    panel.prop_search(active_channel, "tangent_uv_map", ps_ctx.ps_object.data, "uv_layers", text="Tangent UV", icon='GROUP_UVS')
+                row.prop(active_channel, "vector_space", text="Painting Space")
+                row.prop(active_channel, "normalize_input", text="", icon="NORMALS_VERTEX_FACE")
+                panel.prop(active_channel, "output_vector_space", text="Output Space")
         if active_channel.type == "FLOAT":
             float_box = col.box()
             col = float_box.column()
@@ -239,7 +248,10 @@ class MAT_MT_AddChannelMenu(PSContextMixin, Menu):
 
     def draw(self, context):
         layout = self.layout
-        ensure_invoke_context(layout)
+        
+        if layout.operator_context == 'EXEC_REGION_WIN':
+            layout.operator_context = 'INVOKE_REGION_WIN'
+        layout.operator_context = 'INVOKE_REGION_WIN'
         
         ps_ctx = self.parse_context(context)
         col = layout.column()

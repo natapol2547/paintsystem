@@ -217,6 +217,8 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
                     new_group.create_channel_template(context, "NORMAL", add_layers=self.add_layers)
                 ps_ctx = self.parse_context(context)
                 ps_ctx.active_group.active_index = 0
+                ps_ctx = self.parse_context(context)
+                ps_ctx.active_group.active_index = 0
 
             case 'PAINT_OVER':
                 # Check if Engine is EEVEE
@@ -255,11 +257,16 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
                 node_group = mat_node_tree.nodes.new(type='ShaderNodeGroup')
                 node_group.node_tree = node_tree
                 node_group.location = right_most_node.location + Vector((200, 0))
+                normal_map_node = mat_node_tree.nodes.new(type='ShaderNodeNormalMap')
+                normal_map_node.location = node_group.location + Vector((200, 0))
+                normal_map_node.space = 'OBJECT'
                 diffuse_node = mat_node_tree.nodes.new(type='ShaderNodeBsdfDiffuse')
-                diffuse_node.location = node_group.location + Vector((200, 0))
+                diffuse_node.location = normal_map_node.location + Vector((200, 0))
                 mat_output = mat_node_tree.nodes.new(type='ShaderNodeOutputMaterial')
                 mat_output.location = diffuse_node.location + Vector((200, 0))
                 mat_output.is_active_output = True
+                connect_sockets(node_group.outputs['Normal'], normal_map_node.inputs[1])
+                connect_sockets(normal_map_node.outputs[0], diffuse_node.inputs['Normal'])
                 connect_sockets(diffuse_node.outputs[0], mat_output.inputs[0])
                 new_group.create_channel_template(context, "NORMAL", add_layers=self.add_layers)
             case _:
@@ -330,7 +337,9 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
         header, panel = box.panel("advanced_settings_panel", default_closed=True)
         header.label(text="Advanced Settings:", icon="TOOL_SETTINGS")
         if panel:
-            # Group name moved above; keep advanced options here
+            split = panel.split(factor=0.4)
+            split.label(text="Group Name:")
+            split.prop(self, "group_name", text="", icon='NODETREE')
             if self.template in ['BASIC']:
                 panel.prop(self, "use_alpha_blend", text="Use Smooth Alpha")
                 if self.use_alpha_blend:
@@ -346,22 +355,6 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
             if self.template == 'BASIC' and context.scene.view_settings.view_transform != 'Standard':
                 panel.prop(self, "set_view_transform",
                         text="Use Standard View Transform")
-
-def find_basic_setup_nodes(group_node: Node) -> list[Node]:
-    nodes = [group_node]
-    shader_to_rgb = find_connected_node(group_node, {'bl_idname': 'ShaderNodeShaderToRGB'})
-    if shader_to_rgb:
-        nodes.append(shader_to_rgb)
-    mix_shader = find_connected_node(group_node, {'bl_idname': 'ShaderNodeMixShader'})
-    if mix_shader:
-        nodes.append(mix_shader)
-        transparent_node = find_connected_node(mix_shader, {'bl_idname': 'ShaderNodeBsdfTransparent'})
-        if transparent_node:
-            nodes.append(transparent_node)
-        mat_output = find_connected_node(mix_shader, {'bl_idname': 'ShaderNodeOutputMaterial'})
-        if mat_output:
-            nodes.append(mat_output)
-    return nodes
 
 
 class PAINTSYSTEM_OT_DeleteGroup(PSContextMixin, Operator):
@@ -387,6 +380,8 @@ class PAINTSYSTEM_OT_DeleteGroup(PSContextMixin, Operator):
         ps_mat_data = ps_ctx.ps_mat_data
         active_group = ps_ctx.active_group
         node_tree = ps_ctx.active_material.node_tree
+        if self.bake_channels:
+            pass
         match active_group.template:
             case 'BASIC':
                 for group_node in find_nodes(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree}):
@@ -407,7 +402,7 @@ class PAINTSYSTEM_OT_DeleteGroup(PSContextMixin, Operator):
             case 'PBR':
                 for group_node in find_nodes(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree}):
                     nodes = [group_node]
-                dissolve_nodes(active_group.node_tree, active_group.node_tree.nodes)
+                    dissolve_nodes(active_group.node_tree, nodes)
             case 'PAINT_OVER':
                 dissolve_nodes(active_group.node_tree, active_group.node_tree.nodes)
             case 'NORMAL':
@@ -428,6 +423,9 @@ class PAINTSYSTEM_OT_DeleteGroup(PSContextMixin, Operator):
         col.alert = True
         col.label(text="Danger Zone!", icon="ERROR")
         col.label(text=f"Are you sure you want to delete Paint System?", icon="BLANK1")
+        if self.bake_channels:
+            box = layout.box()
+            
 
 
 class PAINTSYSTEM_OT_MoveGroup(PSContextMixin, MultiMaterialOperator):
