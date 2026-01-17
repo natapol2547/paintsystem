@@ -1042,6 +1042,17 @@ class PAINTSYSTEM_OT_SetProjectionView(PSContextMixin, Operator):
         ps_ctx = self.parse_context(context)
         ps_ctx.active_layer.set_projection_view(context)
         return {'FINISHED'}
+    
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+    
+    def draw(self, context):
+        layout = self.layout
+        box = layout.box()
+        box.alert = True
+        col = box.column(align=True)
+        col.label(text="Override the projection view?", icon='ERROR')
+        col.label(text="Projection will be overridden with the current view", icon='BLANK1')
 
 
 class PAINTSYSTEM_OT_ProjectionViewReset(PSContextMixin, Operator):
@@ -1065,13 +1076,29 @@ class PAINTSYSTEM_OT_ProjectionViewReset(PSContextMixin, Operator):
             region_3d = active_space.region_3d
             if region_3d:
                 location = mathutils.Vector(active_layer.projection_position)
-                rotation = mathutils.Euler(active_layer.projection_rotation, 'XYZ').to_quaternion()
+                rotation = mathutils.Euler(active_layer.projection_rotation, 'XYZ')
                 scale = mathutils.Vector((1.0, 1.0, 1.0))
-                view_matrix = mathutils.Matrix.LocRotScale(location, rotation, scale)
-                if active_layer.projection_space == "OBJECT":
-                    view_matrix = ps_ctx.ps_object.matrix_world @ view_matrix
-                view_matrix.invert()
-                region_3d.view_matrix = view_matrix
+                
+                active_space = context.area.spaces.active
+                if active_space.type == 'VIEW_3D':
+                    region_3d = active_space.region_3d
+                    if region_3d:
+                        match region_3d.view_perspective:
+                            case 'PERSP':
+                                view_matrix = mathutils.Matrix.LocRotScale(location, rotation, scale)
+                                if active_layer.projection_space == "OBJECT":
+                                    view_matrix = ps_ctx.ps_object.matrix_world @ view_matrix
+                                view_matrix.invert()
+                                region_3d.view_matrix = view_matrix
+                            case "CAMERA":
+                                # Set active camera position and rotation 
+                                active_camera = bpy.context.scene.camera
+                                active_camera.location = location
+                                active_camera.rotation_euler = rotation
+                            case _:
+                                self.report({'WARNING'}, "This view perspective is not supported")
+                                return {'CANCELLED'}
+                        return {'FINISHED'}
         return {'FINISHED'}
 
 classes = (
