@@ -2,6 +2,7 @@ import bpy
 from bpy.types import UIList, Menu, Context, Image, ImagePreview, Panel, NodeTree
 from bpy.utils import register_classes_factory
 import numpy as np
+import textwrap
 
 from ..custom_icons import get_image_editor_icon
 
@@ -139,7 +140,7 @@ def draw_input_sockets(layout, context: Context, only_output: bool = False):
             grid_col.label(text="Alpha Input")
             grid_col.prop(active_layer, "alpha_input_name", text="")
 class MAT_PT_UL_LayerList(PSContextMixin, UIList):
-    def draw_item(self, context: Context, layout, data, item, icon, active_data, active_property, index):
+    def draw_item(self, context: Context, layout: bpy.types.UILayout, data, item, icon, active_data, active_property, index):
         ps_ctx = self.parse_context(context)
         linked_item = item.get_layer_data()
         if not linked_item:
@@ -180,7 +181,7 @@ class MAT_PT_UL_LayerList(PSContextMixin, UIList):
             if is_layer_linked(linked_item):
                 row.label(icon="LINKED")
             if warnings:
-                op = row.operator("paint_system.show_layer_warnings", text="", icon='ERROR', emboss=False)
+                op = row.operator("paint_system.show_layer_warnings", text="", icon_value=get_icon('error'), emboss=False)
                 op.layer_id = item.id
             if ps_ctx.ps_settings.show_opacity_in_layer_list:
                 row.label(text=f"{linked_item.opacity:.1f}")
@@ -503,12 +504,13 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
             warnings = active_layer.get_layer_warnings(context)
             if warnings:
                 warnings_box = layout.box()
+                warnings_box.alert = True
                 warnings_col = warnings_box.column(align=True)
+                wrapp = textwrap.TextWrapper(width=32) #50 = maximum length
                 for warning in warnings:
                     # Split warning into chunks of 6 words
-                    words = warning.split()
-                    chunks = [' '.join(words[j:j+6]) for j in range(0, len(words), 6)]
-                    for i, chunk in enumerate(chunks):
+                    wList = wrapp.wrap(text=warning)
+                    for i, chunk in enumerate(wList):
                         warnings_col.label(text=chunk, icon='ERROR' if not i else 'BLANK1')
             if ps_ctx.ps_settings.use_legacy_ui:
                 box = layout.box()

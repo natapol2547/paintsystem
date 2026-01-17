@@ -1435,9 +1435,9 @@ class Layer(BaseNestedListItem):
         # If no layer below
         if not below_layer or active_channel.get_parent_layer_id(below_layer, ignore_passthrough=True) != active_channel.get_parent_layer_id(self, ignore_passthrough=True):
             if blend_mode != 'MIX':
-                warnings.append("Blend mode is not MIX and there is no layer below")
+                warnings.append("Blend mode is not MIX. Please move the layer or use folder passthrough blend mode")
             if layer_data.type == "ADJUSTMENT":
-                warnings.append("Adjustment do not work without a layer below")
+                warnings.append("Adjustment disabled. Please move the layer or use folder passthrough blend mode")
             
         return warnings
     
@@ -1765,12 +1765,10 @@ class Channel(BaseNestedListManager):
                 if unlinked_layer.parent_id != -1:
                     sample_id = self.get_parent_layer_id(unlinked_layer)
                 previous_data = previous_dict.get(sample_id, None)
-                if previous_data and previous_data.add_command and previous_data.add_command.properties.get("mute", False):
-                    previous_data.add_command.properties["mute"] = False
                 layer_identifier = unlinked_layer.uid
                 add_command = node_builder.add_node(
                     layer_identifier, "ShaderNodeGroup",
-                    {"node_tree": layer.node_tree, "mute": layer.type == "ADJUSTMENT"},
+                    {"node_tree": layer.node_tree},
                     {"Clip": layer.is_clip or layer.type == "ADJUSTMENT"},
                     force_properties=True,
                     force_default_values=True
