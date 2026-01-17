@@ -38,19 +38,16 @@ submodules = [
     "paintsystem",
     "panels",
     "operators",
+    "keymaps",
 ]
-
-from . import keymaps
 
 _register, _unregister = register_submodule_factory(__name__, submodules)
 
 def register():
     load_icons()
-    keymaps.register()
     _register()
     
 def unregister():
-    keymaps.unregister()
     _unregister()
     unload_icons()
     print("Paint System: Unregistered", __package__)
