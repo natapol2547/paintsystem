@@ -1999,7 +1999,6 @@ class Channel(BaseNestedListManager):
         Raises:
             ValueError: If the node tree is not found
         """
-        
         node_tree = mat.node_tree
         if not node_tree:
             raise ValueError("Node tree not found")
@@ -2018,104 +2017,107 @@ class Channel(BaseNestedListManager):
         
         orig_disable_output_transform = bool(self.disable_output_transform)
         self.disable_output_transform = True
-        
-        ps_objects = ps_context.ps_objects
-        
-        material_output = get_material_output(node_tree)
-        surface_socket = material_output.inputs['Surface']
-        from_socket = surface_socket.links[0].from_socket if surface_socket.links else None
-        
-        # Bake as output of group ps if exists in the node tree
-        bake_node = None
-        to_be_deleted_nodes = []
-        color_output = None
-        alpha_output = None
-        
-        if not self.use_alpha:
-            # Use the value node set to 1 as alpha output
-            value_node = node_tree.nodes.new('ShaderNodeValue')
-            value_node.outputs['Value'].default_value = 1.0
-            alpha_output = value_node.outputs['Value']
-            to_be_deleted_nodes.append(value_node)
-        
-        if hasattr(mat, "ps_mat_data") and mat.ps_mat_data.groups and use_group_tree:
-            for group in mat.ps_mat_data.groups:
-                if group.node_tree and self.name in group.channels:
-                    bake_node = find_node(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': group.node_tree})
-                    color_output = bake_node.outputs[self.name]
-                    if self.use_alpha:
-                        alpha_output = bake_node.outputs[f'{self.name} Alpha']
-                    break
-        
-        if not bake_node:
-            # Use channel node group instead
-            bake_node = node_tree.nodes.new(type='ShaderNodeGroup')
-            bake_node.node_tree = self.node_tree
-            color_output = bake_node.outputs['Color']
-            if self.use_alpha:
-                alpha_output = bake_node.outputs['Alpha']
-            to_be_deleted_nodes.append(bake_node)
-        
-        if as_tangent_normal:
-            tangent_node = node_tree.nodes.new(type='ShaderNodeTangent')
-            tangent_node.direction_type = "UV_MAP"
-            tangent_node.uv_map = self.bake_uv_map
-            to_be_deleted_nodes.append(tangent_node)
-            tangent_norm_nt = get_library_nodetree(".PS Tangent Normal")
-            tangent_group = node_tree.nodes.new(type='ShaderNodeGroup')
-            tangent_group.node_tree = tangent_norm_nt
-            to_be_deleted_nodes.append(tangent_group)
-            connect_sockets(tangent_group.inputs['Custom Normal'], color_output)
-            connect_sockets(tangent_group.inputs['Tangent'], tangent_node.outputs['Tangent'])
-            color_output = tangent_group.outputs['Tangent Normal']
-        
-        # Bake image
-        connect_sockets(surface_socket, color_output)
-        temp_alpha_image = bake_image.copy()
-        bake_image = ps_bake(context, ps_objects, mat, uv_layer, bake_image, use_gpu, margin=margin, margin_type=margin_type)
-        
-        temp_alpha_image.colorspace_settings.name = 'Non-Color'
-        connect_sockets(surface_socket, alpha_output)
-        temp_alpha_image = ps_bake(context, ps_objects, mat, uv_layer, temp_alpha_image, use_gpu, margin=margin, margin_type=margin_type)
+        try:
+            ps_objects = ps_context.ps_objects
+            
+            material_output = get_material_output(node_tree)
+            surface_socket = material_output.inputs['Surface']
+            from_socket = surface_socket.links[0].from_socket if surface_socket.links else None
+            
+            # Bake as output of group ps if exists in the node tree
+            bake_node = None
+            to_be_deleted_nodes = []
+            color_output = None
+            alpha_output = None
+            
+            if not self.use_alpha:
+                # Use the value node set to 1 as alpha output
+                value_node = node_tree.nodes.new('ShaderNodeValue')
+                value_node.outputs['Value'].default_value = 1.0
+                alpha_output = value_node.outputs['Value']
+                to_be_deleted_nodes.append(value_node)
+            
+            if hasattr(mat, "ps_mat_data") and mat.ps_mat_data.groups and use_group_tree:
+                for group in mat.ps_mat_data.groups:
+                    if group.node_tree and self.name in group.channels:
+                        bake_node = find_node(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': group.node_tree})
+                        color_output = bake_node.outputs[self.name]
+                        if self.use_alpha:
+                            alpha_output = bake_node.outputs[f'{self.name} Alpha']
+                        break
+            
+            if not bake_node:
+                # Use channel node group instead
+                bake_node = node_tree.nodes.new(type='ShaderNodeGroup')
+                bake_node.node_tree = self.node_tree
+                color_output = bake_node.outputs['Color']
+                if self.use_alpha:
+                    alpha_output = bake_node.outputs['Alpha']
+                to_be_deleted_nodes.append(bake_node)
+            
+            if as_tangent_normal:
+                tangent_node = node_tree.nodes.new(type='ShaderNodeTangent')
+                tangent_node.direction_type = "UV_MAP"
+                tangent_node.uv_map = self.bake_uv_map
+                to_be_deleted_nodes.append(tangent_node)
+                tangent_norm_nt = get_library_nodetree(".PS Tangent Normal")
+                tangent_group = node_tree.nodes.new(type='ShaderNodeGroup')
+                tangent_group.node_tree = tangent_norm_nt
+                to_be_deleted_nodes.append(tangent_group)
+                connect_sockets(tangent_group.inputs['Custom Normal'], color_output)
+                connect_sockets(tangent_group.inputs['Tangent'], tangent_node.outputs['Tangent'])
+                color_output = tangent_group.outputs['Tangent Normal']
+            
+            # Bake image
+            connect_sockets(surface_socket, color_output)
+            temp_alpha_image = bake_image.copy()
+            bake_image = ps_bake(context, ps_objects, mat, uv_layer, bake_image, use_gpu, margin=margin, margin_type=margin_type)
+            
+            temp_alpha_image.colorspace_settings.name = 'Non-Color'
+            connect_sockets(surface_socket, alpha_output)
+            temp_alpha_image = ps_bake(context, ps_objects, mat, uv_layer, temp_alpha_image, use_gpu, margin=margin, margin_type=margin_type)
 
-        if bake_image and temp_alpha_image:
-            # pixels_bake = np.empty(len(bake_image.pixels), dtype=np.float32)
-            # pixels_temp_alpha = np.empty(len(temp_alpha_image.pixels), dtype=np.float32)
-            pixels_bake = blender_image_to_numpy(bake_image)
-            pixels_temp_alpha = blender_image_to_numpy(temp_alpha_image)
-            
-            if pixels_bake is None or pixels_temp_alpha is None:
-                return
-            
-            # Process tiles - handle both UDIM and non-UDIM cases
-            temp_alpha_single = pixels_temp_alpha.get_single_tile()
-            
-            # Update alpha channel for each tile in bake_image
-            for tile_num in pixels_bake.tiles.keys():
-                bake_tile = pixels_bake.tiles[tile_num]
-                # Use corresponding tile if available, otherwise use single tile
-                if tile_num in pixels_temp_alpha.tiles:
-                    temp_tile = pixels_temp_alpha.tiles[tile_num]
-                    bake_tile[:, :, 3] = temp_tile[:, :, 0]
-                else:
-                    bake_tile[:, :, 3] = temp_alpha_single[:, :, 0]
-            
-            set_image_pixels(bake_image, pixels_bake)
-            save_image(bake_image)
-        bpy.data.images.remove(temp_alpha_image)
+            if bake_image and temp_alpha_image:
+                # pixels_bake = np.empty(len(bake_image.pixels), dtype=np.float32)
+                # pixels_temp_alpha = np.empty(len(temp_alpha_image.pixels), dtype=np.float32)
+                pixels_bake = blender_image_to_numpy(bake_image)
+                pixels_temp_alpha = blender_image_to_numpy(temp_alpha_image)
+                
+                if pixels_bake is None or pixels_temp_alpha is None:
+                    return
+                
+                # Process tiles - handle both UDIM and non-UDIM cases
+                temp_alpha_single = pixels_temp_alpha.get_single_tile()
+                
+                # Update alpha channel for each tile in bake_image
+                for tile_num in pixels_bake.tiles.keys():
+                    bake_tile = pixels_bake.tiles[tile_num]
+                    # Use corresponding tile if available, otherwise use single tile
+                    if tile_num in pixels_temp_alpha.tiles:
+                        temp_tile = pixels_temp_alpha.tiles[tile_num]
+                        bake_tile[:, :, 3] = temp_tile[:, :, 0]
+                    else:
+                        bake_tile[:, :, 3] = temp_alpha_single[:, :, 0]
+                
+                set_image_pixels(bake_image, pixels_bake)
+                save_image(bake_image)
+            bpy.data.images.remove(temp_alpha_image)
 
-        for node in to_be_deleted_nodes:
-            node_tree.nodes.remove(node)
-        
-        # Restore surface socket
-        if from_socket:
-            connect_sockets(surface_socket, from_socket)
-        
-        if force_alpha:
-            self.use_alpha = orig_use_alpha
-        
-        if orig_disable_output_transform:
+            for node in to_be_deleted_nodes:
+                node_tree.nodes.remove(node)
+            
+            # Restore surface socket
+            if from_socket:
+                connect_sockets(surface_socket, from_socket)
+            
+            if force_alpha:
+                self.use_alpha = orig_use_alpha
+            
             self.disable_output_transform = orig_disable_output_transform
+        except Exception as e:
+            print(f"Error baking channel: {e}")
+            self.disable_output_transform = orig_disable_output_transform
+            self.use_alpha = orig_use_alpha
         
     @property
     def item_type(self):
