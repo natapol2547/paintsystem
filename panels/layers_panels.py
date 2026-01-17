@@ -10,7 +10,6 @@ from ..custom_icons import get_image_editor_icon
 from ..utils.version import is_newer_than
 from .common import (
     PSContextMixin,
-    draw_layer_icon,
     is_editor_open,
     line_separator,
     scale_content,
@@ -48,6 +47,72 @@ if is_newer_than(4,3):
     )
 
 
+def is_image_painted(image: Image | ImagePreview) -> bool:
+    """Check if the image is painted
+
+    Args:
+        image (bpy.types.Image): The image to check
+
+    Returns:
+        bool: True if the image is painted, False otherwise
+    """
+    if not image:
+        return False
+    if isinstance(image, Image):
+        pixels = np.zeros(len(image.pixels), dtype=np.float32)
+        image.pixels.foreach_get(pixels)
+        return len(pixels) > 0 and any(pixels)
+    elif isinstance(image, ImagePreview):
+        pixels = np.zeros(len(image.image_pixels_float), dtype=np.float32)
+        image.image_pixels_float.foreach_get(pixels)
+        return len(pixels) > 0 and any(pixels)
+    return False
+
+
+def draw_layer_icon(layer: Layer, layout: bpy.types.UILayout):
+    match layer.type:
+        case 'IMAGE':
+            if not layer.image:
+                layout.label(icon_value=get_icon('image'))
+                return
+            else:
+                if layer.image.preview and is_image_painted(layer.image.preview):
+                    layout.label(
+                        icon_value=layer.image.preview.icon_id)
+                else:
+                    if layer.image.is_dirty:
+                        layer.image.asset_generate_preview()
+                    layout.label(icon_value=get_icon('image'))
+        case 'FOLDER':
+            layout.prop(layer, "is_expanded", text="", icon_only=True, icon_value=get_icon(
+                'folder_open') if layer.is_expanded else get_icon('folder'), emboss=False)
+        case 'SOLID_COLOR':
+            rgb_node = layer.source_node
+            if rgb_node:
+                layout.prop(
+                    rgb_node.outputs[0], "default_value", text="", icon='IMAGE_RGB_ALPHA')
+        case 'ADJUSTMENT':
+            layout.label(icon='SHADERFX')
+        case 'SHADER':
+            layout.label(icon='SHADING_RENDERED')
+        case 'NODE_GROUP':
+            layout.label(icon='NODETREE')
+        case 'ATTRIBUTE':
+            layout.label(icon='MESH_DATA')
+        case 'GRADIENT':
+            if layer.gradient_type == 'FAKE_LIGHT':
+                layout.label(icon='LIGHT')
+            else:
+                layout.label(icon='COLOR')
+        case 'RANDOM':
+            layout.label(icon='SEQ_HISTOGRAM')
+        case 'TEXTURE':
+            layout.label(icon='TEXTURE')
+        case 'GEOMETRY':
+            layout.label(icon='MESH_DATA')
+        case _:
+            layout.label(icon='BLANK1')
+
 def draw_input_sockets(layout, context: Context, only_output: bool = False):
     ps_ctx = PSContextMixin.parse_context(context)
     active_layer = ps_ctx.active_layer
@@ -70,12 +135,13 @@ class MAT_PT_UL_LayerList(PSContextMixin, UIList):
             level = active_channel.get_item_level_from_id(item.id)
             main_row = layout.row(align=True)
             warnings = item.get_layer_warnings(context)
-            # main_row.label(text="\n".join(warnings), icon='ERROR')
+                # main_row.label(text="\n".join(warnings), icon='ERROR')
             # Check if parent of the current item is enabled
             parent_item = active_channel.get_item_by_id(
                 item.parent_id)
             if parent_item and not parent_item.enabled:
                 main_row.enabled = False
+
             row = main_row.row(align=True)
             for i in range(level):
                 if i == level - 1:
@@ -730,6 +796,17 @@ class MAT_MT_ImageFilterMenu(PSContextMixin, Menu):
         layout.operator("paint_system.fill_image", 
                         text="Fill Image", icon='SNAP_FACE')
 
+def draw_painting_may_not_work(layout: bpy.types.UILayout, context: bpy.types.Context):
+    ps_ctx = PSContextMixin.parse_context(context)
+    active_layer = ps_ctx.active_layer
+    if not active_layer:
+        return
+    if active_layer.type == 'IMAGE' and active_layer.coord_type not in ['UV', 'AUTO'] and not is_editor_open(context, 'IMAGE_EDITOR'):
+        info_box = layout.box()
+        info_col = info_box.column(align=True)
+        info_col.label(text="Painting may not work", icon='INFO')
+        info_col.operator("paint_system.split_image_editor", text="Open Image Editor", icon="IMAGE_DATA")
+
 class MAT_PT_LayerSettings(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_LayerSettings'
     bl_space_type = "VIEW_3D"
@@ -909,14 +986,14 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     scale_content(context, row, 1.2, 1.2)
                     if not active_layer.external_image:
                         icon_value = get_image_editor_icon(context.preferences.filepaths.image_editor) or get_icon('image')
-                        row.operator("paint_system.quick_edit", text="Edit in Image Editor", icon_value=icon_value)
+                        col.operator("paint_system.quick_edit", text="Edit Externally", icon_value=icon_value)
                     else:
                         if active_layer.edit_external_mode == 'IMAGE_EDIT':
+                            row = col.row(align=True)
                             row.operator("paint_system.quick_edit", text="Open Image", icon_value=get_image_editor_icon(context.preferences.filepaths.image_editor))
                             row.operator("paint_system.reload_image", text="Reload Image", icon="FILE_REFRESH")
                         elif active_layer.edit_external_mode == 'VIEW_CAPTURE':
-                            row.operator("paint_system.project_apply", text="Apply Edit")
-                    row.operator("paint_system.toggle_image_editor", text="", depress=is_editor_open(context, 'IMAGE_EDITOR'), icon="BLENDER")
+                            col.operator("paint_system.project_apply", text="Apply Edit")
                 case 'ADJUSTMENT':
                     if not ps_ctx.ps_settings.use_legacy_ui:
                         box = layout.box()
@@ -932,11 +1009,12 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     node_group = active_layer.source_node
                     inputs = [i for i in node_group.inputs if not i.is_linked and i.name not in (
                         'Color', 'Alpha')]
-                    if inputs:
-                        col.label(text="Node Group Settings:", icon='NODETREE')
-                        for socket in inputs:
-                            col.prop(socket, "default_value",
-                                    text=socket.name)
+                    if not inputs:
+                        return
+                    col.label(text="Node Group Settings:", icon='NODETREE')
+                    for socket in inputs:
+                        col.prop(socket, "default_value",
+                                text=socket.name)
                 case 'GRADIENT':
                     if active_layer.gradient_type in ('LINEAR', 'RADIAL', 'FAKE_LIGHT'):
                         if not ps_ctx.ps_settings.use_legacy_ui:
@@ -1048,6 +1126,7 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                 else:
                     header.template_ID(active_layer, "image", text="", new="image.new", open="image.open")
                 if panel:
+                    header.label(text="Image", icon_value=get_icon('image'))
                     box = panel.box()
                     col = box.column()
                     image_node = active_layer.source_node
@@ -1131,9 +1210,9 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     if ps_ctx.active_layer.type == "IMAGE" and ps_ctx.active_layer.image:
                         row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
                 if transform_panel:
+                    draw_painting_may_not_work(transform_panel, context)
                     transform_panel.use_property_split = True
                     transform_panel.use_property_decorate = False
-                    box = transform_panel.box()
                     ps_ctx = self.parse_context(context)
                     active_layer = ps_ctx.active_layer
                     box = transform_panel.box()
@@ -1213,7 +1292,6 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                         parallax_node = active_layer.find_node("parallax")
                         if parallax_node:
                             split.prop(parallax_node.inputs["Depth"], "default_value", text="Depth")
-
             # Layer Actions Settings
             header, panel = layout.panel("layer_actions_settings_panel", default_closed=True)
             header.label(text="Actions", icon="KEYTYPE_KEYFRAME_VEC")
