@@ -250,6 +250,18 @@ class MAT_MT_PaintSystemMergeAndExport(PSContextMixin, Menu):
         if not ps_ctx.ps_settings.use_legacy_ui:
             layout.operator("paint_system.export_all_images", text="Export All Channels", icon='EXPORT')
 
+def draw_painting_may_not_work(layout: bpy.types.UILayout, context: bpy.types.Context):
+    ps_ctx = PSContextMixin.parse_context(context)
+    active_layer = ps_ctx.active_layer
+    if not active_layer:
+        return
+    if active_layer.type == 'IMAGE' and active_layer.coord_type not in ['UV', 'AUTO'] and not is_editor_open(context, 'IMAGE_EDITOR'):
+        info_box = layout.box()
+        info_box.alert = True
+        info_col = info_box.column(align=True)
+        info_col.label(text="Painting in 3D may not work")
+        info_col.operator("paint_system.split_image_editor", text="Open Blender Image Editor", icon="BLENDER")
+
 class MAT_PT_Layers(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_Layers'
     bl_space_type = "VIEW_3D"
@@ -431,17 +443,6 @@ class MAT_MT_ImageFilterMenu(PSContextMixin, Menu):
                         icon="MOD_MASK")
         layout.operator("paint_system.fill_image", 
                         text="Fill Image", icon='SNAP_FACE')
-
-def draw_painting_may_not_work(layout: bpy.types.UILayout, context: bpy.types.Context):
-    ps_ctx = PSContextMixin.parse_context(context)
-    active_layer = ps_ctx.active_layer
-    if not active_layer:
-        return
-    if active_layer.type == 'IMAGE' and active_layer.coord_type not in ['UV', 'AUTO'] and not is_editor_open(context, 'IMAGE_EDITOR'):
-        info_box = layout.box()
-        info_col = info_box.column(align=True)
-        info_col.label(text="Painting may not work", icon='INFO')
-        info_col.operator("paint_system.split_image_editor", text="Open Image Editor", icon="IMAGE_DATA")
 
 class MAT_PT_LayerSettings(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_LayerSettings'
