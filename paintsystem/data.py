@@ -2462,6 +2462,9 @@ class Channel(BaseNestedListManager):
             if orig_disable_output_transform:
                 self.disable_output_transform = orig_disable_output_transform
         
+        if orig_disable_output_transform:
+            self.disable_output_transform = orig_disable_output_transform
+        
     @property
     def item_type(self):
         return Layer
