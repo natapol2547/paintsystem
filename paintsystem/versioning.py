@@ -126,9 +126,11 @@ def update_library_nodetree_version():
             if node_tree.name.endswith(" (TEMP)"):
                 bpy.data.node_groups.remove(node_tree)
                 continue
+            if node_tree.name not in LIBRARY_NODE_TREE_VERSIONS:
+                continue
             ps_nodetrees.append(node_tree)
     for node_tree in ps_nodetrees:
-        target_version = LIBRARY_NODE_TREE_VERSIONS.get(node_tree.name, 0)
+        target_version = LIBRARY_NODE_TREE_VERSIONS[node_tree.name]
         if get_nodetree_version(node_tree) != target_version:
             print(f"Updating library nodetree {node_tree.name} to version {target_version}")
             get_library_nodetree(node_tree.name, force_append=True)
