@@ -15,7 +15,6 @@ from ..utils.version import is_newer_than
 from ..utils.unified_brushes import get_unified_settings
 from .brushes import get_brushes_from_library
 from .common import MultiMaterialOperator, PSContextMixin, DEFAULT_PS_UV_MAP_NAME, execute_operator_in_area, wait_for_redraw
-from ..panels.common import is_editor_open
 from .operators_utils import redraw_panel
 
 from bl_ui.properties_paint_common import (
@@ -484,24 +483,16 @@ def split_area(context: bpy.types.Context, direction: str = 'VERTICAL', factor: 
     new_area = new_areas.pop()
     return new_area
 
-class PAINTSYSTEM_OT_ToggleImageEditor(PSContextMixin, Operator):
-    bl_idname = "paint_system.toggle_image_editor"
-    bl_label = "Toggle Image Editor"
+class PAINTSYSTEM_OT_SplitImageEditor(PSContextMixin, Operator):
+    bl_idname = "paint_system.split_image_editor"
+    bl_label = "Split & Open Image Editor"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Toggle the image editor on/off"
+    bl_description = "Split the active area vertically and open Image Editor on the right"
 
     def execute(self, context):
         ps_ctx = self.parse_context(context)
         active_layer = ps_ctx.active_layer
         image = active_layer.image if active_layer else None
-        
-        if is_editor_open(context, 'IMAGE_EDITOR'):
-            # Find the image editor area
-            image_editor_area = next((a for a in context.screen.areas if a.type == 'IMAGE_EDITOR'), None)
-            # Close the image editor area
-            if image_editor_area:
-                execute_operator_in_area(image_editor_area, 'screen.area_close')
-                return {'FINISHED'}
         
         new_area = split_area(context)
         if not new_area:
@@ -514,29 +505,23 @@ class PAINTSYSTEM_OT_ToggleImageEditor(PSContextMixin, Operator):
         if new_area.x < context.area.x:
             new_area.type = context.area.type
             context.area.type = 'IMAGE_EDITOR'
-
-        image_area = next((a for a in context.screen.areas if a.type == 'IMAGE_EDITOR'), None)
-        if image_area:
-            space = image_area.spaces[0]
-            space.show_region_ui = True
-            if image:
-                space.image = image
-                space.ui_mode = 'PAINT'
-                space.overlay.show_overlays = active_layer.coord_type in {'AUTO', 'UV'}
-                execute_operator_in_area(image_area, 'image.view_all', fit_view=True)
+        if image:
+            space = new_area.spaces[0]
+            space.show_region_ui = False
+            space.image = image
+            space.ui_mode = 'PAINT'
+            space.overlay.show_overlays = active_layer.coord_type in {'AUTO', 'UV'}
+            
+            execute_operator_in_area(new_area, 'image.view_all', fit_view=True)
 
         return {'FINISHED'}
-
-
-class PAINTSYSTEM_OT_FocusPSNode(PSContextMixin, Operator):
-    bl_idname = "paint_system.focus_ps_node"
-    bl_label = "Focus PS Node"
-    bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Focus the active node in the Paint System"
-    
-    @classmethod
-    def poll(cls, context):
-        ps_ctx = cls.parse_context(context)
+        if image:
+            space = new_area.spaces[0]
+            space.show_region_ui = True
+            space.image = image
+            space.ui_mode = 'PAINT'
+            space.overlay.show_overlays = active_layer.coord_type in {'AUTO', 'UV'}
+            execute_operator_in_area(new_area, 'image.view_all', fit_view=True)
         return ps_ctx.active_group is not None
     
     def execute(self, context):
@@ -554,7 +539,7 @@ class PAINTSYSTEM_OT_FocusPSNode(PSContextMixin, Operator):
         # Set to Shader Editor
         space = new_area.spaces[0]
         space.tree_type = 'ShaderNodeTree'
-        space.show_region_ui = True
+        space.show_region_ui = False
         
         # Find the node group
         node_to_focus = find_node(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree}, connected_to_output=False)
@@ -571,7 +556,7 @@ class PAINTSYSTEM_OT_FocusPSNode(PSContextMixin, Operator):
                     node.select = True
             node_tree.nodes.active = node_to_focus
             wait_for_redraw()
-            execute_operator_in_area(new_area, 'node.view_selected')
+            print(execute_operator_in_area(new_area, 'node.view_selected'))
         
         
         return {'FINISHED'}
@@ -592,6 +577,7 @@ classes = (
     PAINTSYSTEM_OT_AddCameraPlane,
     PAINTSYSTEM_OT_HidePaintingTips,
     PAINTSYSTEM_OT_DuplicatePaintSystemData,
+    PAINTSYSTEM_OT_ToggleTransformGizmos,
     PAINTSYSTEM_OT_ToggleImageEditor,
     PAINTSYSTEM_OT_FocusPSNode,
 )
@@ -617,12 +603,8 @@ def register():
             print(f"Paint System: Operators already registered (module reload): {e}")
         else:
             raise
-    
-    wm = bpy.context.window_manager
-    kc = wm.keyconfigs.addon if hasattr(wm, "keyconfigs") else None
-    if kc:
         km = kc.keymaps.new(name="3D View", space_type='VIEW_3D')
-        kmi = km.keymap_items.new(
+            PAINTSYSTEM_OT_ToggleImageEditor,
             PAINTSYSTEM_OT_ColorSample.bl_idname, 'I', 'PRESS', repeat=True)
         addon_keymaps.append((km, kmi))
         kmi = km.keymap_items.new(
