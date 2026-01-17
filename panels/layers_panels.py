@@ -64,7 +64,7 @@ def draw_input_sockets(layout, context: Context, only_output: bool = False):
         row.label(icon="BLANK1")
         draw_socket_grid(row, active_layer, include_inputs=not only_output)
 class MAT_PT_UL_LayerList(PSContextMixin, UIList):
-    def draw_item(self, context: Context, layout: bpy.types.UILayout, data, item, icon, active_data, active_property, index):
+    def draw_item(self, context: Context, layout, data, item, icon, active_data, active_property, index):
         ps_ctx = self.parse_context(context)
         linked_item = item.get_layer_data()
         if not linked_item:
@@ -92,11 +92,10 @@ class MAT_PT_UL_LayerList(PSContextMixin, UIList):
             row.enabled = linked_item.opacity > 0 and linked_item.enabled
             draw_layer_icon(linked_item, row)
             main_row.separator()
-            # Display and edit only the layer name without the prefix
-            main_row.prop(linked_item, "display_name", text="", emboss=False)
+            main_row.prop(linked_item, "name", text="", emboss=False)
 
             row = main_row.row(align=True)
-            row.prop(linked_item, "name", text="", emboss=False)
+            row.alignment = 'RIGHT'
             if linked_item.is_clip:
                 row.label(icon="SELECT_INTERSECT")
             if linked_item.lock_layer:
