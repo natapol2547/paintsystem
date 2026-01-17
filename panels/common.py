@@ -379,3 +379,6 @@ def line_separator(layout: bpy.types.UILayout):
         layout.separator(type = 'LINE')
     else:
         layout.separator()
+
+def is_editor_open(context: bpy.types.Context, editor_type: str) -> bool:
+    return any(area.type == editor_type for area in context.screen.areas)

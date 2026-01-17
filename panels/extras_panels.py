@@ -34,7 +34,7 @@ class MAT_PT_BrushTooltips(Panel):
         col = layout.column()
         kmi = find_keymap("paint_system.toggle_brush_erase_alpha")
         self.draw_shortcut(col, kmi, "Toggle Erase Alpha")
-        kmi = find_keymap("paint_system.color_sampler")
+        kmi = find_keymap("paint_system.color_sample")
         self.draw_shortcut(col, kmi, "Eyedropper")
         # kmi = find_keymap("object.transfer_mode")
         # self.draw_shortcut(col, kmi, "Switch Object")
@@ -358,7 +358,7 @@ class MAT_PT_TexPaintRMBMenu(PSContextMixin, Panel, UnifiedPaintPanel):
         sample_col = swatch_row.column(align=True)
         sample_col.scale_y = 0.95
         sample_col.alignment = 'RIGHT'
-        # primary_sample = sample_col.operator("paint_system.color_sampler", text="", icon='EYEDROPPER')
+        # primary_sample = sample_col.operator("paint_system.color_sample", text="", icon='EYEDROPPER')
 
         # HSV sliders (optional based on preferences)
         if show_hsv and ps_ctx.ps_scene_data:

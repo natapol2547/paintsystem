@@ -310,3 +310,47 @@ class PSImageFilterMixin():
                 self.report({'ERROR'}, "Layer Does not have an image")
                 return None
         return image
+
+def wait_for_redraw() -> None:
+    bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
+
+def run_operator_by_id(operator_id, **kwargs):
+    """
+    Calls a Blender operator using its dotted string ID.
+    Example: run_operator_by_id("mesh.primitive_cube_add", size=2)
+    """
+    try:
+        # Split 'mesh.primitive_cube_add' into 'mesh' and 'primitive_cube_add'
+        category, name = operator_id.split(".")
+        
+        # dynamic access: bpy.ops -> category -> name
+        op_category = getattr(bpy.ops, category)
+        op_func = getattr(op_category, name)
+        
+        # Call the operator with any arguments provided
+        return op_func(**kwargs)
+        
+    except (AttributeError, ValueError):
+        return False
+
+def execute_operator_in_area(area: bpy.types.Area, operator_idname: str, **kwargs) -> bool:
+    """
+    Executes a specified operator in the given area.
+
+    :param area: The area to execute the operator in.
+    :param operator_idname: The operator's ID name (e.g., 'screen.screen_full_area').
+    :param kwargs: Optional keyword arguments for the operator properties.
+    """
+    # The 'WINDOW' region is the main canvas where the image is actually drawn.
+    region = next((region for region in area.regions if region.type == 'WINDOW'), None)
+    if not region:
+        return False
+    # Use context.temp_override to create a temporary context
+    with bpy.context.temp_override(area=area, region=region):
+        try:
+            # Call the operator using the specified ID name and arguments
+            run_operator_by_id(operator_idname, **kwargs)
+            return True
+        except RuntimeError as e:
+            print(f"Could not execute operator in {area.type}: {e}")
+            return False

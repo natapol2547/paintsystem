@@ -16,7 +16,7 @@ from ..utils.nodes import find_node, get_material_output
 from ..utils.version import is_newer_than
 from ..utils.unified_brushes import get_unified_settings
 from .brushes import get_brushes_from_library
-from .common import MultiMaterialOperator, PSContextMixin, DEFAULT_PS_UV_MAP_NAME
+from .common import MultiMaterialOperator, PSContextMixin, DEFAULT_PS_UV_MAP_NAME, execute_operator_in_area, wait_for_redraw
 from .operators_utils import redraw_panel
 
 from bl_ui.properties_paint_common import (
@@ -427,6 +427,100 @@ class PAINTSYSTEM_OT_ToggleTransformGizmos(Operator):
         
         return {'FINISHED'}
 
+def split_area(context: bpy.types.Context, direction: str = 'VERTICAL', factor: float = 0.55) -> bpy.types.Area | None:
+    screen = context.screen
+    old_areas = set(screen.areas)
+    
+    with context.temp_override(area=context.area):
+        bpy.ops.screen.area_split(direction=direction, factor=factor)
+
+    new_areas = set(screen.areas) - old_areas
+    if not new_areas:
+        return None
+    new_area = new_areas.pop()
+    return new_area
+
+class PAINTSYSTEM_OT_SplitImageEditor(PSContextMixin, Operator):
+    bl_idname = "paint_system.split_image_editor"
+    bl_label = "Split & Open Image Editor"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Split the active area vertically and open Image Editor on the right"
+
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        active_layer = ps_ctx.active_layer
+        image = active_layer.image if active_layer else None
+        
+        new_area = split_area(context)
+        if not new_area:
+            self.report({'WARNING'}, "Could not split the area.")
+            return {'CANCELLED'}
+
+        # Change the new area to Image Editor
+        new_area.type = 'IMAGE_EDITOR'
+        
+        if new_area.x < context.area.x:
+            new_area.type = context.area.type
+            context.area.type = 'IMAGE_EDITOR'
+        
+        if image:
+            space = new_area.spaces[0]
+            space.show_region_ui = False
+            space.image = image
+            space.ui_mode = 'PAINT'
+            space.overlay.show_overlays = False
+            
+            execute_operator_in_area(new_area, 'image.view_all', fit_view=True)
+
+        return {'FINISHED'}
+
+class PAINTSYSTEM_OT_FocusPSNode(PSContextMixin, Operator):
+    bl_idname = "paint_system.focus_ps_node"
+    bl_label = "Focus PS Node"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Focus the active node in the Paint System"
+    
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_group is not None
+    
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        active_group = ps_ctx.active_group
+        node_tree = ps_ctx.active_material.node_tree
+        
+        new_area = split_area(context)
+        if not new_area:
+            self.report({'WARNING'}, "Could not split the area.")
+            return {'CANCELLED'}
+
+        # Change the new area to Shader Node Editor
+        new_area.type = 'NODE_EDITOR'
+        # Set to Shader Editor
+        space = new_area.spaces[0]
+        space.tree_type = 'ShaderNodeTree'
+        space.show_region_ui = False
+        
+        # Find the node group
+        node_to_focus = find_node(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree}, connected_to_output=False)
+        if not node_to_focus:
+            # Find material output instead
+            node_to_focus = get_material_output(node_tree)
+        
+        if node_to_focus:
+            # Deselect all nodes
+            for node in node_tree.nodes:
+                if node != node_to_focus:
+                    node.select = False
+                else:
+                    node.select = True
+            node_tree.nodes.active = node_to_focus
+            wait_for_redraw()
+            print(execute_operator_in_area(new_area, 'node.view_selected'))
+        
+        
+        return {'FINISHED'}
 
 classes = (
     PAINTSYSTEM_OT_TogglePaintMode,
@@ -443,6 +537,8 @@ classes = (
     PAINTSYSTEM_OT_HidePaintingTips,
     PAINTSYSTEM_OT_DuplicatePaintSystemData,
     PAINTSYSTEM_OT_ToggleTransformGizmos,
+    PAINTSYSTEM_OT_SplitImageEditor,
+    PAINTSYSTEM_OT_FocusPSNode,
 )
 
 register, unregister = register_classes_factory(classes)

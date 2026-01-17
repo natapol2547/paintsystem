@@ -207,7 +207,7 @@ class PaintSystemPreferences(AddonPreferences):
 
         box = layout.box()
         box.label(text="Paint System Shortcuts:")
-        kmi = find_keymap('paint_system.color_sampler')
+        kmi = find_keymap('paint_system.color_sample')
         if kmi:
             self.draw_shortcut(box, kmi, "Color Sampler Shortcut")
         kmi = find_keymap('paint_system.toggle_brush_erase_alpha')
