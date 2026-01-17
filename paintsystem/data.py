@@ -2517,8 +2517,7 @@ class Group(PropertyGroup):
                     if not color_socket:
                         color_socket = find_socket_on_node(to_node, 'Color')
                     if color_socket:
-                        if not transfer_connection(mat_node_tree, color_socket, node_group.inputs['Color']):
-                            channel.create_layer(context, layer_name='Solid Color', layer_type='SOLID_COLOR')
+                        transfer_connection(mat_node_tree, color_socket, node_group.inputs['Color'])
                         transfer_connection(mat_node_tree, color_socket, node_group.inputs['Color'])
                         connect_sockets(node_group.outputs['Color'], color_socket)
                     # Alpha
