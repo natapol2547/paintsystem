@@ -992,6 +992,11 @@ class Layer(BaseNestedListItem):
         self = self.get_layer_data()
         return self.find_node("pre_mix")
     
+    @property
+    def opacity(self) -> float:
+        self = self.get_layer_data()
+        return self.pre_mix_node.inputs['Opacity'].default_value
+
     uid: StringProperty()
     
     def update_layer_name(self, context):
@@ -1419,7 +1424,7 @@ class Layer(BaseNestedListItem):
         warnings = []
         blend_mode = get_layer_blend_type(layer_data)
         # If no layer below
-        if not below_layer or active_channel.get_parent_layer_id(below_layer) != active_channel.get_parent_layer_id(self):
+        if not below_layer or active_channel.get_parent_layer_id(below_layer, ignore_passthrough=True) != active_channel.get_parent_layer_id(self, ignore_passthrough=True):
             if blend_mode != 'MIX':
                 warnings.append("Blend mode is not MIX and there is no layer below")
             if layer_data.type == "ADJUSTMENT":
@@ -1673,13 +1678,14 @@ def ps_bake(context, objects: list[Object], mat: Material, uv_layer, bake_image,
 class Channel(BaseNestedListManager):
     """Custom data for material layers in the Paint System"""
     
-    def get_parent_layer_id(self, layer: "Layer") -> int:
+    def get_parent_layer_id(self, layer: "Layer", ignore_passthrough: bool = False) -> int:
         if layer.parent_id == -1:
             return -1
         parent_layer = self.get_item_by_id(layer.parent_id)
-        parent_layer_linked = parent_layer.get_layer_data()
-        if parent_layer_linked.blend_mode == "PASSTHROUGH":
-            return self.get_parent_layer_id(parent_layer)
+        if ignore_passthrough:
+            parent_layer_linked = parent_layer.get_layer_data()
+            if parent_layer_linked.blend_mode == "PASSTHROUGH":
+                return self.get_parent_layer_id(parent_layer)
         return parent_layer.id
     
     def update_node_tree(self, context:Context):
