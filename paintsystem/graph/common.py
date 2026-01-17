@@ -80,7 +80,7 @@ def get_library_nodetree(tree_name: str, library_filename: str = LIBRARY_FILENAM
     # Return the newly appended node tree (now present in bpy.data.node_groups)
     appended_tree: Optional[bpy.types.NodeTree] = bpy.data.node_groups.get(tree_name)
     
-    if existing_tree and force_append:
+    if appended_tree and existing_tree and force_append:
         # Remap the users to the new tree
         existing_tree.user_remap(appended_tree)
         bpy.data.node_groups.remove(existing_tree)
