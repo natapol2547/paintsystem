@@ -140,6 +140,7 @@ def draw_input_sockets(layout, context: Context, only_output: bool = False):
             grid_col.prop(active_layer, "alpha_input_name", text="")
 class MAT_PT_UL_LayerList(PSContextMixin, UIList):
     def draw_item(self, context: Context, layout, data, item, icon, active_data, active_property, index):
+        ps_ctx = self.parse_context(context)
         linked_item = item.get_layer_data()
         if not linked_item:
             return
@@ -148,7 +149,7 @@ class MAT_PT_UL_LayerList(PSContextMixin, UIList):
         flattened = active_channel.flattened_layers
         if index < len(flattened):
             level = active_channel.get_item_level_from_id(item.id)
-            main_row = layout.row()
+            main_row = layout.row(align=True)
             warnings = item.get_layer_warnings(context)
                 # main_row.label(text="\n".join(warnings), icon='ERROR')
             # Check if parent of the current item is enabled
@@ -163,10 +164,13 @@ class MAT_PT_UL_LayerList(PSContextMixin, UIList):
                     row.label(icon_value=get_icon('folder_indent'))
                 else:
                     row.label(icon='BLANK1')
+            row.enabled = linked_item.opacity > 0 and linked_item.enabled
             draw_layer_icon(linked_item, row)
+            main_row.separator()
+            main_row.prop(linked_item, "name", text="", emboss=False)
 
             row = main_row.row(align=True)
-            row.prop(linked_item, "name", text="", emboss=False)
+            row.alignment = 'RIGHT'
             if linked_item.is_clip:
                 row.label(icon="SELECT_INTERSECT")
             if linked_item.lock_layer:
@@ -178,6 +182,8 @@ class MAT_PT_UL_LayerList(PSContextMixin, UIList):
             if warnings:
                 op = row.operator("paint_system.show_layer_warnings", text="", icon='ERROR', emboss=False)
                 op.layer_id = item.id
+            if ps_ctx.ps_settings.show_opacity_in_layer_list:
+                row.label(text=f"{linked_item.opacity:.1f}")
             row.prop(linked_item, "enabled", text="",
                      icon="HIDE_OFF" if linked_item.enabled else "HIDE_ON", emboss=False)
             self.draw_custom_properties(row, linked_item)

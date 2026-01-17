@@ -26,6 +26,12 @@ class PaintSystemPreferences(AddonPreferences):
         description="Show more color picker settings",
         default=True
     )
+    
+    show_opacity_in_layer_list: BoolProperty(
+        name="Show Opacity in Layer List",
+        description="Show the opacity in the layer list",
+        default=True
+    )
 
     use_compact_design: BoolProperty(
         name="Use Compact Design",
@@ -169,6 +175,7 @@ class PaintSystemPreferences(AddonPreferences):
 
         layout.prop(self, "show_tooltips", text="Show Tooltips")
         layout.prop(self, "use_compact_design", text="Use Compact Design")
+        layout.prop(self, "show_opacity_in_layer_list", text="Show Opacity in Layer List")
         layout.prop(self, "use_legacy_ui", text="Use Legacy UI")
         # layout.prop(self, "name_layers_group",
         #             text="Name Layers According to Group Name")
