@@ -1002,7 +1002,6 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     box = transform_panel.box()
                     ps_ctx = self.parse_context(context)
                     active_layer = ps_ctx.active_layer
-                    panel.enabled = not active_layer.lock_layer
                     box = panel.box()
                     col = box.column()
                     if active_layer.type == 'IMAGE':
