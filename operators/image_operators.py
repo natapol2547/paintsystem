@@ -196,7 +196,9 @@ if PIL_AVAILABLE:
             if image_tiles is None:
                 return {'CANCELLED'}
             blurred_tiles = gaussian_blur(image_tiles, self.gaussian_sigma)
+            image = image.copy()
             set_image_pixels(image, blurred_tiles)
+            ps_ctx.active_layer.image = image
             return {'FINISHED'}
         
         def invoke(self, context, event):
@@ -224,7 +226,9 @@ if PIL_AVAILABLE:
             if image_tiles is None:
                 return {'CANCELLED'}
             sharpened_tiles = sharpen_image(image_tiles, self.sharpen_amount)
+            image = image.copy()
             set_image_pixels(image, sharpened_tiles)
+            ps_ctx.active_layer.image = image
             return {'FINISHED'}
         
         def invoke(self, context, event):
@@ -339,6 +343,7 @@ if PIL_AVAILABLE:
                     wm.progress_begin(0, total_brush)
                 wm.progress_update(brush_applied)
             
+            image = image.copy()
             new_image = painter.apply_brush_painting(image, brush_folder_path=brush_folder_path, brush_texture_path=brush_texture_path, custom_image_gradient=custom_image_gradient, brush_callback=callback)
             
             wm.progress_end()
