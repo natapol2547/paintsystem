@@ -45,6 +45,17 @@ def get_material_output(mat_node_tree: NodeTree) -> Node:
     return node
 
 def transfer_connection(node_tree: NodeTree, source_socket: NodeSocket, target_socket: NodeSocket):
+    """Transfer the connection from the source socket to the target socket
+
+    Args:
+        node_tree (NodeTree): The node tree to transfer the connection to
+        source_socket (NodeSocket): The source socket to transfer the connection from
+        target_socket (NodeSocket): The target socket to transfer the connection to
+
+    Returns:
+        bool: True if the connection was transferred, False otherwise
+    """
+    # If the source socket is linked, transfer the connection to the target socket
     if source_socket.is_linked:
         original_socket = source_socket.links[0].from_socket
         node_tree.links.new(original_socket, target_socket)
@@ -55,8 +66,7 @@ def transfer_connection(node_tree: NodeTree, source_socket: NodeSocket, target_s
             target_socket.default_value = source_socket.default_value
         except Exception as e:
             print(f"Failed to transfer connection from {source_socket.name} ({source_socket.type}) to {target_socket.name} ({target_socket.type}): {e}")
-            return False
-        return True
+        return False
 
 def find_nodes(node_tree: NodeTree, properties: dict) -> list[Node]:
     node = get_material_output(node_tree)

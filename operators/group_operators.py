@@ -252,25 +252,17 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
                     connect_sockets(mix_shader.outputs[0], mat_output.inputs[0])
                         
             case 'NORMAL':
-                channel = new_group.create_channel(context, channel_name='Normal', channel_type='VECTOR', use_alpha=False, normalize_input=True, color_space='NONCOLOR')
-                if self.add_layers:
-                    channel.create_layer(context, layer_name='Object Normal', layer_type='GEOMETRY', geometry_type='OBJECT_NORMAL', normalize_normal=True)
-                    channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
                 right_most_node = get_right_most_node(mat_node_tree)
                 node_group = mat_node_tree.nodes.new(type='ShaderNodeGroup')
                 node_group.node_tree = node_tree
                 node_group.location = right_most_node.location + Vector((200, 0))
-                normal_map_node = mat_node_tree.nodes.new(type='ShaderNodeNormalMap')
-                normal_map_node.location = node_group.location + Vector((200, 0))
-                normal_map_node.space = 'OBJECT'
                 diffuse_node = mat_node_tree.nodes.new(type='ShaderNodeBsdfDiffuse')
-                diffuse_node.location = normal_map_node.location + Vector((200, 0))
+                diffuse_node.location = node_group.location + Vector((200, 0))
                 mat_output = mat_node_tree.nodes.new(type='ShaderNodeOutputMaterial')
                 mat_output.location = diffuse_node.location + Vector((200, 0))
                 mat_output.is_active_output = True
-                connect_sockets(node_group.outputs['Normal'], normal_map_node.inputs[1])
-                connect_sockets(normal_map_node.outputs[0], diffuse_node.inputs['Normal'])
                 connect_sockets(diffuse_node.outputs[0], mat_output.inputs[0])
+                new_group.create_channel_template(context, "NORMAL", add_layers=self.add_layers)
             case _:
                 channel = new_group.create_channel(context, channel_name='Color', channel_type='COLOR', use_alpha=True)
                 if self.add_layers:
@@ -346,7 +338,21 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
                 panel.prop(self, "set_view_transform",
                         text="Use Standard View Transform")
 
-
+def find_basic_setup_nodes(group_node: Node) -> list[Node]:
+    nodes = [group_node]
+    shader_to_rgb = find_connected_node(group_node, {'bl_idname': 'ShaderNodeShaderToRGB'})
+    if shader_to_rgb:
+        nodes.append(shader_to_rgb)
+    mix_shader = find_connected_node(group_node, {'bl_idname': 'ShaderNodeMixShader'})
+    if mix_shader:
+        nodes.append(mix_shader)
+        transparent_node = find_connected_node(mix_shader, {'bl_idname': 'ShaderNodeBsdfTransparent'})
+        if transparent_node:
+            nodes.append(transparent_node)
+        mat_output = find_connected_node(mix_shader, {'bl_idname': 'ShaderNodeOutputMaterial'})
+        if mat_output:
+            nodes.append(mat_output)
+    return nodes
 class PAINTSYSTEM_OT_DeleteGroup(PSContextMixin, Operator):
     """Delete the selected group in the Paint System"""
     bl_idname = "paint_system.delete_group"
@@ -372,31 +378,20 @@ class PAINTSYSTEM_OT_DeleteGroup(PSContextMixin, Operator):
         node_tree = ps_ctx.active_material.node_tree
         if self.bake_channels:
             pass
-        match active_group.template:
-            case 'BASIC':
-                for group_node in find_nodes(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree}):
-                    nodes = [group_node]
-                    shader_to_rgb = find_connected_node(group_node, {'bl_idname': 'ShaderNodeShaderToRGB'})
-                    if shader_to_rgb:
-                        nodes.append(shader_to_rgb)
-                    mix_shader = find_connected_node(group_node, {'bl_idname': 'ShaderNodeMixShader'})
-                    if mix_shader:
-                        nodes.append(mix_shader)
-                        transparent_node = find_connected_node(mix_shader, {'bl_idname': 'ShaderNodeBsdfTransparent'})
-                        if transparent_node:
-                            nodes.append(transparent_node)
-                        mat_output = find_connected_node(mix_shader, {'bl_idname': 'ShaderNodeOutputMaterial'})
-                        if mat_output:
-                            nodes.append(mat_output)
+        for group_node in find_nodes(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree}):
+            match active_group.template:
+                case 'BASIC':
+                    nodes = find_basic_setup_nodes(group_node)
                     dissolve_nodes(node_tree, nodes)
-            case 'PBR':
-                for group_node in find_nodes(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree}):
+                case 'PBR':
                     nodes = [group_node]
-                    dissolve_nodes(active_group.node_tree, nodes)
-            case 'PAINT_OVER':
-                dissolve_nodes(active_group.node_tree, active_group.node_tree.nodes)
-            case 'NORMAL':
-                dissolve_nodes(active_group.node_tree, active_group.node_tree.nodes)
+                    dissolve_nodes(node_tree, nodes)
+                case 'PAINT_OVER':
+                    nodes = find_basic_setup_nodes(group_node)
+                    dissolve_nodes(node_tree, nodes)
+                case 'NORMAL':
+                    nodes = [group_node]
+                    dissolve_nodes(node_tree, nodes)
         lm = ListManager(ps_mat_data, 'groups', ps_mat_data, 'active_index')
         lm.remove_active_item()
         redraw_panel(context)
