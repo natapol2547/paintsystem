@@ -64,7 +64,7 @@ def draw_input_sockets(layout, context: Context, only_output: bool = False):
         row.label(icon="BLANK1")
         draw_socket_grid(row, active_layer, include_inputs=not only_output)
 class MAT_PT_UL_LayerList(PSContextMixin, UIList):
-    def draw_item(self, context: Context, layout, data, item, icon, active_data, active_property, index):
+    def draw_item(self, context: Context, layout: bpy.types.UILayout, data, item, icon, active_data, active_property, index):
         ps_ctx = self.parse_context(context)
         linked_item = item.get_layer_data()
         if not linked_item:
