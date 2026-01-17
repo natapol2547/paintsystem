@@ -2537,13 +2537,16 @@ class Group(PropertyGroup):
                         connect_sockets(node_group.outputs['Roughness'], roughness_socket)
                 return channel
             case "NORMAL":
+                socket_transferred = False
                 channel = self.create_channel(context, channel_name='Normal', channel_type='VECTOR', use_alpha=False, normalize_input=True, color_space='NONCOLOR', default_value='NORMAL', use_space_transform=True)
                 if node_group and to_node:
                     normal_socket = find_socket_on_node(to_node, 'Normal')
                     if normal_socket:
-                        transfer_connection(mat_node_tree, to_node.inputs['Normal'], node_group.inputs['Normal'])
+                        socket_transferred = transfer_connection(mat_node_tree, to_node.inputs['Normal'], node_group.inputs['Normal'])
                         connect_sockets(node_group.outputs['Normal'], normal_socket)
                 if add_layers:
+                    if not socket_transferred:
+                        channel.create_layer(context, layer_name='Normal', layer_type='GEOMETRY', geometry_type='OBJECT_NORMAL', normalize_normal=True)
                     channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
             case _:
                 raise ValueError(f"Invalid template: {template}")
