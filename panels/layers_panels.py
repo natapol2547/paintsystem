@@ -257,7 +257,6 @@ def draw_painting_may_not_work(layout: bpy.types.UILayout, context: bpy.types.Co
         return
     if active_layer.type == 'IMAGE' and active_layer.coord_type not in ['UV', 'AUTO'] and not is_editor_open(context, 'IMAGE_EDITOR'):
         info_box = layout.box()
-        info_box.alert = True
         info_col = info_box.column(align=True)
         info_col.label(text="Painting in 3D may not work")
         info_col.operator("paint_system.split_image_editor", text="Open Blender Image Editor", icon="BLENDER")
