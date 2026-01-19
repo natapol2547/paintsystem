@@ -468,7 +468,7 @@ class PAINTSYSTEM_OT_SplitImageEditor(PSContextMixin, Operator):
             space.show_region_ui = False
             space.image = image
             space.ui_mode = 'PAINT'
-            space.overlay.show_overlays = False
+            space.overlay.show_overlays = active_layer.coord_type in {'AUTO', 'UV'}
             
             execute_operator_in_area(new_area, 'image.view_all', fit_view=True)
 
