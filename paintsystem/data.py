@@ -1073,7 +1073,7 @@ class Layer(BaseNestedListItem):
             if custom_node_tree:
                 outputs = get_nodetree_socket_enum(custom_node_tree, in_out='OUTPUT', include_none=False)
         elif self.source_node:
-            outputs = get_node_socket_enum(self.source_node, in_out='OUTPUT', favor_socket_name='Color', include_none=False)
+            outputs = get_node_socket_enum(self.source_node, in_out='OUTPUT', favor_socket_name='Color', include_none=False, none_at_start=False)
         else:
             outputs = [('_NONE_', 'None', '', 'BLANK1', 0)]
         return outputs
@@ -1084,7 +1084,7 @@ class Layer(BaseNestedListItem):
             if custom_node_tree:
                 outputs = get_nodetree_socket_enum(custom_node_tree, in_out='OUTPUT', include_none=True)
         elif self.source_node:
-            outputs = get_node_socket_enum(self.source_node, in_out='OUTPUT', favor_socket_name='Alpha', include_none=True)
+            outputs = get_node_socket_enum(self.source_node, in_out='OUTPUT', favor_socket_name='Alpha', include_none=True, none_at_start=False)
         else:
             outputs = [('_NONE_', 'None', '', 'BLANK1', 0)]
         return outputs
