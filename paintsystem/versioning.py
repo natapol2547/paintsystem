@@ -35,8 +35,9 @@ def migrate_global_layer_data(layer_parent_map: dict[Layer, LayerParent]):
                 has_migrated_global_layer = True
                 layer.layer_name = layer.name
                 layer.uid = global_layer.name
+                layer.name = global_layer.layer_name
                 if global_layer.name not in seen_global_layers_map:
-                    seen_global_layers_map[global_layer.name] = [mat, global_layer]
+                    seen_global_layers_map[global_layer.name] = [layer_parent["mat"], global_layer]
                     for prop in global_layer.bl_rna.properties:
                         pid = getattr(prop, 'identifier', '')
                         if not pid or getattr(prop, 'is_readonly', False):
@@ -55,7 +56,7 @@ def migrate_global_layer_data(layer_parent_map: dict[Layer, LayerParent]):
                 layer.auto_update_node_tree = True
                 layer.update_node_tree(bpy.context)
         if has_migrated_global_layer:
-            layer_parent.channel.update_node_tree(bpy.context)
+            layer_parent["channel"].update_node_tree(bpy.context)
 
 def migrate_blend_mode(layer_parent_map: dict[Layer, LayerParent]):
     for layer, layer_parent in layer_parent_map.items():
@@ -120,6 +121,9 @@ def update_layer_name(layer_parent_map: dict[Layer, LayerParent]):
             layer.name = layer.layer_name
 
 def update_library_nodetree_version():
+    print(bpy.path.basename(bpy.context.blend_data.filepath))
+    if bpy.path.basename(bpy.context.blend_data.filepath) == "library2.blend":
+        return
     ps_nodetrees = []
     for node_tree in bpy.data.node_groups:
         if node_tree.name.startswith(".PS"):
