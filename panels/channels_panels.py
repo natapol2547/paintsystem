@@ -78,7 +78,7 @@ def draw_channels_list(context, layout):
         "channels", 
         ps_ctx.active_group,
         "active_index",
-        rows=max(len(ps_ctx.active_group.channels), 3),
+        rows=max(len(ps_ctx.active_group.channels), 4),
     )
     col = row.column(align=True)
     available_templates = [template for template in CHANNEL_TEMPLATE_ENUM if not any(channel.name == template[1] for channel in ps_ctx.active_group.channels)]
@@ -89,6 +89,7 @@ def draw_channels_list(context, layout):
     col.operator("paint_system.delete_channel", icon='REMOVE', text="")
     col.operator("paint_system.move_channel_up", icon='TRIA_UP', text="")
     col.operator("paint_system.move_channel_down", icon='TRIA_DOWN', text="")
+
 class MAT_PT_ChannelsSelect(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_ChannelsSelect'
     bl_space_type = "VIEW_3D"
@@ -102,21 +103,7 @@ class MAT_PT_ChannelsSelect(PSContextMixin, Panel):
         ps_ctx = self.parse_context(context)
         col = layout.column(align=True)
         col.label(text="Channels")
-        row = col.row()
-        row.template_list(
-            "PAINTSYSTEM_UL_channels", 
-            "",
-            ps_ctx.active_group,
-            "channels", 
-            ps_ctx.active_group,
-            "active_index",
-            rows=max(len(ps_ctx.active_group.channels), 4),
-        )
-        col = row.column(align=True)
-        col.operator("paint_system.add_channel", icon='ADD', text="")
-        col.operator("paint_system.delete_channel", icon='REMOVE', text="")
-        col.operator("paint_system.move_channel_up", icon='TRIA_UP', text="")
-        col.operator("paint_system.move_channel_down", icon='TRIA_DOWN', text="")
+        draw_channels_list(context, col)
 
 def poll_channels_panel(context: Context):
     ps_ctx = PSContextMixin.parse_context(context)
