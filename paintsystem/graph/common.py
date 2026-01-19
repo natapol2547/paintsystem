@@ -16,6 +16,7 @@ DEFAULT_PS_UV_MAP_NAME = "PS_UVMap"
 
 LIBRARY_NODE_TREE_VERSIONS = {
     ".PS Projection": 1,
+    ".PS Tangent Normal": 1,
 }
 
 def get_layer_blend_type(layer: Layer) -> str:
