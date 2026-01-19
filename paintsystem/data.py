@@ -1438,9 +1438,9 @@ class Layer(BaseNestedListItem):
         # If no layer below
         if not below_layer or active_channel.get_parent_layer_id(below_layer, ignore_passthrough=True) != active_channel.get_parent_layer_id(self, ignore_passthrough=True):
             if blend_mode != 'MIX':
-                warnings.append("Blend mode is not MIX. Please move the layer or use folder passthrough blend mode")
+                warnings.append("Blend mode is not MIX. Use Folder with Passthrough blend mode or move the layer")
             if layer_data.type == "ADJUSTMENT":
-                warnings.append("Adjustment disabled. Please move the layer or use folder passthrough blend mode")
+                warnings.append("Adjustment disabled. Use Folder with Passthrough blend mode or move the layer")
             
         return warnings
     
