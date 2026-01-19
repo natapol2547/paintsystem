@@ -117,6 +117,9 @@ def update_layer_name(layer_parent_map: dict[Layer, LayerParent]):
             layer.name = layer.layer_name
 
 def update_library_nodetree_version():
+    print(bpy.path.basename(bpy.context.blend_data.filepath))
+    if bpy.path.basename(bpy.context.blend_data.filepath) == "library2.blend":
+        return
     ps_nodetrees = []
     for node_tree in bpy.data.node_groups:
         if node_tree.name.startswith(".PS"):
