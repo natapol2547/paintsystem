@@ -199,17 +199,24 @@ class MAT_PT_ChannelsSettings(PSContextMixin, Panel):
             box = col.box()
             box.use_property_split = False
             header, panel = box.panel("vector_space_settings_panel", default_closed=True)
-            header.prop(active_channel, "use_space_transform", text="Use Space Transform")
+            header.label(text="Vector Transform")
             if panel:
-                panel.use_property_split = True
-                panel.enabled = active_channel.use_space_transform
-                panel.prop(active_channel, "vector_type", text="Vector Type", expand=True)
-                panel.prop(active_channel, "input_vector_space", text="Input Space")
                 row = panel.row(align=True)
+                row.prop(active_channel, "use_space_transform_input", text="Transform Input", toggle=1)
+                row.prop(active_channel, "use_space_transform_output", text="Transform Output", toggle=1)
+                panel.use_property_split = True
+                panel.prop(active_channel, "vector_type", text="Vector Type", expand=True)
+                row = panel.row(align=True)
+                row.enabled = active_channel.use_space_transform_input
+                row.prop(active_channel, "input_vector_space", text="Input Space")
+                row = panel.row(align=True)
+                row.enabled = active_channel.use_space_transform_output or active_channel.use_space_transform_input
                 row.prop(active_channel, "vector_space", text="Painting Space")
                 if active_channel.vector_space != "TANGENT":
                     row.prop(active_channel, "normalize_input", text="", icon="NORMALS_VERTEX_FACE")
-                panel.prop(active_channel, "output_vector_space", text="Output Space")
+                row = panel.row(align=True)
+                row.enabled = active_channel.use_space_transform_output
+                row.prop(active_channel, "output_vector_space", text="Output Space")
                 if active_channel.vector_space == "TANGENT" or active_channel.output_vector_space == "TANGENT":
                     panel.prop_search(active_channel, "tangent_uv_map", ps_ctx.ps_object.data, "uv_layers", text="Tangent UV", icon='GROUP_UVS')
         if active_channel.type == "FLOAT":

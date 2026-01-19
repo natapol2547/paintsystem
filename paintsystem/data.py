@@ -1650,6 +1650,8 @@ def ps_bake(context, objects: list[Object], mat: Material, uv_layer, bake_image,
     cycles_settings = save_cycles_settings()
     # Switch to Cycles if needed
     
+    orig_view_transform = str(context.scene.view_settings.view_transform)
+    
     node_tree = mat.node_tree
     
     image_node = node_tree.nodes.new(type='ShaderNodeTexImage')
@@ -1684,11 +1686,13 @@ def ps_bake(context, objects: list[Object], mat: Material, uv_layer, bake_image,
     # Delete bake nodes
     node_tree.nodes.remove(image_node)
     
+    context.scene.view_settings.view_transform = orig_view_transform
+    
     restore_cycles_settings(cycles_settings)
 
     return bake_image
 
-def vector_transform_output(node_builder: NodeTreeBuilder, color_name: str, color_socket: str, convert_from: str, convert_to: str, normalize_input: bool, normalize_output: bool, vector_type: str, tangent_uv: str= "UVMap"):
+def vector_transform(node_builder: NodeTreeBuilder, color_name: str, color_socket: str, convert_from: str, convert_to: str, normalize_input: bool, normalize_output: bool, vector_type: str, tangent_uv: str= "UVMap"):
     """Transform the vector output of the channel to the output vector space.
 
     Args:
@@ -1820,8 +1824,8 @@ class Channel(BaseNestedListManager):
         previous_dict[-1] = PreviousLayer(color_name="group_output", color_socket="Color", alpha_name="alpha_clamp_end", alpha_socket="Value")
         
         previous_data = previous_dict.get(-1)
-        if self.type == "VECTOR" and not self.disable_output_transform:
-            color_name, color_socket = vector_transform_output(
+        if self.type == "VECTOR" and self.use_space_transform_output and not self.disable_output_transform:
+            color_name, color_socket = vector_transform(
                 node_builder,
                 previous_data.color_name,
                 previous_data.color_socket,
@@ -1923,8 +1927,8 @@ class Channel(BaseNestedListManager):
                 if previous_data.clip_mode and not layer.is_clip:
                     previous_data.clip_mode = False
         prev_layer = previous_dict[-1]
-        if self.type == "VECTOR":
-            color_name, color_socket = vector_transform_output(
+        if self.type == "VECTOR" and self.use_space_transform_input:
+            color_name, color_socket = vector_transform(
                 node_builder,
                 prev_layer.color_name,
                 prev_layer.color_socket,
@@ -2204,8 +2208,13 @@ class Channel(BaseNestedListManager):
                 self.disable_output_transform = orig_disable_output_transform
         except Exception as e:
             print(f"Error baking channel: {e}")
-            self.disable_output_transform = orig_disable_output_transform
-            self.use_alpha = orig_use_alpha
+            try:
+                self.use_alpha = orig_use_alpha
+                self.tangent_uv_map = orig_tangent_uv_map
+                self.output_vector_space = orig_output_vector_space
+                self.disable_output_transform = orig_disable_output_transform
+            except Exception as e:
+                print(f"Error restoring channel settings: {e}")
         
     @property
     def item_type(self):
@@ -2290,10 +2299,16 @@ class Channel(BaseNestedListManager):
         default=False,
         update=update_node_tree
     )
-    use_space_transform: BoolProperty(
-        name="Use Space Transform",
+    use_space_transform_input: BoolProperty(
+        name="Use Space Transform Input",
         description="Use space transform for the channel",
         default=True,
+        update=update_node_tree
+    )
+    use_space_transform_output: BoolProperty(
+        name="Use Space Transform Output",
+        description="Use space transform for the channel",
+        default=False,
         update=update_node_tree
     )
     def update_default_value(self, context):
@@ -2319,13 +2334,13 @@ class Channel(BaseNestedListManager):
         ],
         name="Vector Type",
         description="Type of the vector",
-        default='NORMAL',
+        default='VECTOR',
         update=update_node_tree
     )
     input_vector_space: EnumProperty(
         items=[
-            ('WORLD', "World Space", "World Space", "WORLD", 0),
-            ('OBJECT', "Object Space", "Object Space", "OBJECT_DATA", 1),
+            ('WORLD', "World", "World Space", "WORLD", 0),
+            ('OBJECT', "Object", "Object Space", "OBJECT_DATA", 1),
         ],
         name="Input Vector Space",
         description="Space of the input",
@@ -2334,9 +2349,9 @@ class Channel(BaseNestedListManager):
     )
     vector_space: EnumProperty(
         items=[
-            ('WORLD', "World Space", "World Space", "WORLD", 0),
-            ('OBJECT', "Object Space", "Object Space", "OBJECT_DATA", 1),
-            ('TANGENT', "Tangent Space", "Tangent Space", "MESH_DATA", 2)
+            ('WORLD', "World", "World Space", "WORLD", 0),
+            ('OBJECT', "Object", "Object Space", "OBJECT_DATA", 1),
+            ('TANGENT', "Tangent", "Tangent Space", "MESH_DATA", 2)
         ],
         name="Vector Space",
         description="Space used when painting",
@@ -2345,9 +2360,9 @@ class Channel(BaseNestedListManager):
     )
     output_vector_space: EnumProperty(
         items=[
-            ('WORLD', "World Space", "World Space", "WORLD", 0),
-            ('OBJECT', "Object Space", "Object Space", "OBJECT_DATA", 1),
-            ('TANGENT', "Tangent Space", "Tangent Space", "MESH_DATA", 2)
+            ('WORLD', "World", "World Space", "WORLD", 0),
+            ('OBJECT', "Object", "Object Space", "OBJECT_DATA", 1),
+            ('TANGENT', "Tangent", "Tangent Space", "MESH_DATA", 2)
         ],
         name="Output Vector Space",
         description="Space of the output vector",
@@ -2647,7 +2662,7 @@ class Group(PropertyGroup):
                 return channel
             case "NORMAL":
                 socket_transferred = False
-                channel = self.create_channel(context, channel_name='Normal', channel_type='VECTOR', use_alpha=False, normalize_input=True, color_space='NONCOLOR', default_value='NORMAL', use_space_transform=True)
+                channel = self.create_channel(context, channel_name='Normal', channel_type='VECTOR', use_alpha=False, normalize_input=True, color_space='NONCOLOR', default_value='NORMAL', use_space_transform_input=True, use_space_transform_output=True)
                 if node_group and to_node:
                     normal_socket = find_socket_on_node(to_node, 'Normal')
                     if normal_socket:
