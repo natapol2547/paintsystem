@@ -1941,8 +1941,10 @@ class Channel(BaseNestedListManager):
         
         previous_data = previous_dict.get(-1)
         if self.type == "VECTOR" and not self.disable_output_transform:
-            if self.output_vector_space != "NONE" and self.use_space_transform:
-                node_builder.add_node("vector_transform_output", "ShaderNodeVectorTransform", {"vector_type": self.vector_type, "convert_from": 'WORLD' if self.normalize_input else self.vector_space, "convert_to": self.output_vector_space}, force_properties=True)
+            convert_from = 'WORLD' if self.normalize_input else self.vector_space
+            convert_to = self.output_vector_space
+            if self.output_vector_space != "NONE" and self.use_space_transform and convert_from != convert_to:
+                node_builder.add_node("vector_transform_output", "ShaderNodeVectorTransform", {"vector_type": self.vector_type, "convert_from": convert_from, "convert_to": convert_to}, force_properties=True)
                 node_builder.link("vector_transform_output", previous_data.color_name, "Vector", previous_data.color_socket)
                 previous_data.color_name = "vector_transform_output"
                 previous_data.color_socket = "Vector"
@@ -2046,7 +2048,7 @@ class Channel(BaseNestedListManager):
                 node_builder.link("normalize", prev_layer.color_name, "Vector", prev_layer.color_socket)
                 prev_layer.color_name = "normalize"
                 prev_layer.color_socket = "Vector"
-            if self.use_space_transform:
+            if self.use_space_transform and self.vector_space != self.input_vector_space:
                 node_builder.add_node("vector_transform", "ShaderNodeVectorTransform", {"vector_type": self.vector_type, "convert_to": self.vector_space, "convert_from": self.input_vector_space}, force_properties=True)
                 node_builder.link("vector_transform", prev_layer.color_name, "Vector", prev_layer.color_socket)
                 prev_layer.color_name = "vector_transform"
@@ -2458,6 +2460,7 @@ class Channel(BaseNestedListManager):
         items=[
             ('WORLD', "World Space", "World Space", "WORLD", 0),
             ('OBJECT', "Object Space", "Object Space", "OBJECT_DATA", 1),
+            ('TANGENT', "Tangent Space", "Tangent Space", "MESH_DATA", 2)
         ],
         name="Vector Space",
         description="Space used when painting",
@@ -2467,8 +2470,7 @@ class Channel(BaseNestedListManager):
     output_vector_space: EnumProperty(
         items=[
             ('WORLD', "World Space", "World Space", "WORLD", 0),
-            ('OBJECT', "Object Space", "Object Space", "OBJECT_DATA", 1),
-            ('TANGENT', "Tangent Space", "Tangent Space", "MESH_DATA", 2)
+            ('OBJECT', "Object Space", "Object Space", "OBJECT_DATA", 1)
         ],
         name="Output Vector Space",
         description="Space of the output vector",
