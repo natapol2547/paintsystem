@@ -1816,6 +1816,19 @@ class Channel(BaseNestedListManager):
             clip_color_socket: Optional[str] = None
             clip_alpha_socket: Optional[str] = None
             passthrough_id: Optional[int] = None
+        
+        def connect_passthrough(node_builder: NodeTreeBuilder, layer_identifier: str, previous_data: PreviousLayer):
+            if previous_data.passthrough_id:
+                passthrough_data = previous_dict.get(previous_data.passthrough_id, None)
+                if passthrough_data:
+                    node_builder.link(layer_identifier,
+                                    passthrough_data.color_name,
+                                    "Color",
+                                    passthrough_data.color_socket)
+                    node_builder.link(layer_identifier,
+                                    passthrough_data.alpha_name,
+                                    "Alpha", passthrough_data.alpha_socket)
+                    previous_data.passthrough_id = None
             
         previous_dict: Dict[int, PreviousLayer] = {}
         
@@ -1874,6 +1887,7 @@ class Channel(BaseNestedListManager):
                     node_builder.add_node(clip_nt_identifier, "ShaderNodeGroup", {"node_tree": clip_nt}, {"Color": (0, 0, 0, 1), "Alpha": 0}, force_default_values=True)
                     node_builder.link(clip_nt_identifier, previous_data.color_name, "Color", previous_data.color_socket)
                     node_builder.link(clip_nt_identifier, previous_data.alpha_name, "Alpha", previous_data.alpha_socket)
+                    connect_passthrough(node_builder, clip_nt_identifier, previous_data)
                     previous_data.color_name = clip_nt_identifier
                     previous_data.color_socket = "Color"
                     previous_data.alpha_name = clip_nt_identifier
@@ -1894,17 +1908,7 @@ class Channel(BaseNestedListManager):
                                 target_alpha,
                                 "Alpha",
                                 target_alpha_socket)
-                if previous_data.passthrough_id:
-                    passthrough_data = previous_dict.get(previous_data.passthrough_id, None)
-                    if passthrough_data:
-                        node_builder.link(layer_identifier,
-                                        passthrough_data.color_name,
-                                        "Color",
-                                        passthrough_data.color_socket)
-                        node_builder.link(layer_identifier,
-                                        passthrough_data.alpha_name,
-                                        "Alpha", passthrough_data.alpha_socket)
-                        previous_data.passthrough_id = None
+                connect_passthrough(node_builder, layer_identifier, previous_data)
                 if layer.blend_mode == "PASSTHROUGH":
                     previous_data.passthrough_id = unlinked_layer.id
                 if previous_data.clip_mode:
