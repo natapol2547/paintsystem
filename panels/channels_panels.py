@@ -207,8 +207,11 @@ class MAT_PT_ChannelsSettings(PSContextMixin, Panel):
                 panel.prop(active_channel, "input_vector_space", text="Input Space")
                 row = panel.row(align=True)
                 row.prop(active_channel, "vector_space", text="Painting Space")
-                row.prop(active_channel, "normalize_input", text="", icon="NORMALS_VERTEX_FACE")
+                if active_channel.vector_space != "TANGENT":
+                    row.prop(active_channel, "normalize_input", text="", icon="NORMALS_VERTEX_FACE")
                 panel.prop(active_channel, "output_vector_space", text="Output Space")
+                if active_channel.vector_space == "TANGENT" or active_channel.output_vector_space == "TANGENT":
+                    panel.prop_search(active_channel, "tangent_uv_map", ps_ctx.ps_object.data, "uv_layers", text="Tangent UV", icon='GROUP_UVS')
         if active_channel.type == "FLOAT":
             float_box = col.box()
             col = float_box.column()
