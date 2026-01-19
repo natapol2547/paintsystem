@@ -68,6 +68,28 @@ class PAINTSYSTEM_UL_channels(PSContextMixin, UIList):
     #     flt_neworder = list(range(len(channels)))
     #     return flt_flags, flt_neworder
 
+def draw_channels_list(context, layout):
+    ps_ctx = PSContextMixin.parse_context(context)
+    row = layout.row()
+    row.template_list(
+        "PAINTSYSTEM_UL_channels", 
+        "",
+        ps_ctx.active_group,
+        "channels", 
+        ps_ctx.active_group,
+        "active_index",
+        rows=max(len(ps_ctx.active_group.channels), 4),
+    )
+    col = row.column(align=True)
+    available_templates = [template for template in CHANNEL_TEMPLATE_ENUM if not any(channel.name == template[1] for channel in ps_ctx.active_group.channels)]
+    if available_templates:
+        col.operator("wm.call_menu", icon='ADD', text="").name = "MAT_MT_AddChannelMenu"
+    else:
+        col.operator("paint_system.add_channel", icon='ADD', text="").template = "CUSTOM"
+    col.operator("paint_system.delete_channel", icon='REMOVE', text="")
+    col.operator("paint_system.move_channel_up", icon='TRIA_UP', text="")
+    col.operator("paint_system.move_channel_down", icon='TRIA_DOWN', text="")
+
 class MAT_PT_ChannelsSelect(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_ChannelsSelect'
     bl_space_type = "VIEW_3D"
@@ -81,21 +103,7 @@ class MAT_PT_ChannelsSelect(PSContextMixin, Panel):
         ps_ctx = self.parse_context(context)
         col = layout.column(align=True)
         col.label(text="Channels")
-        row = col.row()
-        row.template_list(
-            "PAINTSYSTEM_UL_channels", 
-            "",
-            ps_ctx.active_group,
-            "channels", 
-            ps_ctx.active_group,
-            "active_index",
-            rows=max(len(ps_ctx.active_group.channels), 4),
-        )
-        col = row.column(align=True)
-        col.operator("paint_system.add_channel", icon='ADD', text="")
-        col.operator("paint_system.delete_channel", icon='REMOVE', text="")
-        col.operator("paint_system.move_channel_up", icon='TRIA_UP', text="")
-        col.operator("paint_system.move_channel_down", icon='TRIA_DOWN', text="")
+        draw_channels_list(context, col)
 
 class MAT_PT_ChannelsPanel(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_ChannelsPanel'
@@ -132,26 +140,7 @@ class MAT_PT_ChannelsPanel(PSContextMixin, Panel):
         ps_ctx = self.parse_context(context)
         if ps_ctx.ps_settings.use_legacy_ui:
             layout.menu("MAT_MT_PaintSystemChannelsMergeAndExport", icon="TEXTURE_DATA", text="Bake and Export")
-        row = layout.row()
-        row.template_list(
-            "PAINTSYSTEM_UL_channels", 
-            "",
-            ps_ctx.active_group,
-            "channels", 
-            ps_ctx.active_group,
-            "active_index",
-            rows=max(len(ps_ctx.active_group.channels), 4),
-        )
-        col = row.column(align=True)
-        
-        available_templates = [template for template in CHANNEL_TEMPLATE_ENUM if not any(channel.name == template[1] for channel in ps_ctx.active_group.channels)]
-        if available_templates:
-            col.operator("wm.call_menu", icon='ADD', text="").name = "MAT_MT_AddChannelMenu"
-        else:
-            col.operator("paint_system.add_channel", icon='ADD', text="").template = "CUSTOM"
-        col.operator("paint_system.delete_channel", icon='REMOVE', text="")
-        col.operator("paint_system.move_channel_up", icon='TRIA_UP', text="")
-        col.operator("paint_system.move_channel_down", icon='TRIA_DOWN', text="")
+        draw_channels_list(context, layout)
 
 
 class MAT_PT_ChannelsSettings(PSContextMixin, Panel):
