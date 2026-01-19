@@ -566,6 +566,9 @@ def ensure_paint_system_uv_map(context: bpy.types.Context):
     # Get the active object
     ps_object = parse_context(context).ps_object
     
+    if not ps_object:
+        return
+    
     if ps_object.data.uv_layers.get(DEFAULT_PS_UV_MAP_NAME):
         return
 
