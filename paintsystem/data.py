@@ -1688,6 +1688,88 @@ def ps_bake(context, objects: list[Object], mat: Material, uv_layer, bake_image,
 
     return bake_image
 
+def vector_transform_output(node_builder: NodeTreeBuilder, color_name: str, color_socket: str, convert_from: str, convert_to: str, normalize_input: bool, normalize_output: bool, vector_type: str, tangent_uv: str= "UVMap"):
+    """Transform the vector output of the channel to the output vector space.
+
+    Args:
+        node_builder (NodeTreeBuilder): The node tree builder to add the nodes to.
+        color_name (str): The name of the color socket to transform.
+        color_socket (str): The socket of the color socket to transform.
+        convert_from (str): The input vector space. Can be "WORLD", "OBJECT", "TANGENT".
+        convert_to (str): The output vector space. Can be "WORLD", "OBJECT", "TANGENT".
+        normalize_input (bool): Whether to normalize the input vector.
+        normalize_output (bool): Whether to normalize the output vector.
+        vector_type (str): The type of the vector. Can be "POINT", "VECTOR", "NORMAL".
+        tangent_uv (str): The UV map to use for the tangent space.
+
+    Returns:
+        tuple[str, str]: The name and socket of the transformed vector.
+    """
+    output_name = None
+    output_socket = None
+    new_color_name = None
+    new_color_socket = None
+    is_output_tangent = convert_to == "TANGENT"
+    if convert_from == "TANGENT":
+        # Tangent space is already normalized
+        normalize_input = True
+    if is_output_tangent:
+        # Do not need to normalize output as the conversion from tangent space to tangent space is already normalized
+        normalize_output = True
+        # need to set convert_to to WORLD first before conversion
+        convert_to = "WORLD"
+    if normalize_input:
+        normal_map_name = node_builder.get_unique_identifier("normal_map")
+        node_builder.add_node(normal_map_name, "ShaderNodeNormalMap", {"space": convert_from, 'uv_map': tangent_uv}, force_properties=True)
+        if not output_name and not output_socket:
+            new_color_name = normal_map_name
+            new_color_socket = "Color"
+        else:
+            node_builder.link(output_name, normal_map_name, output_socket, "Normal")
+        output_name = normal_map_name
+        output_socket = "Normal"
+        convert_from = "WORLD"
+    if convert_from != convert_to:
+        vector_transform_name = node_builder.get_unique_identifier("vector_transform_output")
+        node_builder.add_node(vector_transform_name, "ShaderNodeVectorTransform", {"vector_type": vector_type, "convert_from": convert_from, "convert_to": convert_to}, force_properties=True)
+        if not output_name and not output_socket:
+            new_color_name = vector_transform_name
+            new_color_socket = "Vector"
+        else:
+            node_builder.link(output_name, vector_transform_name, output_socket, "Vector")
+        output_name = vector_transform_name
+        output_socket = "Vector"
+    if normalize_output:
+        if is_output_tangent:
+            tangent_norm_nt = get_library_nodetree(".PS Tangent Normal")
+            tangent_norm_name = node_builder.get_unique_identifier("tangent_normalize")
+            node_builder.add_node("tangent", "ShaderNodeTangent", {"direction_type": "UV_MAP", "uv_map": tangent_uv})
+            node_builder.add_node(tangent_norm_name, "ShaderNodeGroup", {"node_tree": tangent_norm_nt}, force_properties=True)
+            node_builder.link("tangent", tangent_norm_name, "Tangent", "Tangent")
+            if not output_name and not output_socket:
+                new_color_name = tangent_norm_name
+                new_color_socket = "Custom Normal"
+            else:
+                node_builder.link(output_name, tangent_norm_name, output_socket, "Custom Normal")
+            output_name = tangent_norm_name
+            output_socket = "Tangent Normal"
+        else:
+            normalize_name = node_builder.get_unique_identifier("normalize")
+            node_builder.add_node(normalize_name, "ShaderNodeVectorMath", {"operation": "MULTIPLY_ADD", "hide": True}, {1: (0.5, 0.5, 0.5), 2: (0.5, 0.5, 0.5)})
+            if not output_name and not output_socket:
+                new_color_name = normalize_name
+                new_color_socket = "Vector"
+            else:
+                node_builder.link(output_name, normalize_name, output_socket, "Vector")
+            output_name = normalize_name
+            output_socket = "Vector"
+    if output_name and output_socket:
+        node_builder.link(output_name, color_name, output_socket, color_socket)
+    else:
+        new_color_name = color_name
+        new_color_socket = color_socket
+    return new_color_name, new_color_socket
+
 class Channel(BaseNestedListManager):
     """Custom data for material layers in the Paint System"""
     
@@ -1739,22 +1821,23 @@ class Channel(BaseNestedListManager):
         
         previous_data = previous_dict.get(-1)
         if self.type == "VECTOR" and not self.disable_output_transform:
-            convert_from = 'WORLD' if self.normalize_input else self.vector_space
-            convert_to = self.output_vector_space
-            if self.output_vector_space != "NONE" and self.use_space_transform and convert_from != convert_to:
-                node_builder.add_node("vector_transform_output", "ShaderNodeVectorTransform", {"vector_type": self.vector_type, "convert_from": convert_from, "convert_to": convert_to}, force_properties=True)
-                node_builder.link("vector_transform_output", previous_data.color_name, "Vector", previous_data.color_socket)
-                previous_data.color_name = "vector_transform_output"
-                previous_data.color_socket = "Vector"
-            if self.normalize_input:
-                node_builder.add_node("normal_map", "ShaderNodeNormalMap", {"space": self.vector_space}, force_properties=True)
-                node_builder.link("normal_map", previous_data.color_name, "Normal", previous_data.color_socket)
-                previous_data.color_name = "normal_map"
-                previous_data.color_socket = "Color"
+            color_name, color_socket = vector_transform_output(
+                node_builder,
+                previous_data.color_name,
+                previous_data.color_socket,
+                self.bake_vector_space if self.use_bake_image else self.vector_space,
+                self.output_vector_space,
+                self.normalize_input,
+                False,
+                self.vector_type,
+                self.bake_uv_map if self.use_bake_image else self.tangent_uv_map
+            )
+            previous_data.color_name = color_name
+            previous_data.color_socket = color_socket
         
         if self.bake_image:
             node_builder.add_node("uv_map", "ShaderNodeUVMap", {"uv_map": self.bake_uv_map}, force_properties=True)
-            node_builder.add_node("bake_image", "ShaderNodeTexImage", {"image": self.bake_image})
+            node_builder.add_node("bake_image", "ShaderNodeTexImage", {"image": self.bake_image, "interpolation": "Closest"})
             node_builder.link("uv_map", "bake_image", "UV", "Vector")
             if self.use_bake_image:
                 node_builder.link("bake_image", previous_data.color_name, "Color", previous_data.color_socket)
@@ -1841,16 +1924,19 @@ class Channel(BaseNestedListManager):
                     previous_data.clip_mode = False
         prev_layer = previous_dict[-1]
         if self.type == "VECTOR":
-            if self.normalize_input:
-                node_builder.add_node("normalize", "ShaderNodeVectorMath", {"operation": "MULTIPLY_ADD", "hide": True}, {1: (0.5, 0.5, 0.5), 2: (0.5, 0.5, 0.5)})
-                node_builder.link("normalize", prev_layer.color_name, "Vector", prev_layer.color_socket)
-                prev_layer.color_name = "normalize"
-                prev_layer.color_socket = "Vector"
-            if self.use_space_transform and self.vector_space != self.input_vector_space:
-                node_builder.add_node("vector_transform", "ShaderNodeVectorTransform", {"vector_type": self.vector_type, "convert_to": self.vector_space, "convert_from": self.input_vector_space}, force_properties=True)
-                node_builder.link("vector_transform", prev_layer.color_name, "Vector", prev_layer.color_socket)
-                prev_layer.color_name = "vector_transform"
-                prev_layer.color_socket = "Vector"
+            color_name, color_socket = vector_transform_output(
+                node_builder,
+                prev_layer.color_name,
+                prev_layer.color_socket,
+                self.input_vector_space,
+                self.vector_space,
+                False,
+                self.normalize_input,
+                self.vector_type,
+                self.tangent_uv_map
+            )
+            prev_layer.color_name = color_name
+            prev_layer.color_socket = color_socket
             if self.default_value != "NONE":
                 node_builder.add_node("vector_length", "ShaderNodeVectorMath", {"operation": "LENGTH"})
                 node_builder.add_node("compare", "ShaderNodeMath", {"operation": "COMPARE"}, {1: 0, 2: 0})
@@ -2019,9 +2105,15 @@ class Channel(BaseNestedListManager):
         if force_alpha:
             orig_use_alpha = bool(self.use_alpha)
             self.use_alpha = True
-        
-        orig_disable_output_transform = bool(self.disable_output_transform)
-        self.disable_output_transform = True
+            
+        if as_tangent_normal:
+            orig_tangent_uv_map = str(self.tangent_uv_map)
+            self.tangent_uv_map = self.bake_uv_map
+            orig_output_vector_space = str(self.output_vector_space)
+            self.output_vector_space = "TANGENT"
+        else:
+            orig_disable_output_transform = bool(self.disable_output_transform)
+            self.disable_output_transform = True
         try:
             ps_objects = ps_context.ps_objects
             
@@ -2059,19 +2151,6 @@ class Channel(BaseNestedListManager):
                 if self.use_alpha:
                     alpha_output = bake_node.outputs['Alpha']
                 to_be_deleted_nodes.append(bake_node)
-            
-            if as_tangent_normal:
-                tangent_node = node_tree.nodes.new(type='ShaderNodeTangent')
-                tangent_node.direction_type = "UV_MAP"
-                tangent_node.uv_map = self.bake_uv_map
-                to_be_deleted_nodes.append(tangent_node)
-                tangent_norm_nt = get_library_nodetree(".PS Tangent Normal")
-                tangent_group = node_tree.nodes.new(type='ShaderNodeGroup')
-                tangent_group.node_tree = tangent_norm_nt
-                to_be_deleted_nodes.append(tangent_group)
-                connect_sockets(tangent_group.inputs['Custom Normal'], color_output)
-                connect_sockets(tangent_group.inputs['Tangent'], tangent_node.outputs['Tangent'])
-                color_output = tangent_group.outputs['Tangent Normal']
             
             # Bake image
             connect_sockets(surface_socket, color_output)
@@ -2117,8 +2196,12 @@ class Channel(BaseNestedListManager):
             
             if force_alpha:
                 self.use_alpha = orig_use_alpha
-            
-            self.disable_output_transform = orig_disable_output_transform
+                
+            if as_tangent_normal:
+                self.tangent_uv_map = orig_tangent_uv_map
+                self.output_vector_space = orig_output_vector_space
+            else:
+                self.disable_output_transform = orig_disable_output_transform
         except Exception as e:
             print(f"Error baking channel: {e}")
             self.disable_output_transform = orig_disable_output_transform
@@ -2210,7 +2293,7 @@ class Channel(BaseNestedListManager):
     use_space_transform: BoolProperty(
         name="Use Space Transform",
         description="Use space transform for the channel",
-        default=False,
+        default=True,
         update=update_node_tree
     )
     def update_default_value(self, context):
@@ -2242,7 +2325,7 @@ class Channel(BaseNestedListManager):
     input_vector_space: EnumProperty(
         items=[
             ('WORLD', "World Space", "World Space", "WORLD", 0),
-            ('OBJECT', "Object Space", "Object Space", "OBJECT", 1),
+            ('OBJECT', "Object Space", "Object Space", "OBJECT_DATA", 1),
         ],
         name="Input Vector Space",
         description="Space of the input",
@@ -2263,18 +2346,24 @@ class Channel(BaseNestedListManager):
     output_vector_space: EnumProperty(
         items=[
             ('WORLD', "World Space", "World Space", "WORLD", 0),
-            ('OBJECT', "Object Space", "Object Space", "OBJECT_DATA", 1)
+            ('OBJECT', "Object Space", "Object Space", "OBJECT_DATA", 1),
+            ('TANGENT', "Tangent Space", "Tangent Space", "MESH_DATA", 2)
         ],
         name="Output Vector Space",
         description="Space of the output vector",
         default='WORLD',
         update=update_node_tree
     )
+    tangent_uv_map: StringProperty(
+        name="Tangent UV Map",
+        default="UVMap",
+        update=update_node_tree
+    )
     # Used when isolating the channel
     disable_output_transform: BoolProperty(
         name="Disable Output Transform",
         description="Disable the output transform for the channel",
-        default=False,
+        default=True, # For legacy reasons, the default is True
         update=update_node_tree
     )
     
@@ -2486,6 +2575,7 @@ class Group(PropertyGroup):
         context, 
         channel_name: str = "New Channel",
         channel_type: str = "COLOR",
+        disable_output_transform: bool = False, # Newly created channels are disabled by default
         **kwargs
     ):
         channels = self.channels
@@ -2495,6 +2585,7 @@ class Group(PropertyGroup):
         unique_name = get_next_unique_name(channel_name, [channel.name for channel in channels])
         new_channel.name = unique_name
         new_channel.type = channel_type
+        new_channel.disable_output_transform = disable_output_transform
         for key, value in kwargs.items():
             setattr(new_channel, key, value)
         new_channel.node_tree = node_tree

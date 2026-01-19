@@ -469,6 +469,20 @@ class NodeTreeBuilder:
         
         self.__add_nodes_commands[identifier] = add_command
         return add_command
+    
+    def find_node(self, identifier: str) -> bpy.types.Node:
+        # Check the add_nodes_commands for the node
+        if identifier in self.__add_nodes_commands:
+            return self.__add_nodes_commands[identifier]
+        return None
+    
+    def get_unique_identifier(self, identifier: str, counter = 0) -> str:
+        # Check the add_nodes_commands for the node
+        check_identifier = identifier if counter == 0 else f"{identifier}_{counter}"
+        node = self.find_node(check_identifier)
+        if node is not None:
+            return self.get_unique_identifier(identifier, counter + 1)
+        return check_identifier
 
     def _create_node(self, identifier: str, node_type: str, properties: dict = None, default_values: dict = None, default_outputs: dict = None, force_properties: bool = False, force_default_values: bool = False) -> None:
         """
