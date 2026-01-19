@@ -1249,7 +1249,7 @@ class Layer(BaseNestedListItem):
         self.update_node_tree(context)
     type: EnumProperty(
         items=LAYER_TYPE_ENUM,
-        default='IMAGE',
+        default='BLANK',
         update=update_type
     )
     lock_layer: BoolProperty(
