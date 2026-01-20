@@ -971,19 +971,19 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                                             mask_settings_col.prop(img, "source", text="")
                                             mask_settings_col.prop(img.colorspace_settings, "name", text="Color Space")
                                             mask_settings_col.prop(img, "alpha_mode", text="Alpha")
-
                     row = col.row(align=True)
                     scale_content(context, row, 1.2, 1.2)
                     if not active_layer.external_image:
                         icon_value = get_image_editor_icon(context.preferences.filepaths.image_editor) or get_icon('image')
-                        col.operator("paint_system.quick_edit", text="Edit Externally", icon_value=icon_value)
+                        row.operator("paint_system.quick_edit", text="Edit in Image Editor", icon_value=icon_value)
                     else:
                         if active_layer.edit_external_mode == 'IMAGE_EDIT':
-                            row = col.row(align=True)
                             row.operator("paint_system.quick_edit", text="Open Image", icon_value=get_image_editor_icon(context.preferences.filepaths.image_editor))
                             row.operator("paint_system.reload_image", text="Reload Image", icon="FILE_REFRESH")
                         elif active_layer.edit_external_mode == 'VIEW_CAPTURE':
-                            col.operator("paint_system.project_apply", text="Apply Edit")
+                            row.operator("paint_system.project_apply", text="Apply Edit")
+                    if not is_editor_open(context, 'IMAGE_EDITOR'):
+                        row.operator("paint_system.split_image_editor", text="", icon="BLENDER")
                 case 'ADJUSTMENT':
                     if not ps_ctx.ps_settings.use_legacy_ui:
                         box = layout.box()
@@ -999,12 +999,11 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     node_group = active_layer.source_node
                     inputs = [i for i in node_group.inputs if not i.is_linked and i.name not in (
                         'Color', 'Alpha')]
-                    if not inputs:
-                        return
-                    col.label(text="Node Group Settings:", icon='NODETREE')
-                    for socket in inputs:
-                        col.prop(socket, "default_value",
-                                text=socket.name)
+                    if inputs:
+                        col.label(text="Node Group Settings:", icon='NODETREE')
+                        for socket in inputs:
+                            col.prop(socket, "default_value",
+                                    text=socket.name)
                 case 'GRADIENT':
                     if active_layer.gradient_type in ('LINEAR', 'RADIAL', 'FAKE_LIGHT'):
                         if not ps_ctx.ps_settings.use_legacy_ui:
@@ -1116,7 +1115,6 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                 else:
                     header.template_ID(active_layer, "image", text="", new="image.new", open="image.open")
                 if panel:
-                    header.label(text="Image", icon_value=get_icon('image'))
                     box = panel.box()
                     col = box.column()
                     image_node = active_layer.source_node
@@ -1200,7 +1198,7 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     if ps_ctx.active_layer.type == "IMAGE" and ps_ctx.active_layer.image:
                         row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
                 if transform_panel:
-                    draw_painting_may_not_work(transform_panel, context)
+                    # draw_painting_may_not_work(transform_panel, context)
                     transform_panel.use_property_split = True
                     transform_panel.use_property_decorate = False
                     ps_ctx = self.parse_context(context)
