@@ -87,8 +87,13 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
     )
     
     group_name: bpy.props.StringProperty(
+<<<<<<< HEAD
         name="Setup Name",
         description="Name of the new setup",
+=======
+        name="Name",
+        description="Name of the new group",
+>>>>>>> 12aa2d8 (Logix)
         default="",
     )
 
