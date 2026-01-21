@@ -3,7 +3,7 @@ import bpy
 from bpy.types import NodeTree, Panel, Menu, UILayout
 from bpy.utils import register_classes_factory
 
-from .common import PSContextMixin, draw_layer_icon, get_event_icons, find_keymap, find_keymap_by_name, get_icon_from_channel, scale_content, get_icon, is_uv_edit_active
+from .common import PSContextMixin, draw_layer_icon, get_event_icons, find_keymap, find_keymap_by_name, get_icon_from_channel, scale_content, get_icon
 from ..utils.version import is_newer_than
 from ..utils.unified_brushes import get_unified_settings
 from ..utils.nodes import is_in_nodetree
@@ -431,8 +431,6 @@ class NODE_PT_PaintSystemShaderEditor(PSContextMixin, Panel):
     def poll(cls, context):
         """Show panel only when object has Paint System data"""
         ps_ctx = cls.parse_context(context)
-        if is_uv_edit_active(context):
-            return False
         return ps_ctx.active_group is not None and context.space_data.tree_type == 'ShaderNodeTree'
     
     def draw_header(self, context):
