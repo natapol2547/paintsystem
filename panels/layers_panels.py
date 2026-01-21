@@ -482,7 +482,6 @@ def draw_layer_settings(layout, context):
         elif active_action.action_bind == 'MARKER':
             actions_col.prop_search(active_action, "marker_name", context.scene, "timeline_markers", text="Once reach", icon="MARKER_HLT")
         actions_col.prop(active_action, "action_type", text="Action")
-        actions_col.prop(active_action, "action_type", text="Action")
 
 def draw_painting_may_not_work(layout: bpy.types.UILayout, context: bpy.types.Context):
     ps_ctx = PSContextMixin.parse_context(context)
@@ -493,7 +492,7 @@ def draw_painting_may_not_work(layout: bpy.types.UILayout, context: bpy.types.Co
         info_box = layout.box()
         info_col = info_box.column(align=True)
         info_col.label(text="Painting in 3D may not work")
-        info_col.operator("paint_system.split_image_editor", text="Open Blender Image Editor", icon="BLENDER")
+        info_col.operator("paint_system.toggle_image_editor", text="Open Blender Image Editor", icon="BLENDER")
 
 class MAT_PT_Layers(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_Layers'
@@ -813,8 +812,7 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                             row.operator("paint_system.reload_image", text="Reload Image", icon="FILE_REFRESH")
                         elif active_layer.edit_external_mode == 'VIEW_CAPTURE':
                             row.operator("paint_system.project_apply", text="Apply Edit")
-                    if not is_editor_open(context, 'IMAGE_EDITOR'):
-                        row.operator("paint_system.split_image_editor", text="", icon="BLENDER")
+                    row.operator("paint_system.toggle_image_editor", text="", depress=is_editor_open(context, 'IMAGE_EDITOR'), icon="BLENDER")
                 case 'ADJUSTMENT':
                     if not ps_ctx.ps_settings.use_legacy_ui:
                         box = layout.box()
@@ -1010,7 +1008,6 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                 if ps_ctx.active_layer.type == "IMAGE" and ps_ctx.active_layer.image:
                     row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
                 if transform_panel:
-                    # draw_painting_may_not_work(transform_panel, context)
                     transform_panel.use_property_split = True
                     transform_panel.use_property_decorate = False
                     box = transform_panel.box()
