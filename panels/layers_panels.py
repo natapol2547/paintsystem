@@ -9,6 +9,7 @@ from ..custom_icons import get_image_editor_icon
 from ..utils.version import is_newer_than
 from .common import (
     PSContextMixin,
+    draw_layer_icon,
     is_editor_open,
     line_separator,
     scale_content,
@@ -45,72 +46,6 @@ if is_newer_than(4,3):
         DATA_PT_grease_pencil_onion_skinning,
     )
 
-
-def is_image_painted(image: Image | ImagePreview) -> bool:
-    """Check if the image is painted
-
-    Args:
-        image (bpy.types.Image): The image to check
-
-    Returns:
-        bool: True if the image is painted, False otherwise
-    """
-    if not image:
-        return False
-    if isinstance(image, Image):
-        pixels = np.zeros(len(image.pixels), dtype=np.float32)
-        image.pixels.foreach_get(pixels)
-        return len(pixels) > 0 and any(pixels)
-    elif isinstance(image, ImagePreview):
-        pixels = np.zeros(len(image.image_pixels_float), dtype=np.float32)
-        image.image_pixels_float.foreach_get(pixels)
-        return len(pixels) > 0 and any(pixels)
-    return False
-
-
-def draw_layer_icon(layer: Layer, layout: bpy.types.UILayout):
-    match layer.type:
-        case 'IMAGE':
-            if not layer.image:
-                layout.label(icon_value=get_icon('image'))
-                return
-            else:
-                if layer.image.preview and is_image_painted(layer.image.preview):
-                    layout.label(
-                        icon_value=layer.image.preview.icon_id)
-                else:
-                    if layer.image.is_dirty:
-                        layer.image.asset_generate_preview()
-                    layout.label(icon_value=get_icon('image'))
-        case 'FOLDER':
-            layout.prop(layer, "is_expanded", text="", icon_only=True, icon_value=get_icon(
-                'folder_open') if layer.is_expanded else get_icon('folder'), emboss=False)
-        case 'SOLID_COLOR':
-            rgb_node = layer.source_node
-            if rgb_node:
-                layout.prop(
-                    rgb_node.outputs[0], "default_value", text="", icon='IMAGE_RGB_ALPHA')
-        case 'ADJUSTMENT':
-            layout.label(icon='SHADERFX')
-        case 'SHADER':
-            layout.label(icon='SHADING_RENDERED')
-        case 'NODE_GROUP':
-            layout.label(icon='NODETREE')
-        case 'ATTRIBUTE':
-            layout.label(icon='MESH_DATA')
-        case 'GRADIENT':
-            if layer.gradient_type == 'FAKE_LIGHT':
-                layout.label(icon='LIGHT')
-            else:
-                layout.label(icon='COLOR')
-        case 'RANDOM':
-            layout.label(icon='SEQ_HISTOGRAM')
-        case 'TEXTURE':
-            layout.label(icon='TEXTURE')
-        case 'GEOMETRY':
-            layout.label(icon='MESH_DATA')
-        case _:
-            layout.label(icon='BLANK1')
 
 def draw_input_sockets(layout, context: Context, only_output: bool = False):
     ps_ctx = PSContextMixin.parse_context(context)

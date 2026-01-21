@@ -500,7 +500,7 @@ class PAINTSYSTEM_OT_FocusPSNode(PSContextMixin, Operator):
         # Set to Shader Editor
         space = new_area.spaces[0]
         space.tree_type = 'ShaderNodeTree'
-        space.show_region_ui = False
+        space.show_region_ui = True
         
         # Find the node group
         node_to_focus = find_node(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree}, connected_to_output=False)
@@ -517,7 +517,7 @@ class PAINTSYSTEM_OT_FocusPSNode(PSContextMixin, Operator):
                     node.select = True
             node_tree.nodes.active = node_to_focus
             wait_for_redraw()
-            print(execute_operator_in_area(new_area, 'node.view_selected'))
+            execute_operator_in_area(new_area, 'node.view_selected')
         
         
         return {'FINISHED'}
