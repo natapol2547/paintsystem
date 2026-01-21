@@ -72,7 +72,7 @@ def node_tree_has_complex_setup(node_tree: NodeTree) -> bool:
 class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOperator):
     """Create a new group in the Paint System"""
     bl_idname = "paint_system.new_group"
-    bl_label = "New Group"
+    bl_label = "New Paint System"
     bl_options = {'REGISTER', 'UNDO'}
     
     def get_templates(self, context):
@@ -87,7 +87,7 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
     )
     
     group_name: bpy.props.StringProperty(
-        name="Group Name",
+        name="Name",
         description="Name of the new group",
         default="",
     )
@@ -277,8 +277,14 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
     
     def invoke(self, context, event):
         ps_ctx = self.parse_context(context)
-        # Default the group name to "ps_New Group" with ps_ prefix
-        base_name = "ps_New Group"
+        # Default name: use existing material name if available, otherwise use object name
+        if ps_ctx.active_material:
+            base_name = ps_ctx.active_material.name
+        elif ps_ctx.ps_object:
+            base_name = ps_ctx.ps_object.name
+        else:
+            base_name = "New Paint System"
+        
         if ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.groups:
             self.group_name = get_next_unique_name(base_name, [group.name for group in ps_ctx.ps_mat_data.groups])
         else:
