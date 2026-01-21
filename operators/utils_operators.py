@@ -17,6 +17,7 @@ from ..utils.version import is_newer_than
 from ..utils.unified_brushes import get_unified_settings
 from .brushes import get_brushes_from_library
 from .common import MultiMaterialOperator, PSContextMixin, DEFAULT_PS_UV_MAP_NAME, execute_operator_in_area, wait_for_redraw
+from ..panels.common import is_editor_open
 from .operators_utils import redraw_panel
 
 from bl_ui.properties_paint_common import (
@@ -440,16 +441,24 @@ def split_area(context: bpy.types.Context, direction: str = 'VERTICAL', factor: 
     new_area = new_areas.pop()
     return new_area
 
-class PAINTSYSTEM_OT_SplitImageEditor(PSContextMixin, Operator):
-    bl_idname = "paint_system.split_image_editor"
-    bl_label = "Split & Open Image Editor"
+class PAINTSYSTEM_OT_ToggleImageEditor(PSContextMixin, Operator):
+    bl_idname = "paint_system.toggle_image_editor"
+    bl_label = "Toggle Image Editor"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Split the active area vertically and open Image Editor on the right"
+    bl_description = "Toggle the image editor on/off"
 
     def execute(self, context):
         ps_ctx = self.parse_context(context)
         active_layer = ps_ctx.active_layer
         image = active_layer.image if active_layer else None
+        
+        if is_editor_open(context, 'IMAGE_EDITOR'):
+            # Find the image editor area
+            image_editor_area = next((a for a in context.screen.areas if a.type == 'IMAGE_EDITOR'), None)
+            # Close the image editor area
+            if image_editor_area:
+                execute_operator_in_area(image_editor_area, 'screen.area_close')
+                return {'FINISHED'}
         
         new_area = split_area(context)
         if not new_area:
@@ -537,7 +546,7 @@ classes = (
     PAINTSYSTEM_OT_HidePaintingTips,
     PAINTSYSTEM_OT_DuplicatePaintSystemData,
     PAINTSYSTEM_OT_ToggleTransformGizmos,
-    PAINTSYSTEM_OT_SplitImageEditor,
+    PAINTSYSTEM_OT_ToggleImageEditor,
     PAINTSYSTEM_OT_FocusPSNode,
 )
 
