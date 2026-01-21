@@ -898,10 +898,13 @@ class Layer(BaseNestedListItem):
         self.updating_name_flag = True
         if self.layer_name != self.name:
             self.layer_name = self.name
-<<<<<<< HEAD
 
         prefs = get_preferences(context)
-        if getattr(prefs, "automatic_name_syncing", True):
+        sync_names_enabled = bool(
+            getattr(prefs, "automatic_name_syncing", True) and
+            getattr(prefs, "automatic_name_sync", True)
+        )
+        if sync_names_enabled:
             material = find_material_for_layer(self)
             if material:
                 new_name = ensure_layer_name_prefix(self.name, material.name)
@@ -910,12 +913,8 @@ class Layer(BaseNestedListItem):
                     self.layer_name = new_name
             if self.type == 'IMAGE' and self.image:
                 self.image.name = self.name
+
         self.updating_name_flag = False
-=======
-        # Update image name to match layer name
-        if self.type == 'IMAGE' and self.image:
-            self.image.name = self.name
->>>>>>> 12aa2d8 (Logix)
         self.update_node_tree(context)
     
     name: StringProperty(

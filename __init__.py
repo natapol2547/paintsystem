@@ -25,11 +25,7 @@ bl_info = {
     "author": "Tawan Sunflower, @blastframe",
     "description": "",
     "blender": (4, 2, 0),
-<<<<<<< HEAD
     "version": (2, 1, 8),
-=======
-    "version": (2, 1, 6),
->>>>>>> a6f904f (change: version number)
     "location": "View3D > Sidebar > Paint System",
     "warning": "",
     "category": "Paint",
