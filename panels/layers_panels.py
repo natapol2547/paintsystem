@@ -9,6 +9,7 @@ from ..custom_icons import get_image_editor_icon
 from ..utils.version import is_newer_than
 from .common import (
     PSContextMixin,
+    draw_layer_icon,
     is_editor_open,
     line_separator,
     scale_content,
