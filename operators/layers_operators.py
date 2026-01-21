@@ -1086,7 +1086,6 @@ class PAINTSYSTEM_OT_ProjectionViewReset(PSContextMixin, Operator):
                 return {'FINISHED'}
         return {'FINISHED'}
 
-
 # Masks
 class PAINTSYSTEM_OT_NewValueMask(PSContextMixin, Operator):
     """Create a new value mask"""
@@ -1154,7 +1153,6 @@ class PAINTSYSTEM_OT_NewTextureMask(PSContextMixin, Operator):
         ps_ctx = self.parse_context(context)
         ps_ctx.active_layer.create_mask("TEXTURE")
         return {'FINISHED'}
-
 class PAINTSYSTEM_OT_RenameLayerSuffix(PSContextMixin, Operator):
     """Rename the active layer's suffix while preserving its prefix"""
     bl_idname = "paint_system.rename_layer_suffix"
@@ -1234,7 +1232,6 @@ class PAINTSYSTEM_OT_DeleteLayerMask(PSContextMixin, Operator):
         lm = ListManager(active_layer, "layer_masks", active_layer, "active_layer_mask_index")
         lm.remove_active_item()
         return {'FINISHED'}
-
 classes = (
     PAINTSYSTEM_OT_NewImage,
     PAINTSYSTEM_OT_NewFolder,
