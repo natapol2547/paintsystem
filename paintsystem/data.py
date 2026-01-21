@@ -817,9 +817,14 @@ class Layer(BaseNestedListItem):
     def update_name(self, context):
         if self.layer_name != self.name:
             self.layer_name = self.name
-        # Update image name to match layer name
-        if self.type == 'IMAGE' and self.image:
-            self.image.name = self.name
+        # Sync image name if automatic name syncing is enabled
+        if context and self.type == 'IMAGE' and self.image:
+            try:
+                prefs = get_preferences(context)
+                if prefs.automatic_name_sync:
+                    self.image.name = self.name
+            except:
+                pass
         self.update_node_tree(context)
     
     name: StringProperty(
