@@ -817,6 +817,9 @@ class Layer(BaseNestedListItem):
     def update_name(self, context):
         if self.layer_name != self.name:
             self.layer_name = self.name
+        # Update image name to match layer name
+        if self.type == 'IMAGE' and self.image:
+            self.image.name = self.name
         self.update_node_tree(context)
     
     name: StringProperty(
@@ -3244,6 +3247,31 @@ class LegacyPaintSystemContextParser:
                 return node
         return None
 
+def update_material_name(material, context):
+    """Update group name and all image layer names when material name changes"""
+    if not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
+        return
+    
+    new_mat_name = material.name
+    
+    # Update active group name to match material (with ps_ prefix for display)
+    if material.ps_mat_data.groups:
+        active_group = material.ps_mat_data.groups[material.ps_mat_data.active_index] if material.ps_mat_data.active_index < len(material.ps_mat_data.groups) else material.ps_mat_data.groups[0]
+        if active_group:
+            # Update group name with ps_ prefix
+            active_group.name = f"ps_{new_mat_name}"
+            
+            # Update all image layer names in all channels
+            for channel in active_group.channels:
+                for layer in channel.layers:
+                    if layer.type == 'IMAGE':
+                        # Strip old prefix and add new one
+                        current_name = layer.name
+                        suffix = current_name.split('_', 1)[1] if '_' in current_name else current_name
+                        new_layer_name = f"{new_mat_name}_{suffix}"
+                        layer.name = new_layer_name
+                        # Image name is updated by layer.update_name callback
+
 classes = (
     MarkerAction,
     GlobalLayer,
@@ -3275,6 +3303,22 @@ def register():
         description="Material Data for the Paint System"
     )
     bpy.types.Material.paint_system = PointerProperty(type=LegacyPaintSystemGroups)
+    
+    # Hook into material name property to sync names
+    def material_name_update(self, context):
+        update_material_name(self, context)
+    
+    # Store original update function
+    original_update = bpy.types.Material.bl_rna.properties['name'].update
+    
+    # Wrap it with our sync function
+    def wrapped_update(self, context):
+        if original_update:
+            original_update(self, context)
+        material_name_update(self, context)
+    
+    # Override the update callback
+    bpy.types.Material.bl_rna.properties['name'].update = wrapped_update
     
 def unregister():
     """Unregister the Paint System data module."""
