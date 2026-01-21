@@ -1006,7 +1006,6 @@ classes = (
     PAINTSYSTEM_OT_NewGroup,
     PAINTSYSTEM_OT_DeleteGroup,
     PAINTSYSTEM_OT_MoveGroup,
-    PAINTSYSTEM_OT_ConvertMaterialToPS,
     PAINTSYSTEM_OT_SyncNames,
     PAINTSYSTEM_OT_ConvertMaterialToPS,
 )
