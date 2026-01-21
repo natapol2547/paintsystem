@@ -11,6 +11,7 @@ submodules = [
     "quick_edit",
     "versioning_operators",
     "bake_operators",
+    "shader_editor",
 ]
 
 register, unregister = register_submodule_factory(__name__, submodules)

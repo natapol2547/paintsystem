@@ -204,4 +204,6 @@ def find_socket_on_node(node: Node, name: str, in_out: str = 'INPUT', properties
         if all(hasattr(socket, prop) and getattr(socket, prop) == value for prop, value in properties.items()):
             return socket
     return None
-    
+
+def is_in_nodetree(context: Context) -> bool:
+    return context.space_data.type == 'NODE_EDITOR' and len(context.space_data.path) > 1

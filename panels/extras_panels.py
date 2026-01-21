@@ -1,17 +1,26 @@
 from bl_ui.properties_material import EEVEE_MATERIAL_PT_context_material
 import bpy
-from bpy.types import Panel, Menu
+from bpy.types import NodeTree, Panel, Menu, UILayout
 from bpy.utils import register_classes_factory
 
-from .common import PSContextMixin, get_event_icons, find_keymap, find_keymap_by_name, scale_content, get_icon
+from .common import PSContextMixin, draw_layer_icon, get_event_icons, find_keymap, find_keymap_by_name, get_icon_from_channel, scale_content, get_icon
 from ..utils.version import is_newer_than
 from ..utils.unified_brushes import get_unified_settings
+from ..utils.nodes import is_in_nodetree
 
 from bl_ui.properties_paint_common import (
     UnifiedPaintPanel,
     brush_settings,
-    draw_color_settings,
 )
+
+def nodetree_operator(layout: UILayout, nodetree: NodeTree, text="", icon='ADD'):
+    op = layout.operator("node.add_node", text=text, icon=icon)
+    ops = op.settings.add()
+    ops.name = "node_tree"
+    ops.value = "bpy.data.node_groups[{!r}]".format(nodetree.name)
+    op.use_transform = True
+    op.type = "ShaderNodeGroup"
+    return op
 
 class MAT_PT_BrushTooltips(Panel):
     bl_label = "Brush Tooltips"
@@ -394,6 +403,84 @@ class MAT_PT_TexPaintRMBMenu(PSContextMixin, Panel, UnifiedPaintPanel):
                 slider=True,
             )
 
+class NODE_PT_PaintSystemShaderEditor(PSContextMixin, Panel):
+    """Paint System panel in Shader Editor for viewing layers"""
+    bl_label = "Paint System"
+    bl_idname = "NODE_PT_paint_system_shader_editor"
+    bl_space_type = 'NODE_EDITOR'
+    bl_region_type = 'UI'
+    bl_category = "Paint System"
+    
+    @classmethod
+    def poll(cls, context):
+        """Show panel only when object has Paint System data"""
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_group is not None and context.space_data.tree_type == 'ShaderNodeTree'
+    
+    def draw_header(self, context):
+        layout = self.layout
+        layout.label(icon_value=get_icon("sunflower"))
+    
+    def draw(self, context):
+        ps_ctx = self.parse_context(context)
+        layout = self.layout
+            
+        # Group name section
+        box = layout.box()
+        row = box.row(align=True)
+        row.label(text="Groups:", icon='OUTLINER_OB_GROUP_INSTANCE')
+        nodetree_operator(row, ps_ctx.active_group.node_tree, text="Create Node")
+        box.template_list("MATERIAL_UL_PaintSystemGroups", "", ps_ctx.ps_mat_data, "groups", ps_ctx.ps_mat_data, "active_index", rows=max(2, len(ps_ctx.ps_mat_data.groups)))
+        
+        # Channels and Layers section
+        channels = ps_ctx.active_group.channels
+        if channels:
+            box = layout.box()
+            row = box.row(align=True)
+            row.label(text="Channels:", icon='OUTLINER_OB_GROUP_INSTANCE')
+            if is_in_nodetree(context):
+                row.operator("paint_system.exit_all_node_groups", text="Exit All Groups", icon='NODETREE')
+            col = box.column(align=True)
+            for idx, channel in enumerate(channels):
+                if idx:
+                    col.separator()
+                header, panel = col.panel(f"channel_{idx}", default_closed=True)
+                # Channel header
+                header.label(text=channel.name, icon_value=get_icon_from_channel(channel))
+                if panel:
+                    layer_col = panel.column(align=True)
+                    flattened = channel.flattened_unlinked_layers
+                    if flattened:
+                        for layer in flattened:
+                            self.draw_layer_row(layer_col, context, layer, channel)
+    
+    def draw_layer_row(self, layout, context, layer, channel):
+        """Draw a single layer row with indentation for hierarchy"""
+        ps_ctx = self.parse_context(context)
+        linked_layer = layer.get_layer_data()
+        if not linked_layer:
+            return
+        
+        level = channel.get_item_level_from_id(layer.id)
+        row = layout.row(align=True)
+        row.label(icon="BLANK1")
+        for i in range(level):
+            if i == level - 1:
+                row.label(icon_value=get_icon('folder_indent'))
+            else:
+                row.label(icon='BLANK1')
+        row.enabled = linked_layer.opacity > 0 and linked_layer.enabled
+        draw_layer_icon(linked_layer, row)
+        
+        row.label(text=linked_layer.name)
+        
+        # Select node button - only for non-folder layers with node trees
+        if linked_layer.type != 'FOLDER' and linked_layer.node_tree and ps_ctx.active_material:
+            nt = linked_layer.node_tree
+            nodetree_operator(row, nt)
+            op = row.operator("paint_system.inspect_layer_node_tree", text="", icon='NODETREE')
+            op.layer_id = layer.id
+            op.channel_name = channel.name
 
 def draw_paint_system_material(self, context):
     layout = self.layout
@@ -414,6 +501,7 @@ classes = (
     MAT_PT_BrushColorSettings,
     MAT_PT_BrushColor,
     MAT_PT_TexPaintRMBMenu,
+    NODE_PT_PaintSystemShaderEditor,
 )
 
 _register, _unregister = register_classes_factory(classes)
