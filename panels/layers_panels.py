@@ -104,7 +104,8 @@ class MAT_PT_UL_LayerList(PSContextMixin, UIList):
             row.enabled = linked_item.opacity > 0 and linked_item.enabled
             draw_layer_icon(linked_item, row)
             main_row.separator()
-            main_row.prop(linked_item, "name", text="", emboss=False)
+            # Display and edit only the layer name without the prefix
+            main_row.prop(linked_item, "display_name", text="", emboss=False)
 
             row = main_row.row(align=True)
             row.alignment = 'RIGHT'
@@ -907,6 +908,22 @@ class MAT_MT_LayerMenu(PSContextMixin, Menu):
             "paint_system.merge_down",
             text="Merge Down",
             icon="TRIA_DOWN_BAR"
+        )
+        
+        # Rename layer (edit suffix only)
+        layout.separator()
+        layout.operator(
+            "paint_system.rename_layer_suffix",
+            text="Rename Layer",
+            icon="FILE_TEXT"
+        )
+        
+        # Divider before utility actions
+        layout.separator()
+        layout.operator(
+            "paint_system.sync_names",
+            text="Sync Names",
+            icon="FILE_REFRESH"
         )
 
 
