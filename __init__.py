@@ -27,6 +27,7 @@ bl_info = {
     "description": "",
     "blender": (4, 2, 0),
     "version": (2, 1, 10),
+    "version": (2, 1, 8),
     "location": "View3D > Sidebar > Paint System",
     "warning": "",
     "category": "Paint",
