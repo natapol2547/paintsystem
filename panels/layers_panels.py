@@ -746,10 +746,10 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     # draw_painting_may_not_work(transform_panel, context)
                     transform_panel.use_property_split = True
                     transform_panel.use_property_decorate = False
+                    box = transform_panel.box()
                     ps_ctx = self.parse_context(context)
                     active_layer = ps_ctx.active_layer
                     if active_layer.coord_type not in {'AUTO', 'OBJECT', 'CAMERA', 'WINDOW', 'REFLECTION', 'POSITION', 'GENERATED'}:
-                        box = transform_panel.box()
                         col = box.column()
                         if active_layer.coord_type == 'UV':
                             col.prop_search(active_layer, "uv_map_name", text="UV Map",
@@ -807,6 +807,19 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                         row = layout.row(align=True)
                         row.label(icon="BLANK1")
                         row.operator("paint_system.select_empty", text="Select Empty", icon='OBJECT_ORIGIN')
+                    elif active_layer.coord_type == 'PROJECT':
+                        row = layout.row(align=True)
+                        row.label(icon="BLANK1")
+                        row.operator("paint_system.projection_view_reset", text="View Current Projection", icon='CAMERA_DATA')
+                        row.operator("paint_system.set_projection_view", text="", icon='FILE_REFRESH')
+                    elif active_layer.coord_type == 'PARALLAX':
+                        split = layout.split(factor=0.35, align=True)
+                        row = split.row(align=True)
+                        row.label(icon="BLANK1")
+                        row.prop(active_layer, "parallax_space", text="")
+                        parallax_node = active_layer.find_node("parallax")
+                        if parallax_node:
+                            split.prop(parallax_node.inputs["Depth"], "default_value", text="Depth")
             # Layer Actions Settings
             header, panel = layout.panel("layer_actions_settings_panel", default_closed=True)
             header.label(text="Actions", icon="KEYTYPE_KEYFRAME_VEC")
