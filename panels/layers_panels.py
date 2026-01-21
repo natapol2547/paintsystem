@@ -1201,6 +1201,7 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     # draw_painting_may_not_work(transform_panel, context)
                     transform_panel.use_property_split = True
                     transform_panel.use_property_decorate = False
+                    box = transform_panel.box()
                     ps_ctx = self.parse_context(context)
                     active_layer = ps_ctx.active_layer
                     box = transform_panel.box()
