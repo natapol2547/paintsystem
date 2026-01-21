@@ -89,7 +89,7 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
     group_name: bpy.props.StringProperty(
         name="Group Name",
         description="Name of the new group",
-        default="New Group",
+        default="",
     )
 
     use_alpha_blend: BoolProperty(
@@ -149,7 +149,8 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
         ps_ctx = self.parse_context(context)
         # See if there is any material slot on the active object
         if not ps_ctx.active_material:
-            mat = bpy.data.materials.new(name=f"{self.group_name} Material")
+            # Use the chosen group name (defaults to object name) for the material
+            mat = bpy.data.materials.new(name=self.group_name)
             ps_ctx.ps_object.active_material = mat
         ps_ctx = self.parse_context(context)
         mat = ps_ctx.active_material
@@ -276,10 +277,12 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
     
     def invoke(self, context, event):
         ps_ctx = self.parse_context(context)
+        # Default the group name to "ps_New Group" with ps_ prefix
+        base_name = "ps_New Group"
         if ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.groups:
-            self.group_name = get_next_unique_name(self.group_name, [group.name for group in ps_ctx.ps_mat_data.groups])
+            self.group_name = get_next_unique_name(base_name, [group.name for group in ps_ctx.ps_mat_data.groups])
         else:
-            self.group_name = "New Group"
+            self.group_name = base_name
         self.get_coord_type(context)
         if ps_ctx.active_material and node_tree_has_complex_setup(ps_ctx.active_material.node_tree) and "EEVEE" in bpy.context.scene.render.engine:
             self.template = 'PAINT_OVER'
@@ -309,6 +312,10 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
             col.prop(self, "pbr_add_roughness", text="Roughness", icon_value=get_icon('float_socket'))
             col.prop(self, "pbr_add_normal", text="Normal", icon_value=get_icon('vector_socket'))
         
+        # Group name above the "Add Template Layers" toggle
+        row = layout.row()
+        scale_content(context, row, 1.5, 1.5)
+        row.prop(self, "group_name", text="Group Name", icon='NODETREE')
         row = layout.row()
         scale_content(context, row, 1.5, 1.5)
         row.prop(self, "add_layers", text="Add Template Layers", icon_value=get_icon('layer_add'))
@@ -319,9 +326,7 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
         header, panel = box.panel("advanced_settings_panel", default_closed=True)
         header.label(text="Advanced Settings:", icon="TOOL_SETTINGS")
         if panel:
-            split = panel.split(factor=0.4)
-            split.label(text="Group Name:")
-            split.prop(self, "group_name", text="", icon='NODETREE')
+            # Group name moved above; keep advanced options here
             if self.template in ['BASIC']:
                 panel.prop(self, "use_alpha_blend", text="Use Smooth Alpha")
                 if self.use_alpha_blend:
@@ -443,10 +448,46 @@ class PAINTSYSTEM_OT_MoveGroup(PSContextMixin, MultiMaterialOperator):
         return {'FINISHED'}
 
 
+class PAINTSYSTEM_OT_SyncNames(PSContextMixin, Operator):
+    """Sync material, group, and layer names based on object name"""
+    bl_idname = "paint_system.sync_names"
+    bl_label = "Sync Names"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.ps_object is not None and ps_ctx.active_material is not None
+
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        base_name = ps_ctx.ps_object.name
+        
+        # Rename material
+        ps_ctx.active_material.name = base_name
+        
+        # Rename group with ps_ prefix
+        if ps_ctx.active_group:
+            ps_ctx.active_group.name = f"ps_{base_name}"
+            
+            # Rename layers with ObjectName_OriginalLayerName pattern
+            for channel in ps_ctx.active_group.channels:
+                for layer in channel.layers:
+                    # Strip any existing prefix before adding new one
+                    current_name = layer.name
+                    suffix = current_name.split('_', 1)[1] if '_' in current_name else current_name
+                    layer.name = f"{base_name}_{suffix}"
+        
+        redraw_panel(context)
+        self.report({'INFO'}, f"Synced names to: {base_name}")
+        return {'FINISHED'}
+
+
 classes = (
     PAINTSYSTEM_OT_NewGroup,
     PAINTSYSTEM_OT_DeleteGroup,
     PAINTSYSTEM_OT_MoveGroup,
+    PAINTSYSTEM_OT_SyncNames,
 )
 
 register, unregister = register_classes_factory(classes)    
