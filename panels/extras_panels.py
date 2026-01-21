@@ -494,6 +494,7 @@ def draw_paint_system_material(self, context):
         row.prop(ps_ctx.active_group, "name", text="")
         row.operator("paint_system.new_group", icon='ADD', text="")
         row.operator("paint_system.delete_group", icon='REMOVE', text="")
+        row.operator("paint_system.sync_names", icon='FILE_REFRESH', text="")
 
 classes = (
     MAT_PT_BrushTooltips,

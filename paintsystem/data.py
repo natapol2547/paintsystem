@@ -825,6 +825,35 @@ class Layer(BaseNestedListItem):
         default="Layer",
         update=update_name
     )
+
+    # Display-only name (suffix without prefix). Editing this updates the real name,
+    # preserving the original prefix before the first underscore.
+    def _get_display_name(self):
+        n = self.name or ""
+        return n.split('_', 1)[1] if '_' in n else n
+
+    def _set_display_name(self, value):
+        current = self.name or ""
+        if '_' in current:
+            prefix = current.split('_', 1)[0]
+            new_name = f"{prefix}_{value}"
+        else:
+            new_name = value
+        # Use setattr to trigger the update callback
+        if new_name != current:
+            self['name'] = new_name
+            # Manually trigger update since we're bypassing the property setter
+            try:
+                self.update_name(bpy.context)
+            except:
+                pass
+
+    display_name: StringProperty(
+        name="Name",
+        description="Layer name (without prefix)",
+        get=_get_display_name,
+        set=_set_display_name,
+    )
     
     def update_node_tree(self, context):
         if not self.auto_update_node_tree:
