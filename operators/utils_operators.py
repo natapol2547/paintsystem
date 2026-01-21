@@ -442,35 +442,47 @@ def split_area(context: bpy.types.Context, direction: str = 'VERTICAL', factor: 
 
 class PAINTSYSTEM_OT_SplitImageEditor(PSContextMixin, Operator):
     bl_idname = "paint_system.split_image_editor"
-    bl_label = "Split & Open Image Editor"
+    bl_label = "Toggle Image Editor"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Split the active area vertically and open Image Editor on the right"
+    bl_description = "Toggle Image Editor panel (open or close)"
 
     def execute(self, context):
+        from ..panels.common import is_editor_open
+        
         ps_ctx = self.parse_context(context)
         active_layer = ps_ctx.active_layer
         image = active_layer.image if active_layer else None
         
-        new_area = split_area(context)
-        if not new_area:
-            self.report({'WARNING'}, "Could not split the area.")
-            return {'CANCELLED'}
+        # Check if Image Editor is already open
+        if is_editor_open(context, 'IMAGE_EDITOR'):
+            # Close the Image Editor
+            for area in context.screen.areas:
+                if area.type == 'IMAGE_EDITOR':
+                    with context.temp_override(area=area):
+                        bpy.ops.screen.area_close()
+                    return {'FINISHED'}
+        else:
+            # Open the Image Editor
+            new_area = split_area(context)
+            if not new_area:
+                self.report({'WARNING'}, "Could not split the area.")
+                return {'CANCELLED'}
 
-        # Change the new area to Image Editor
-        new_area.type = 'IMAGE_EDITOR'
-        
-        if new_area.x < context.area.x:
-            new_area.type = context.area.type
-            context.area.type = 'IMAGE_EDITOR'
-        
-        if image:
-            space = new_area.spaces[0]
-            space.show_region_ui = False
-            space.image = image
-            space.ui_mode = 'PAINT'
-            space.overlay.show_overlays = active_layer.coord_type in {'AUTO', 'UV'}
+            # Change the new area to Image Editor
+            new_area.type = 'IMAGE_EDITOR'
             
-            execute_operator_in_area(new_area, 'image.view_all', fit_view=True)
+            if new_area.x < context.area.x:
+                new_area.type = context.area.type
+                context.area.type = 'IMAGE_EDITOR'
+            
+            if image:
+                space = new_area.spaces[0]
+                space.show_region_ui = False
+                space.image = image
+                space.ui_mode = 'PAINT'
+                space.overlay.show_overlays = active_layer.coord_type in {'AUTO', 'UV'}
+                
+                execute_operator_in_area(new_area, 'image.view_all', fit_view=True)
 
         return {'FINISHED'}
 

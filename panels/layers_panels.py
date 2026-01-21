@@ -255,11 +255,14 @@ def draw_painting_may_not_work(layout: bpy.types.UILayout, context: bpy.types.Co
     active_layer = ps_ctx.active_layer
     if not active_layer:
         return
-    if active_layer.type == 'IMAGE' and active_layer.coord_type not in ['UV', 'AUTO'] and not is_editor_open(context, 'IMAGE_EDITOR'):
+    if active_layer.type == 'IMAGE' and active_layer.coord_type not in ['UV', 'AUTO']:
         info_box = layout.box()
         info_col = info_box.column(align=True)
-        info_col.label(text="Painting in 3D may not work")
-        info_col.operator("paint_system.split_image_editor", text="Open Blender Image Editor", icon="BLENDER")
+        if is_editor_open(context, 'IMAGE_EDITOR'):
+            info_col.label(text="Image Editor is open")
+        else:
+            info_col.label(text="Painting in 3D may not work")
+        info_col.operator("paint_system.split_image_editor", text="Image Editor", icon="IMAGE", depress=is_editor_open(context, 'IMAGE_EDITOR'))
 
 class MAT_PT_Layers(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_Layers'
@@ -547,7 +550,9 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                         elif active_layer.edit_external_mode == 'VIEW_CAPTURE':
                             row.operator("paint_system.project_apply", text="Apply Edit")
                     if not is_editor_open(context, 'IMAGE_EDITOR'):
-                        row.operator("paint_system.split_image_editor", text="", icon="BLENDER")
+                        row.operator("paint_system.split_image_editor", text="", icon="IMAGE")
+                    else:
+                        row.operator("paint_system.split_image_editor", text="", icon="IMAGE", depress=True)
                 case 'ADJUSTMENT':
                     if not ps_ctx.ps_settings.use_legacy_ui:
                         box = layout.box()

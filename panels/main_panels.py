@@ -282,6 +282,23 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
         # layout.label(text="Welcome to the Paint System!")
         # layout.operator("paint_system.new_image_layer", text="Create New Image Layer")
 
+
+class NODE_PT_PaintSystemMainPanel(MAT_PT_PaintSystemMainPanel):
+    """Duplicate of the main Paint System panel for the Shader Editor UI region."""
+
+    bl_idname = "NODE_PT_PaintSystemMainPanel"
+    bl_space_type = "NODE_EDITOR"
+    bl_region_type = "UI"
+    bl_category = "Paint System"
+    bl_context = "shader"
+    bl_label = "Paint System"
+
+    def draw(self, context):
+        layout = self.layout
+        ps_ctx = self.parse_context(context)
+        
+        layout.label(text="Layers", icon='OUTLINER_DATA_GREASEPENCIL')
+
 class MAT_MT_DeleteGroupMenu(PSContextMixin, Menu):
     bl_label = "Delete Group"
     bl_idname = "MAT_MT_DeleteGroupMenu"
@@ -304,6 +321,7 @@ classes = (
     MATERIAL_UL_PaintSystemGroups,
     MAT_MT_PaintSystemMaterialSelectMenu,
     MAT_PT_PaintSystemMainPanel,
+    NODE_PT_PaintSystemMainPanel,
     MAT_PT_PaintSystemGroups,
     MAT_MT_DeleteGroupMenu,
 )
