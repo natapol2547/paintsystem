@@ -967,10 +967,47 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
         row.label(text="Setup Settings:", icon="NODETREE")
         box.prop(self, "group_name", text="Setup Name", icon='NODETREE')
 
+class PAINTSYSTEM_OT_SyncNames(PSContextMixin, Operator):
+    """Sync material, group, and layer names based on object name"""
+    bl_idname = "paint_system.sync_names"
+    bl_label = "Sync Names"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.ps_object is not None and ps_ctx.active_material is not None
+
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        base_name = ps_ctx.ps_object.name
+        
+        # Rename material
+        ps_ctx.active_material.name = base_name
+        
+        # Rename group with ps_ prefix
+        if ps_ctx.active_group:
+            ps_ctx.active_group.name = f"ps_{base_name}"
+            
+            # Rename layers with ObjectName_OriginalLayerName pattern
+            for channel in ps_ctx.active_group.channels:
+                for layer in channel.layers:
+                    # Strip any existing prefix before adding new one
+                    current_name = layer.name
+                    suffix = current_name.split('_', 1)[1] if '_' in current_name else current_name
+                    layer.name = f"{base_name}_{suffix}"
+        
+        redraw_panel(context)
+        self.report({'INFO'}, f"Synced names to: {base_name}")
+        return {'FINISHED'}
+
+
 classes = (
     PAINTSYSTEM_OT_NewGroup,
     PAINTSYSTEM_OT_DeleteGroup,
     PAINTSYSTEM_OT_MoveGroup,
+    PAINTSYSTEM_OT_ConvertMaterialToPS,
+    PAINTSYSTEM_OT_SyncNames,
     PAINTSYSTEM_OT_ConvertMaterialToPS,
 )
 
