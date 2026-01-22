@@ -547,6 +547,41 @@ def create_ps_image(name: str, width: int = 2048, height: int = 2048, use_udim_t
             raise ValueError("Objects and UV layer name are required for UDIM tiles")
     return img
 
+def get_name_prefix(context: bpy.types.Context) -> str:
+    """Get the name prefix for layers based on the object/material name.
+    
+    Returns the object/material name that should be used as a prefix for layer names
+    when automatic name syncing is enabled. Returns empty string if no valid object/material found.
+    """
+    try:
+        ps_ctx = parse_context(context)
+        # Try to get the material name first
+        if ps_ctx.active_material:
+            return ps_ctx.active_material.name
+        # Fall back to object name
+        if ps_ctx.ps_object:
+            return ps_ctx.ps_object.name
+    except:
+        pass
+    return ""
+
+def apply_name_prefix(base_name: str, context: bpy.types.Context) -> str:
+    """Apply the automatic name prefix to a base layer name.
+    
+    If automatic name syncing is enabled and a prefix is available,
+    returns "prefix_base_name", otherwise returns the base_name unchanged.
+    """
+    try:
+        prefs = get_preferences(context)
+        if not prefs.automatic_name_sync:
+            return base_name
+        prefix = get_name_prefix(context)
+        if prefix:
+            return f"{prefix}_{base_name}"
+    except:
+        pass
+    return base_name
+
 def ensure_paint_system_uv_map(context: bpy.types.Context):
     selection = context.selected_objects
 
@@ -822,7 +857,12 @@ class Layer(BaseNestedListItem):
                     self.image.name = self.name
             except:
                 pass
-        self.update_node_tree(context)
+        # Update node tree name with proper prefix
+        if context:
+            try:
+                self.update_node_tree(context)
+            except:
+                pass
     
     name: StringProperty(
         name="Name",
@@ -2039,11 +2079,14 @@ class Channel(BaseNestedListManager):
         handle_folder: bool = True,
         **kwargs
     ) -> 'Layer':
+        # Apply automatic name prefix if enabled
+        full_layer_name = apply_name_prefix(layer_name, context)
+        
         parent_id, insert_order = self.get_insertion_data(handle_folder=handle_folder, insert_at=insert_at)
         # Adjust existing items' order
         self.adjust_sibling_orders(parent_id, insert_order)
         layer = self.add_item(
-                layer_name,
+                full_layer_name,
                 "BLANK",
                 parent_id=parent_id,
                 order=insert_order
@@ -2551,10 +2594,12 @@ class Group(PropertyGroup):
                     if group.node_tree == node_tree:
                         mat = material
                         break
+        # Normalize to a single PS_ prefix to avoid duplicates like "PS PS_<name>"
+        group_label = self.name if self.name.startswith("PS_") else f"PS_{self.name}"
         if mat:
-            node_tree.name = f"PS {self.name} ({mat.name})"
+            node_tree.name = f"{group_label} ({mat.name})"
         else:
-            node_tree.name = f"PS {self.name} (None)"
+            node_tree.name = f"{group_label} (None)"
         # node_tree.name = f"Paint System ({self.name})"
         if not isinstance(node_tree, bpy.types.NodeTree):
             return
@@ -2939,7 +2984,9 @@ class MaterialData(PropertyGroup):
                 node_tree.nodes.remove(node)
         lm = ListManager(self, 'groups', self, 'active_index')
         new_group = lm.add_item()
-        new_group.name = group_name
+        # Apply PS_ prefix to group names
+        ps_prefixed_name = f"PS_{group_name}"
+        new_group.name = ps_prefixed_name
         new_group.node_tree = node_tree
         new_group.update_node_tree(context)
         return new_group
@@ -3335,18 +3382,6 @@ def register():
     # Hook into material name property to sync names
     def material_name_update(self, context):
         update_material_name(self, context)
-    
-    # Store original update function
-    original_update = bpy.types.Material.bl_rna.properties['name'].update
-    
-    # Wrap it with our sync function
-    def wrapped_update(self, context):
-        if original_update:
-            original_update(self, context)
-        material_name_update(self, context)
-    
-    # Override the update callback
-    bpy.types.Material.bl_rna.properties['name'].update = wrapped_update
     
 def unregister():
     """Unregister the Paint System data module."""
