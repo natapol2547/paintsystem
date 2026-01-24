@@ -3,7 +3,7 @@ schema_version = "1.0.0"
 # Example of manifest file for a Blender extension
 # Change the values according to your extension
 id = "paint_system"
-version = "2.1.5"
+version = "2.1.6"
 name = "Paint System"
 tagline = "Addon for adding painting system to blender"
 maintainer = "Tawan Sunflower"
