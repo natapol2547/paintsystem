@@ -26,12 +26,12 @@ class PaintSystemPreferences:
     preferred_coord_type: str = 'UNDETECTED'
     show_opacity_in_layer_list: bool = True
 
-def get_preferences(context) -> PaintSystemPreferences:
-    """Get the Paint System preferences"""
-    ps = addon_package()
-    # Be robust across classic add-ons and new Extensions, and during early init
-    try:
-        return context.preferences.addons[ps].preferences
-    except Exception:
-        # Fallback: return a safe default so UI can render without crashing
-        return PaintSystemPreferences()
+# def get_preferences(context) -> PaintSystemPreferences:
+#     """Get the Paint System preferences"""
+#     ps = addon_package()
+#     # Be robust across classic add-ons and new Extensions, and during early init
+#     try:
+#         return context.preferences.addons[ps].preferences
+#     except Exception:
+#         # Fallback: return a safe default so UI can render without crashing
+#         return PaintSystemPreferences()
