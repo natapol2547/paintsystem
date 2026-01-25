@@ -257,6 +257,79 @@ class PAINTSYSTEM_OT_RecalculateNormals(Operator):
             bpy.ops.object.mode_set(mode=orig_mode)
         return {'FINISHED'}
 
+class PAINTSYSTEM_OT_ToggleTransformGizmos(Operator):
+    bl_idname = "paint_system.toggle_transform_gizmos"
+    bl_label = "Toggle Transform Gizmos"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Toggle transform gizmos with mode-aware behavior"
+
+    @classmethod
+    def poll(cls, context):
+        # Must have a 3D View space to toggle gizmos
+        return context.area and context.area.type == 'VIEW_3D'
+
+    def execute(self, context):
+        # Access active 3D view space
+        space = context.area.spaces[0]
+        if space.type != 'VIEW_3D':
+            return {'CANCELLED'}
+
+        wm = context.window_manager
+        
+        # Preserve overlay state before changing gizmos
+        overlay_state = None
+        if hasattr(space, 'overlay'):
+            overlay_state = space.overlay.show_overlays
+        
+        # Check if any gizmo is currently ON
+        current_translate = bool(getattr(space, "show_gizmo_object_translate", False))
+        current_rotate = bool(getattr(space, "show_gizmo_object_rotate", False))
+        current_scale = bool(getattr(space, "show_gizmo_object_scale", False))
+        
+        any_gizmo_on = current_translate or current_rotate or current_scale
+        
+        if any_gizmo_on:
+            # If any gizmo is ON, save their state and turn them all OFF
+            wm["ps_gizmo_translate"] = current_translate
+            wm["ps_gizmo_rotate"] = current_rotate
+            wm["ps_gizmo_scale"] = current_scale
+            # Mark that gizmos are manually toggled OFF
+            wm["ps_gizmo_toggled_off"] = True
+            
+            space.show_gizmo_object_translate = False
+            space.show_gizmo_object_rotate = False
+            space.show_gizmo_object_scale = False
+        else:
+            # If all gizmos are OFF, check if we have saved state to restore
+            has_saved = wm.get("ps_gizmo_translate") is not None
+            if has_saved:
+                # Restore exactly what was saved (not defaults)
+                translate_pref = wm.get("ps_gizmo_translate", False)
+                rotate_pref = wm.get("ps_gizmo_rotate", False)
+                scale_pref = wm.get("ps_gizmo_scale", False)
+            else:
+                # First time - default to just translate and rotate
+                translate_pref = True
+                rotate_pref = True
+                scale_pref = False
+                # Save these defaults
+                wm["ps_gizmo_translate"] = translate_pref
+                wm["ps_gizmo_rotate"] = rotate_pref
+                wm["ps_gizmo_scale"] = scale_pref
+            
+            # Mark that gizmos are manually toggled ON
+            wm["ps_gizmo_toggled_off"] = False
+            
+            space.show_gizmo_object_translate = translate_pref
+            space.show_gizmo_object_rotate = rotate_pref
+            space.show_gizmo_object_scale = scale_pref
+        
+        # Restore overlay state if it was affected
+        if overlay_state is not None and hasattr(space, 'overlay'):
+            space.overlay.show_overlays = overlay_state
+
+        return {'FINISHED'}
+
 class PAINTSYSTEM_OT_AddCameraPlane(Operator):
     bl_idname = "paint_system.add_camera_plane"
     bl_label = "Add Camera Plane"
@@ -374,60 +447,6 @@ class PAINTSYSTEM_OT_DuplicatePaintSystemData(PSContextMixin, MultiMaterialOpera
         return {'FINISHED'}
 
 
-class PAINTSYSTEM_OT_ToggleTransformGizmos(Operator):
-    bl_idname = "paint_system.toggle_transform_gizmos"
-    bl_label = "Toggle Transform Gizmos"
-    bl_options = {'REGISTER'}
-    bl_description = "Toggle transform gizmos on/off with state memory for paint mode"
-
-    def execute(self, context):
-        space = context.area.spaces[0] if context.area and context.area.spaces else None
-        if not space or space.type != 'VIEW_3D':
-            return {'CANCELLED'}
-        
-        wm = context.window_manager
-        obj = context.active_object
-        
-        # Determine current gizmo state
-        gizmos_enabled = (space.show_gizmo_object_translate or
-                         space.show_gizmo_object_rotate or
-                         space.show_gizmo_object_scale)
-        
-        # Treat paint, sculpt, vertex/weight paint, and GP draw modes the same for gizmos
-        paint_like_modes = {
-            'PAINT_TEXTURE',
-            'SCULPT',
-            'PAINT_VERTEX',
-            'PAINT_WEIGHT',
-            'PAINT_GPENCIL',
-            'PAINT_GPENCIL_LEGACY',
-            'PAINT_GREASE_PENCIL',
-        }
-        in_paint_mode = obj and obj.mode in paint_like_modes
-        
-        if in_paint_mode:
-            # Store current gizmo state before entering paint mode
-            wm["ps_gizmo_translate"] = space.show_gizmo_object_translate
-            wm["ps_gizmo_rotate"] = space.show_gizmo_object_rotate
-            wm["ps_gizmo_scale"] = space.show_gizmo_object_scale
-            # Keep gizmos disabled during paint mode
-            space.show_gizmo_object_translate = False
-            space.show_gizmo_object_rotate = False
-            space.show_gizmo_object_scale = False
-        else:
-            # Not in paint mode - toggle gizmos normally
-            new_state = not gizmos_enabled
-            space.show_gizmo_object_translate = new_state
-            space.show_gizmo_object_rotate = new_state
-            space.show_gizmo_object_scale = new_state
-        
-        # Redraw the viewport
-        for area in context.screen.areas:
-            if area.type == 'VIEW_3D':
-                area.tag_redraw()
-        
-        return {'FINISHED'}
-
 def split_area(context: bpy.types.Context, direction: str = 'VERTICAL', factor: float = 0.55) -> bpy.types.Area | None:
     screen = context.screen
     old_areas = set(screen.areas)
@@ -542,12 +561,57 @@ classes = (
     PAINTSYSTEM_OT_OpenPaintSystemPreferences,
     PAINTSYSTEM_OT_FlipNormals,
     PAINTSYSTEM_OT_RecalculateNormals,
+    PAINTSYSTEM_OT_ToggleTransformGizmos,
     PAINTSYSTEM_OT_AddCameraPlane,
     PAINTSYSTEM_OT_HidePaintingTips,
     PAINTSYSTEM_OT_DuplicatePaintSystemData,
-    PAINTSYSTEM_OT_ToggleTransformGizmos,
     PAINTSYSTEM_OT_ToggleImageEditor,
     PAINTSYSTEM_OT_FocusPSNode,
 )
 
-register, unregister = register_classes_factory(classes)
+addon_keymaps = []
+
+_register, _unregister = register_classes_factory(classes)
+
+def register():
+    """Register operators with idempotent error handling."""
+    # Defensive cleanup in case Blender kept classes from a previous load
+    # (notably in CI where the addon may be enabled twice within one process).
+    for cls in classes:
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception:
+            # Fine if it was not registered yet.
+            pass
+    try:
+        _register()
+    except ValueError as e:
+        if "already registered" in str(e):
+            print(f"Paint System: Operators already registered (module reload): {e}")
+        else:
+            raise
+    
+    wm = bpy.context.window_manager
+    kc = wm.keyconfigs.addon if hasattr(wm, "keyconfigs") else None
+    if kc:
+        km = kc.keymaps.new(name="3D View", space_type='VIEW_3D')
+        kmi = km.keymap_items.new(
+            PAINTSYSTEM_OT_ColorSample.bl_idname, 'I', 'PRESS', repeat=True)
+        addon_keymaps.append((km, kmi))
+        kmi = km.keymap_items.new(
+            PAINTSYSTEM_OT_ToggleBrushEraseAlpha.bl_idname, type='E', value='PRESS')
+        addon_keymaps.append((km, kmi))
+
+def unregister():
+    """Unregister operators with idempotent error handling."""
+    for km, kmi in addon_keymaps:
+        try:
+            km.keymap_items.remove(kmi)
+        except Exception as e:
+            print(f"Paint System: Error removing keymap: {e}")
+    addon_keymaps.clear()
+    
+    try:
+        _unregister()
+    except Exception as e:
+        print(f"Paint System: Error unregistering operators: {e}")
