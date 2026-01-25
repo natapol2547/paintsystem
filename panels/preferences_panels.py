@@ -19,12 +19,12 @@ class PaintSystemPreferences(AddonPreferences):
     show_hex_color: BoolProperty(
         name="Show Hex Color",
         description="Show hex color in the color picker settings",
-        default=False
+        default=True
     )
     show_more_color_picker_settings: BoolProperty(
         name="Show More Color Picker Settings",
         description="Show more color picker settings",
-        default=False
+        default=True
     )
     
     show_opacity_in_layer_list: BoolProperty(
@@ -88,7 +88,7 @@ class PaintSystemPreferences(AddonPreferences):
     show_hsv_sliders_rmb: BoolProperty(
         name="Show Hue/Saturation/Value sliders (RMB)",
         description="Show HSV sliders under the color wheel in the Texture Paint right-click popover",
-        default=False
+        default=True
     )
     show_active_palette_rmb: BoolProperty(
         name="Show Active Palette (RMB)",
@@ -185,7 +185,7 @@ class PaintSystemPreferences(AddonPreferences):
         rmb_box.label(text="Texture Paint Right Click Menu", icon='MOUSE_RMB')
         rmb_box.prop(self, "color_picker_scale_rmb", text="Color Wheel Scale")
         rmb_box.prop(self, "show_hsv_sliders_rmb", text="Show HSV sliders in RMB popover")
-        # rmb_box.prop(self, "show_active_palette_rmb", text="Show Active Palette in RMB popover")
+        rmb_box.prop(self, "show_active_palette_rmb", text="Show Active Palette in RMB popover")
         rmb_box.prop(self, "show_brush_settings_rmb", text="Show Brush Controls in RMB popover")
         
         # Version check settings
