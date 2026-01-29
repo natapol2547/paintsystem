@@ -1,5 +1,5 @@
 import bpy
-from bpy.props import BoolProperty, EnumProperty
+from bpy.props import BoolProperty, EnumProperty, IntProperty
 from bpy.types import Node, NodeTree, Operator
 from bpy.utils import register_classes_factory
 from bpy_extras.node_utils import connect_sockets, find_base_socket_type
@@ -512,6 +512,23 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
         default='CONVERT'
     )
     
+    apply_to_all_objects: BoolProperty(
+        name="Apply to All Objects",
+        description="Apply to all objects using the same material",
+        default=True
+    )
+    
+    detected_objects_count: IntProperty(
+        name="Detected Objects Count",
+        description="Number of objects detected with the same material",
+        default=0,
+        options={'SKIP_SAVE'}
+    )
+    
+    def execute(self, context):
+        # Override parent execute to control multiple_objects based on apply_to_all_objects
+        self.multiple_objects = self.apply_to_all_objects
+        return super().execute(context)
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
@@ -790,6 +807,25 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
         ps_ctx = self.parse_context(context)
         mat = ps_ctx.active_material
         
+        # Detect all objects that share the same material
+        if mat:
+            objects_with_material = []
+            for obj in context.scene.objects:
+                if obj.type == 'MESH' and obj.data.materials:
+                    if mat in obj.data.materials[:]:
+                        objects_with_material.append(obj)
+            
+            self.detected_objects_count = len(objects_with_material)
+            
+            # If user wants to apply to all objects, select them
+            if self.apply_to_all_objects and objects_with_material:
+                for obj in context.selected_objects:
+                    obj.select_set(False)
+                for obj in objects_with_material:
+                    obj.select_set(True)
+                if objects_with_material and context.view_layer.objects.active not in objects_with_material:
+                    context.view_layer.objects.active = objects_with_material[0]
+        
         # Set group name to material name
         if mat:
             base_name = mat.name
@@ -868,6 +904,16 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
     def draw(self, context):
         layout = self.layout
         self.multiple_objects_ui(layout, context)
+        
+        # Show option to apply to all objects with the material
+        if self.detected_objects_count > 1:
+            box = layout.box()
+            box.alert = not self.apply_to_all_objects
+            row = box.row()
+            row.prop(self, "apply_to_all_objects", text=f"Apply to All {self.detected_objects_count} Objects", icon='OBJECT_DATA')
+            if not self.apply_to_all_objects:
+                info_row = box.row()
+                info_row.label(text="Will only affect current object", icon='INFO')
         
         box = layout.box()
         row = box.row()
