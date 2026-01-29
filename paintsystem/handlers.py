@@ -324,32 +324,15 @@ def paint_system_object_update(scene: bpy.types.Scene, depsgraph: bpy.types.Deps
 
 @bpy.app.handlers.persistent
 def material_name_update_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph = None):
-    if not depsgraph:
-        return
-    if not depsgraph.id_type_updated('MATERIAL'):
-        return
     try:
-        for update in depsgraph.updates:
-            material = update.id
-            if not isinstance(material, bpy.types.Material):
-                continue
+        for material in bpy.data.materials:
             if not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
                 continue
             last_name = material.ps_mat_data.last_material_name
             if last_name and last_name != material.name:
                 update_material_name(material, bpy.context)
             elif not last_name:
-                inferred_old = ""
-                if material.ps_mat_data.groups:
-                    for group in material.ps_mat_data.groups:
-                        if group.name.startswith("PS_"):
-                            inferred_old = group.name[3:]
-                            break
-                if inferred_old and inferred_old != material.name:
-                    material.ps_mat_data.last_material_name = inferred_old
-                    update_material_name(material, bpy.context)
-                else:
-                    material.ps_mat_data.last_material_name = material.name
+                material.ps_mat_data.last_material_name = material.name
     except Exception:
         pass
 
@@ -428,4 +411,5 @@ def unregister():
     bpy.app.handlers.save_pre.remove(save_handler)
     bpy.app.handlers.load_post.remove(refresh_image)
     bpy.app.handlers.depsgraph_update_post.remove(paint_system_object_update)
+    bpy.app.handlers.depsgraph_update_post.remove(material_name_update_handler)
     bpy.app.handlers.depsgraph_update_post.remove(color_history_handler)
