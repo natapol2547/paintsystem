@@ -2,7 +2,7 @@ import bpy
 
 from .versioning import get_layer_parent_map, migrate_global_layer_data, migrate_blend_mode, migrate_source_node, migrate_socket_names, update_layer_name, update_layer_version, update_library_nodetree_version
 from .version_check import get_latest_version
-from .data import sort_actions, parse_context, get_all_layers, is_valid_uuidv4
+from .data import sort_actions, parse_context, get_all_layers, is_valid_uuidv4, update_material_name
 from .image import save_image
 from .graph.basic_layers import get_layer_version_for_type
 import time
@@ -227,6 +227,21 @@ def paint_system_object_update(scene: bpy.types.Scene, depsgraph: bpy.types.Deps
                 pass
 
 
+@bpy.app.handlers.persistent
+def material_name_update_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph = None):
+    try:
+        for material in bpy.data.materials:
+            if not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
+                continue
+            last_name = material.ps_mat_data.last_material_name
+            if last_name and last_name != material.name:
+                update_material_name(material, bpy.context)
+            elif not last_name:
+                material.ps_mat_data.last_material_name = material.name
+    except Exception:
+        pass
+
+
 # --- On Addon Enable ---
 def on_addon_enable():
     load_post(bpy.context.scene)
@@ -246,6 +261,7 @@ def register():
     bpy.app.handlers.save_pre.append(save_handler)
     bpy.app.handlers.load_post.append(refresh_image)
     bpy.app.handlers.depsgraph_update_post.append(paint_system_object_update)
+    bpy.app.handlers.depsgraph_update_post.append(material_name_update_handler)
     bpy.app.handlers.depsgraph_update_post.append(color_history_handler)
     bpy.app.timers.register(on_addon_enable, first_interval=0.1)
     bpy.msgbus.subscribe_rna(
@@ -274,4 +290,5 @@ def unregister():
     bpy.app.handlers.save_pre.remove(save_handler)
     bpy.app.handlers.load_post.remove(refresh_image)
     bpy.app.handlers.depsgraph_update_post.remove(paint_system_object_update)
+    bpy.app.handlers.depsgraph_update_post.remove(material_name_update_handler)
     bpy.app.handlers.depsgraph_update_post.remove(color_history_handler)
