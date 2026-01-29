@@ -3,7 +3,7 @@ import bpy
 from .versioning import get_layer_parent_map, migrate_global_layer_data, migrate_blend_mode, migrate_source_node, migrate_socket_names, update_layer_name, update_layer_version, update_library_nodetree_version
 from .version_check import get_latest_version
 from .context import parse_context
-from .data import sort_actions, get_all_layers, is_valid_uuidv4, iter_all_layers
+from .data import sort_actions, get_all_layers, is_valid_uuidv4, iter_all_layers, update_material_name
 from .image import save_image
 from .graph.basic_layers import get_layer_version_for_type
 import time
@@ -324,6 +324,21 @@ def paint_system_object_update(scene: bpy.types.Scene, depsgraph: bpy.types.Deps
                 pass
 
 
+@bpy.app.handlers.persistent
+def material_name_update_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph = None):
+    try:
+        for material in bpy.data.materials:
+            if not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
+                continue
+            last_name = material.ps_mat_data.last_material_name
+            if last_name and last_name != material.name:
+                update_material_name(material, bpy.context)
+            elif not last_name:
+                material.ps_mat_data.last_material_name = material.name
+    except Exception:
+        pass
+
+
 # --- On Addon Enable ---
 def on_addon_enable():
     load_post(bpy.context.scene)
@@ -344,9 +359,12 @@ def register():
     bpy.app.handlers.load_post.append(refresh_image)
     if hasattr(bpy.app.handlers, 'scene_update_pre'):
         bpy.app.handlers.scene_update_pre.append(paint_system_object_update)
+        bpy.app.handlers.scene_update_pre.append(material_name_update_handler)
         bpy.app.handlers.scene_update_pre.append(color_history_handler)
+        bpy.app.handlers.scene_update_pre.append(transform_gizmo_mode_handler)
     else:
         bpy.app.handlers.depsgraph_update_post.append(paint_system_object_update)
+        bpy.app.handlers.depsgraph_update_post.append(material_name_update_handler)
         bpy.app.handlers.depsgraph_update_post.append(color_history_handler)
         bpy.app.handlers.depsgraph_update_post.append(transform_gizmo_mode_handler)
     bpy.app.timers.register(on_addon_enable, first_interval=0.1)
@@ -377,8 +395,11 @@ def unregister():
     bpy.app.handlers.load_post.remove(refresh_image)
     if hasattr(bpy.app.handlers, 'scene_update_pre'):
         bpy.app.handlers.scene_update_pre.remove(paint_system_object_update)
+        bpy.app.handlers.scene_update_pre.remove(material_name_update_handler)
         bpy.app.handlers.scene_update_pre.remove(color_history_handler)
+        bpy.app.handlers.scene_update_pre.remove(transform_gizmo_mode_handler)
     else:
         bpy.app.handlers.depsgraph_update_post.remove(paint_system_object_update)
+        bpy.app.handlers.depsgraph_update_post.remove(material_name_update_handler)
         bpy.app.handlers.depsgraph_update_post.remove(color_history_handler)
         bpy.app.handlers.depsgraph_update_post.remove(transform_gizmo_mode_handler)
