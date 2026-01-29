@@ -2932,6 +2932,11 @@ class PaintSystemGlobalData(PropertyGroup):
 
 class MaterialData(PropertyGroup):
     """Custom data for channels in the Paint System"""
+    last_material_name: StringProperty(
+        name="Last Material Name",
+        description="Cached material name for rename tracking",
+        default=""
+    )
     groups: CollectionProperty(
         type=Group,
         name="Groups",
@@ -3305,6 +3310,7 @@ def update_material_name(material, context):
         return
     
     new_mat_name = material.name
+    material.ps_mat_data.last_material_name = new_mat_name
     
     # Update active group name to match material (with ps_ prefix for display)
     if material.ps_mat_data.groups:
