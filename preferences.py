@@ -28,6 +28,7 @@ class PaintSystemPreferences:
     use_panel_quick_access: bool = False
     developer_mode: bool = False
     automatic_name_sync: bool = True
+    automatic_name_syncing: bool = True
 
 def get_preferences(context) -> PaintSystemPreferences:
     """Get the Paint System preferences"""
