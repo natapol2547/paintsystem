@@ -894,16 +894,23 @@ class Layer(BaseNestedListItem):
     ref_layer_id: StringProperty()
     
     def update_name(self, context):
+        if self.updating_name_flag:
+            return
+        self.updating_name_flag = True
         if self.layer_name != self.name:
             self.layer_name = self.name
-        # Sync image name if automatic name syncing is enabled
-        if context and self.type == 'IMAGE' and self.image:
-            try:
-                prefs = get_preferences(context)
-                if prefs.automatic_name_sync:
-                    self.image.name = self.name
-            except:
-                pass
+
+        prefs = get_preferences(context)
+        if getattr(prefs, "automatic_name_syncing", True):
+            material = find_material_for_layer(self)
+            if material:
+                new_name = ensure_layer_name_prefix(self.name, material.name)
+                if new_name != self.name:
+                    self.name = new_name
+                    self.layer_name = new_name
+            if self.type == 'IMAGE' and self.image:
+                self.image.name = self.name
+        self.updating_name_flag = False
         self.update_node_tree(context)
     
     name: StringProperty(
@@ -911,6 +918,31 @@ class Layer(BaseNestedListItem):
         description="Layer name",
         default="Layer",
         update=update_name
+    )
+    updating_name_flag: BoolProperty(
+        default=False,
+        options={'SKIP_SAVE'}  # Don't save this flag in the .blend file
+    )
+    
+    def get_display_name(self):
+        """Return only the suffix part of the name (after underscore) for UI display"""
+        if '_' in self.name:
+            return self.name.split('_', 1)[1]
+        return self.name
+    
+    def set_display_name(self, value):
+        """Set the layer name preserving the material prefix"""
+        if '_' in self.name:
+            prefix = self.name.split('_', 1)[0]
+            self.name = f"{prefix}_{value}"
+        else:
+            self.name = value
+    
+    display_name: StringProperty(
+        name="Name",
+        description="Layer name without prefix",
+        get=get_display_name,
+        set=set_display_name
     )
     
     def update_node_tree(self, context):
@@ -963,7 +995,7 @@ class Layer(BaseNestedListItem):
         
         match self.type:
             case "IMAGE":
-                if self.image:
+                if self.image and getattr(get_preferences(context), "automatic_name_syncing", True):
                     self.image.name = self.name
                 layer_graph = create_image_graph(self)
             case "FOLDER":
@@ -2625,13 +2657,9 @@ class Group(PropertyGroup):
                         mat = material
                         break
         if mat:
-            new_name = self.name if self.name == mat.name else f"{self.name} ({mat.name})"
+            node_tree.name = f"PS {self.name} ({mat.name})"
         else:
-            new_name = self.name
-        try:
-            node_tree.name = new_name
-        except AttributeError:
-            pass
+            node_tree.name = f"PS {self.name} (None)"
         # node_tree.name = f"Paint System ({self.name})"
         if not isinstance(node_tree, bpy.types.NodeTree):
             return
@@ -2768,7 +2796,7 @@ class Group(PropertyGroup):
                             transfer_connection(mat_node_tree, alpha_socket, node_group.inputs['Color Alpha'])
                             connect_sockets(node_group.outputs['Color Alpha'], alpha_socket)
                 if add_layers:
-                    channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+                    channel.create_layer(context, layer_name=f'{mat.name}_Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
                 return channel
             case "METALLIC":
                 channel = self.create_channel(context, channel_name='Metallic', channel_type='FLOAT', use_alpha=False, use_max_min=True, color_space='NONCOLOR')
@@ -2796,8 +2824,8 @@ class Group(PropertyGroup):
                         connect_sockets(node_group.outputs['Normal'], normal_socket)
                 if add_layers:
                     if not socket_transferred:
-                        channel.create_layer(context, layer_name='Normal', layer_type='GEOMETRY', geometry_type='OBJECT_NORMAL', normalize_normal=True)
-                    channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+                        channel.create_layer(context, layer_name=f'{mat.name}_Normal', layer_type='GEOMETRY', geometry_type='OBJECT_NORMAL', normalize_normal=True)
+                    channel.create_layer(context, layer_name=f'{mat.name}_Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
             case _:
                 raise ValueError(f"Invalid template: {template}")
     
@@ -3315,10 +3343,7 @@ class PaintSystemGlobalData(PropertyGroup):
         self.active_clipboard_index = 0
 
 class MaterialData(PropertyGroup):
-    """Per-material Paint System data (stored on ``Material.ps_mat_data``).
-    
-    Contains groups, preview state, and helper methods for creating groups.
-    """
+    """Custom data for channels in the Paint System"""
     groups: CollectionProperty(
         type=Group,
         name="Groups",
@@ -3400,6 +3425,7 @@ class Filter(PropertyGroup):
         default=1
     )
 
+
 def find_material_for_layer(layer: "Layer") -> Material | None:
     target_layer = layer.get_layer_data() if hasattr(layer, "get_layer_data") else layer
     if not target_layer:
@@ -3439,37 +3465,6 @@ def ensure_layer_name_prefix(layer_name: str, material_name: str, old_material_n
     return f"{material_name}_{suffix}"
 
 
-def _replace_prefix(name: str, old_prefix: str, new_prefix: str) -> str | None:
-    if not name or not old_prefix or not new_prefix:
-        return None
-    if name == old_prefix:
-        return new_prefix
-    if name.startswith(f"{old_prefix}_"):
-        return f"{new_prefix}_{name[len(old_prefix) + 1:]}"
-    return None
-
-
-def ensure_group_name_prefix(group_name: str, material_name: str, old_material_name: str | None = None) -> str:
-    new_prefix = material_name
-    if group_name == new_prefix or group_name.startswith(f"{new_prefix}_"):
-        return group_name
-    if old_material_name:
-        renamed = _replace_prefix(group_name, old_material_name, new_prefix)
-        if renamed:
-            return renamed
-        renamed = _replace_prefix(group_name, f"PS_{old_material_name}", new_prefix)
-        if renamed:
-            return renamed
-    if group_name.startswith("PS_"):
-        stripped = group_name[3:]
-        if stripped == new_prefix or stripped.startswith(f"{new_prefix}_"):
-            return stripped
-        if "_" in stripped:
-            suffix = stripped.split("_", 1)[1]
-            return f"{new_prefix}_{suffix}"
-    return new_prefix
-
-
 def _set_layer_name(layer: "Layer", new_name: str, context: Context):
     if not layer or not new_name:
         return
@@ -3496,33 +3491,16 @@ def update_material_name(material: Material, context: Context = None, force: boo
     old_name = ps_mat_data.last_material_name or material.name
     new_name = material.name
 
-    # Update group names to material name (no PS_ prefix)
-    group_old_names: dict[int, str] = {}
-    group_new_names: dict[int, str] = {}
-    for group_idx, group in enumerate(ps_mat_data.groups):
-        group_old_names[group_idx] = group.name
-        base_name = ensure_group_name_prefix(group.name, new_name, old_name)
-        reserved = [g.name for g in ps_mat_data.groups if g != group]
-        reserved.extend(group_new_names.values())
-        unique_name = get_next_unique_name(base_name, reserved)
-        group_new_names[group_idx] = unique_name
+    # Update group names with PS_ prefix
+    for group in ps_mat_data.groups:
+        base_name = f"PS_{new_name}"
+        unique_name = get_next_unique_name(base_name, [g.name for g in ps_mat_data.groups if g != group])
         if group.name != unique_name:
             group.name = unique_name
 
     # Update layer names (all types) and image datablocks
-    for group_idx, group in enumerate(ps_mat_data.groups):
+    for group in ps_mat_data.groups:
         for channel in group.channels:
-            bake_image = channel.bake_image
-            if bake_image:
-                old_group_name = group_old_names.get(group_idx, group.name)
-                new_group_name = group_new_names.get(group_idx, group.name)
-                new_bake_name = _replace_prefix(bake_image.name, old_group_name, new_group_name)
-                if not new_bake_name:
-                    new_bake_name = _replace_prefix(bake_image.name, old_name, new_name)
-                if not new_bake_name:
-                    new_bake_name = _replace_prefix(bake_image.name, f"PS_{old_name}", f"PS_{new_name}")
-                if new_bake_name and bake_image.name != new_bake_name:
-                    bake_image.name = new_bake_name
             for layer in channel.layers:
                 if layer.is_linked:
                     continue
@@ -3546,12 +3524,8 @@ def sync_names(context: Context, material: Material | None = None, force: bool =
     if ps_ctx.active_material:
         update_material_name(ps_ctx.active_material, context, force=force)
 
-def iter_all_layers() -> Generator[tuple[Material, Group, Channel, Layer], None, None]:
-    """Yield (material, group, channel, layer) for every layer across all materials.
-    
-    This is the canonical way to iterate over all Paint System layers and avoids
-    duplicating the four-level nested loop throughout the codebase.
-    """
+def get_all_layers() -> list[Layer]:
+    layers = []
     for material in bpy.data.materials:
         if hasattr(material, 'ps_mat_data'):
             for group in material.ps_mat_data.groups:
