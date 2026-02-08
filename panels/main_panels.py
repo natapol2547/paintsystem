@@ -189,8 +189,8 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
         layout = self.layout
         ps_ctx = self.parse_context(context)
         row = layout.row(align=True)
-        groups = ps_ctx.ps_mat_data.groups
-        if ps_ctx.ps_mat_data and groups:
+        if ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.groups:
+            groups = ps_ctx.ps_mat_data.groups
             if len(groups) > 1:
                 row.popover("MAT_PT_PaintSystemGroups", text="", icon="NODETREE")
             row.operator("paint_system.new_group", icon='ADD', text="")
