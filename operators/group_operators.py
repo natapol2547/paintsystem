@@ -448,7 +448,6 @@ class PAINTSYSTEM_OT_MoveGroup(PSContextMixin, MultiMaterialOperator):
         redraw_panel(context)
         return {'FINISHED'}
 
-
 class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, MultiMaterialOperator):
     """Convert an existing material to Paint System by replacing Principled BSDF with paint system groups"""
     bl_idname = "paint_system.convert_material_to_ps"
@@ -940,8 +939,6 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
         row.alignment = "CENTER"
         row.label(text="Setup Settings:", icon="NODETREE")
         box.prop(self, "group_name", text="Setup Name", icon='NODETREE')
-
-
 classes = (
     PAINTSYSTEM_OT_NewGroup,
     PAINTSYSTEM_OT_DeleteGroup,

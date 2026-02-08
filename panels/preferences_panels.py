@@ -33,12 +33,6 @@ class PaintSystemPreferences(AddonPreferences):
         default=True
     )
 
-    automatic_name_sync: BoolProperty(
-        name="Automatic Name Syncing",
-        description="Automatically sync layer names with image names when creating or renaming layers",
-        default=True
-    )
-
     use_compact_design: BoolProperty(
         name="Use Compact Design",
         description="Use a more compact design for the UI",
@@ -194,7 +188,6 @@ class PaintSystemPreferences(AddonPreferences):
         layout.prop(self, "show_tooltips", text="Show Tooltips")
         layout.prop(self, "use_compact_design", text="Use Compact Design")
         layout.prop(self, "show_opacity_in_layer_list", text="Show Opacity in Layer List")
-        layout.prop(self, "automatic_name_sync", text="Automatic Name Syncing")
         layout.prop(self, "use_legacy_ui", text="Use Legacy UI")
         layout.prop(self, "use_panel_quick_access", text="Use Panel Quick Access")
         layout.prop(self, "automatic_name_syncing", text="Automatic Name Syncing")
