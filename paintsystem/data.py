@@ -2925,11 +2925,6 @@ class PaintSystemGlobalData(PropertyGroup):
 
 class MaterialData(PropertyGroup):
     """Custom data for channels in the Paint System"""
-    last_material_name: StringProperty(
-        name="Last Material Name",
-        description="Cached material name for rename tracking",
-        default=""
-    )
     groups: CollectionProperty(
         type=Group,
         name="Groups",
@@ -3402,32 +3397,6 @@ class LegacyPaintSystemContextParser:
             if match:
                 return node
         return None
-
-def update_material_name(material, context):
-    """Update group name and all image layer names when material name changes"""
-    if not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
-        return
-    
-    new_mat_name = material.name
-    material.ps_mat_data.last_material_name = new_mat_name
-    
-    # Update active group name to match material (with ps_ prefix for display)
-    if material.ps_mat_data.groups:
-        active_group = material.ps_mat_data.groups[material.ps_mat_data.active_index] if material.ps_mat_data.active_index < len(material.ps_mat_data.groups) else material.ps_mat_data.groups[0]
-        if active_group:
-            # Update group name with ps_ prefix
-            active_group.name = f"ps_{new_mat_name}"
-            
-            # Update all image layer names in all channels
-            for channel in active_group.channels:
-                for layer in channel.layers:
-                    if layer.type == 'IMAGE':
-                        # Strip old prefix and add new one
-                        current_name = layer.name
-                        suffix = current_name.split('_', 1)[1] if '_' in current_name else current_name
-                        new_layer_name = f"{new_mat_name}_{suffix}"
-                        layer.name = new_layer_name
-                        # Image name is updated by layer.update_name callback
 
 classes = (
     MarkerAction,
