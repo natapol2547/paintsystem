@@ -15,6 +15,8 @@ import bpy
 from bpy.utils import register_submodule_factory
 from .custom_icons import load_icons, unload_icons
 
+# Ensure subpackage is available for extension loader expectations
+from . import paintsystem as paintsystem
 bl_info = {
     "name": "Paint System",
     "author": "Tawan Sunflower, @blastframe",
