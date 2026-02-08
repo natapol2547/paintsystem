@@ -329,15 +329,32 @@ def paint_system_object_update(scene: bpy.types.Scene, depsgraph: bpy.types.Deps
 
 @bpy.app.handlers.persistent
 def material_name_update_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph = None):
+    if not depsgraph:
+        return
+    if not depsgraph.id_type_updated('MATERIAL'):
+        return
     try:
-        for material in bpy.data.materials:
+        for update in depsgraph.updates:
+            material = update.id
+            if not isinstance(material, bpy.types.Material):
+                continue
             if not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
                 continue
             last_name = material.ps_mat_data.last_material_name
             if last_name and last_name != material.name:
                 update_material_name(material, bpy.context)
             elif not last_name:
-                material.ps_mat_data.last_material_name = material.name
+                inferred_old = ""
+                if material.ps_mat_data.groups:
+                    for group in material.ps_mat_data.groups:
+                        if group.name.startswith("PS_"):
+                            inferred_old = group.name[3:]
+                            break
+                if inferred_old and inferred_old != material.name:
+                    material.ps_mat_data.last_material_name = inferred_old
+                    update_material_name(material, bpy.context)
+                else:
+                    material.ps_mat_data.last_material_name = material.name
     except Exception:
         pass
 
@@ -345,7 +362,6 @@ def material_name_update_handler(scene: bpy.types.Scene, depsgraph: bpy.types.De
 # --- On Addon Enable ---
 def on_addon_enable():
     load_post(bpy.context.scene)
-    get_latest_version()
     try:
         for material in bpy.data.materials:
             if hasattr(material, 'ps_mat_data') and material.ps_mat_data:
@@ -361,21 +377,6 @@ def brush_color_callback(*args):
     context = bpy.context
     if context.scene and hasattr(context.scene, 'ps_scene_data'):
         context.scene.ps_scene_data.update_hsv_color(context)
-
-
-def uv_edit_mode_guard(*args):
-    context = bpy.context
-    if not context or not context.scene or not hasattr(context.scene, 'ps_scene_data'):
-        return
-    ps_scene_data = context.scene.ps_scene_data
-    if not ps_scene_data or not ps_scene_data.uv_edit_enabled:
-        return
-    obj = context.object
-    if obj and getattr(obj, "mode", None) == 'PAINT_TEXTURE':
-        try:
-            bpy.ops.object.mode_set(mode='OBJECT')
-        except Exception:
-            pass
 
 
 def material_name_msgbus_callback(*args):
@@ -419,12 +420,6 @@ def register():
         owner=owner,
         args=(None,),
         notify=brush_color_callback,
-    )
-    bpy.msgbus.subscribe_rna(
-        key=(bpy.types.Object, "mode"),
-        owner=owner,
-        args=(None,),
-        notify=uv_edit_mode_guard,
     )
     bpy.msgbus.subscribe_rna(
         key=(bpy.types.Material, "name"),
