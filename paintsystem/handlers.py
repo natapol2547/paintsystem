@@ -397,7 +397,6 @@ def on_addon_enable():
 
     return None
 
-
 owner = object()
 
 def brush_color_callback(*args):
@@ -419,8 +418,6 @@ def uv_edit_mode_guard(*args):
             bpy.ops.object.mode_set(mode='OBJECT')
         except Exception:
             pass
-
-
 def material_name_msgbus_callback(*args):
     try:
         for material in bpy.data.materials:
