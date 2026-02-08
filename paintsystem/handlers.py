@@ -441,6 +441,7 @@ def uv_edit_mode_guard(*args):
             bpy.ops.object.mode_set(mode='OBJECT')
         except Exception:
             pass
+
 def material_name_msgbus_callback(*args):
     try:
         for material in bpy.data.materials:

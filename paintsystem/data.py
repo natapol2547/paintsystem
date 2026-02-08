@@ -560,41 +560,6 @@ def create_ps_image(name: str, width: int = 2048, height: int = 2048, use_udim_t
             raise ValueError("Objects and UV layer name are required for UDIM tiles")
     return img
 
-def get_name_prefix(context: bpy.types.Context) -> str:
-    """Get the name prefix for layers based on the object/material name.
-    
-    Returns the object/material name that should be used as a prefix for layer names
-    when automatic name syncing is enabled. Returns empty string if no valid object/material found.
-    """
-    try:
-        ps_ctx = parse_context(context)
-        # Try to get the material name first
-        if ps_ctx.active_material:
-            return ps_ctx.active_material.name
-        # Fall back to object name
-        if ps_ctx.ps_object:
-            return ps_ctx.ps_object.name
-    except:
-        pass
-    return ""
-
-def apply_name_prefix(base_name: str, context: bpy.types.Context) -> str:
-    """Apply the automatic name prefix to a base layer name.
-    
-    If automatic name syncing is enabled and a prefix is available,
-    returns "prefix_base_name", otherwise returns the base_name unchanged.
-    """
-    try:
-        prefs = get_preferences(context)
-        if not prefs.automatic_name_sync:
-            return base_name
-        prefix = get_name_prefix(context)
-        if prefix:
-            return f"{prefix}_{base_name}"
-    except:
-        pass
-    return base_name
-
 def ensure_paint_system_uv_map(context: bpy.types.Context):
     selection = context.selected_objects
 
@@ -850,22 +815,24 @@ class Layer(BaseNestedListItem):
     ref_layer_id: StringProperty()
     
     def update_name(self, context):
+        if self.updating_name_flag:
+            return
+        self.updating_name_flag = True
         if self.layer_name != self.name:
             self.layer_name = self.name
-        # Sync image name if automatic name syncing is enabled
-        if context and self.type == 'IMAGE' and self.image:
-            try:
-                prefs = get_preferences(context)
-                if prefs.automatic_name_sync:
-                    self.image.name = self.name
-            except:
-                pass
-        # Update node tree name with proper prefix
-        if context:
-            try:
-                self.update_node_tree(context)
-            except:
-                pass
+
+        prefs = get_preferences(context)
+        if getattr(prefs, "automatic_name_syncing", True):
+            material = find_material_for_layer(self)
+            if material:
+                new_name = ensure_layer_name_prefix(self.name, material.name)
+                if new_name != self.name:
+                    self.name = new_name
+                    self.layer_name = new_name
+            if self.type == 'IMAGE' and self.image:
+                self.image.name = self.name
+        self.updating_name_flag = False
+        self.update_node_tree(context)
     
     name: StringProperty(
         name="Name",
@@ -873,34 +840,30 @@ class Layer(BaseNestedListItem):
         default="Layer",
         update=update_name
     )
-
-    # Display-only name (suffix without prefix). Editing this updates the real name,
-    # preserving the original prefix before the first underscore.
-    def _get_display_name(self):
-        n = self.name or ""
-        return n.split('_', 1)[1] if '_' in n else n
-
-    def _set_display_name(self, value):
-        current = self.name or ""
-        if '_' in current:
-            prefix = current.split('_', 1)[0]
-            new_name = f"{prefix}_{value}"
+    updating_name_flag: BoolProperty(
+        default=False,
+        options={'SKIP_SAVE'}  # Don't save this flag in the .blend file
+    )
+    
+    def get_display_name(self):
+        """Return only the suffix part of the name (after underscore) for UI display"""
+        if '_' in self.name:
+            return self.name.split('_', 1)[1]
+        return self.name
+    
+    def set_display_name(self, value):
+        """Set the layer name preserving the material prefix"""
+        if '_' in self.name:
+            prefix = self.name.split('_', 1)[0]
+            self.name = f"{prefix}_{value}"
         else:
-            new_name = value
-        # Use setattr to trigger the update callback
-        if new_name != current:
-            self['name'] = new_name
-            # Manually trigger update since we're bypassing the property setter
-            try:
-                self.update_name(bpy.context)
-            except:
-                pass
-
+            self.name = value
+    
     display_name: StringProperty(
         name="Name",
-        description="Layer name (without prefix)",
-        get=_get_display_name,
-        set=_set_display_name,
+        description="Layer name without prefix",
+        get=get_display_name,
+        set=set_display_name
     )
     
     def update_node_tree(self, context):
@@ -955,7 +918,7 @@ class Layer(BaseNestedListItem):
         
         match self.type:
             case "IMAGE":
-                if self.image:
+                if self.image and getattr(get_preferences(context), "automatic_name_syncing", True):
                     self.image.name = self.name
                 layer_graph = create_image_graph(self)
             case "FOLDER":
@@ -2074,14 +2037,11 @@ class Channel(BaseNestedListManager):
         handle_folder: bool = True,
         **kwargs
     ) -> 'Layer':
-        # Apply automatic name prefix if enabled
-        full_layer_name = apply_name_prefix(layer_name, context)
-        
         parent_id, insert_order = self.get_insertion_data(handle_folder=handle_folder, insert_at=insert_at)
         # Adjust existing items' order
         self.adjust_sibling_orders(parent_id, insert_order)
         layer = self.add_item(
-                full_layer_name,
+                layer_name,
                 "BLANK",
                 parent_id=parent_id,
                 order=insert_order
@@ -2585,12 +2545,10 @@ class Group(PropertyGroup):
                     if group.node_tree == node_tree:
                         mat = material
                         break
-        # Normalize to a single PS_ prefix to avoid duplicates like "PS PS_<name>"
-        group_label = self.name if self.name.startswith("PS_") else f"PS_{self.name}"
         if mat:
-            node_tree.name = f"{group_label} ({mat.name})"
+            node_tree.name = f"PS {self.name} ({mat.name})"
         else:
-            node_tree.name = f"{group_label} (None)"
+            node_tree.name = f"PS {self.name} (None)"
         # node_tree.name = f"Paint System ({self.name})"
         if not isinstance(node_tree, bpy.types.NodeTree):
             return
@@ -2625,12 +2583,15 @@ class Group(PropertyGroup):
             if channel.use_alpha:
                 node_builder.link(channel_name, "group_output", "Alpha", c_alpha_name)
         node_builder.compile()
+
+    def update_group_name(self, context):
+        self.update_node_tree(context)
     
     name: StringProperty(
         name="Name",
         description="Group name",
         default="New Group",
-        update=update_node_tree
+        update=update_group_name
     )
     channels: CollectionProperty(
         type=Channel,
@@ -2728,7 +2689,7 @@ class Group(PropertyGroup):
                         # Disable alpha
                         channel.use_alpha = False
                 if add_layers:
-                    channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+                    channel.create_layer(context, layer_name=f'{mat.name}_Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
                 return channel
             case "METALLIC":
                 channel = self.create_channel(context, channel_name='Metallic', channel_type='FLOAT', use_alpha=False, use_max_min=True, color_space='NONCOLOR')
@@ -2756,8 +2717,8 @@ class Group(PropertyGroup):
                         connect_sockets(node_group.outputs['Normal'], normal_socket)
                 if add_layers:
                     if not socket_transferred:
-                        channel.create_layer(context, layer_name='Normal', layer_type='GEOMETRY', geometry_type='OBJECT_NORMAL', normalize_normal=True)
-                    channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+                        channel.create_layer(context, layer_name=f'{mat.name}_Normal', layer_type='GEOMETRY', geometry_type='OBJECT_NORMAL', normalize_normal=True)
+                    channel.create_layer(context, layer_name=f'{mat.name}_Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
             case _:
                 raise ValueError(f"Invalid template: {template}")
     
@@ -2932,17 +2893,17 @@ class PaintSystemGlobalData(PropertyGroup):
 
 class MaterialData(PropertyGroup):
     """Custom data for channels in the Paint System"""
-    last_material_name: StringProperty(
-        name="Last Material Name",
-        description="Cached material name for rename tracking",
-        default=""
-    )
     groups: CollectionProperty(
         type=Group,
         name="Groups",
         description="Collection of groups in the Paint System"
     )
     active_index: IntProperty(name="Active Group Index")
+    last_material_name: StringProperty(
+        name="Last Material Name",
+        description="Tracks the last known material name for syncing",
+        default=""
+    )
     use_alpha: BoolProperty(
         name="Use Alpha",
         description="Use alpha channel in the Paint System",
@@ -2975,9 +2936,7 @@ class MaterialData(PropertyGroup):
                 node_tree.nodes.remove(node)
         lm = ListManager(self, 'groups', self, 'active_index')
         new_group = lm.add_item()
-        # Apply PS_ prefix to group names
-        ps_prefixed_name = f"PS_{group_name}"
-        new_group.name = ps_prefixed_name
+        new_group.name = group_name
         new_group.node_tree = node_tree
         new_group.update_node_tree(context)
         return new_group
@@ -3014,6 +2973,105 @@ class Filter(PropertyGroup):
         description="Iterations of the filter",
         default=1
     )
+
+
+def find_material_for_layer(layer: "Layer") -> Material | None:
+    target_layer = layer.get_layer_data() if hasattr(layer, "get_layer_data") else layer
+    if not target_layer:
+        return None
+    target_uid = getattr(target_layer, "uid", None)
+    if not target_uid:
+        return None
+    for material in bpy.data.materials:
+        if hasattr(material, 'ps_mat_data') and material.ps_mat_data:
+            for group in material.ps_mat_data.groups:
+                for channel in group.channels:
+                    for item in channel.layers:
+                        item_layer = item.get_layer_data() if hasattr(item, "get_layer_data") else item
+                        if item_layer and getattr(item_layer, "uid", None) == target_uid:
+                            return material
+    return None
+
+
+def get_layer_suffix(layer_name: str, old_material_name: str | None = None) -> str:
+    if old_material_name and layer_name == old_material_name:
+        return ""
+    if old_material_name and layer_name.startswith(f"{old_material_name}_"):
+        return layer_name.split("_", 1)[1]
+    if "_" in layer_name:
+        return layer_name.split("_", 1)[1]
+    return layer_name
+
+
+def ensure_layer_name_prefix(layer_name: str, material_name: str, old_material_name: str | None = None) -> str:
+    if layer_name == material_name:
+        return layer_name
+    if layer_name.startswith(f"{material_name}_"):
+        return layer_name
+    suffix = get_layer_suffix(layer_name, old_material_name)
+    if not suffix:
+        return material_name
+    return f"{material_name}_{suffix}"
+
+
+def _set_layer_name(layer: "Layer", new_name: str, context: Context):
+    if not layer or not new_name:
+        return
+    if layer.name == new_name:
+        return
+    previous_flag = getattr(layer, "updating_name_flag", False)
+    layer.updating_name_flag = True
+    layer.name = new_name
+    layer.layer_name = new_name
+    layer.updating_name_flag = previous_flag
+    layer.update_node_tree(context)
+
+
+def update_material_name(material: Material, context: Context = None, force: bool = False):
+    context = context or bpy.context
+    if not material or not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
+        return
+    prefs = get_preferences(context)
+    if not force and not getattr(prefs, "automatic_name_syncing", True):
+        material.ps_mat_data.last_material_name = material.name
+        return
+
+    ps_mat_data = material.ps_mat_data
+    old_name = ps_mat_data.last_material_name or material.name
+    new_name = material.name
+
+    # Update group names with PS_ prefix
+    for group in ps_mat_data.groups:
+        base_name = f"PS_{new_name}"
+        unique_name = get_next_unique_name(base_name, [g.name for g in ps_mat_data.groups if g != group])
+        if group.name != unique_name:
+            group.name = unique_name
+
+    # Update layer names (all types) and image datablocks
+    for group in ps_mat_data.groups:
+        for channel in group.channels:
+            for layer in channel.layers:
+                if layer.is_linked:
+                    continue
+                layer_data = layer.get_layer_data()
+                if not layer_data:
+                    continue
+                new_layer_name = ensure_layer_name_prefix(layer_data.name, new_name, old_name)
+                _set_layer_name(layer_data, new_layer_name, context)
+                if layer_data.image and layer_data.image.name != layer_data.name:
+                    layer_data.image.name = layer_data.name
+
+    ps_mat_data.last_material_name = new_name
+
+
+def sync_names(context: Context, material: Material | None = None, force: bool = False):
+    context = context or bpy.context
+    if material:
+        update_material_name(material, context, force=force)
+        return
+    ps_ctx = parse_context(context)
+    if ps_ctx.active_material:
+        update_material_name(ps_ctx.active_material, context, force=force)
 
 def get_all_layers() -> list[Layer]:
     layers = []
@@ -3304,32 +3362,6 @@ class LegacyPaintSystemContextParser:
                 return node
         return None
 
-def update_material_name(material, context):
-    """Update group name and all image layer names when material name changes"""
-    if not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
-        return
-    
-    new_mat_name = material.name
-    material.ps_mat_data.last_material_name = new_mat_name
-    
-    # Update active group name to match material (with ps_ prefix for display)
-    if material.ps_mat_data.groups:
-        active_group = material.ps_mat_data.groups[material.ps_mat_data.active_index] if material.ps_mat_data.active_index < len(material.ps_mat_data.groups) else material.ps_mat_data.groups[0]
-        if active_group:
-            # Update group name with ps_ prefix
-            active_group.name = f"ps_{new_mat_name}"
-            
-            # Update all image layer names in all channels
-            for channel in active_group.channels:
-                for layer in channel.layers:
-                    if layer.type == 'IMAGE':
-                        # Strip old prefix and add new one
-                        current_name = layer.name
-                        suffix = current_name.split('_', 1)[1] if '_' in current_name else current_name
-                        new_layer_name = f"{new_mat_name}_{suffix}"
-                        layer.name = new_layer_name
-                        # Image name is updated by layer.update_name callback
-
 classes = (
     MarkerAction,
     GlobalLayer,
@@ -3361,10 +3393,6 @@ def register():
         description="Material Data for the Paint System"
     )
     bpy.types.Material.paint_system = PointerProperty(type=LegacyPaintSystemGroups)
-    
-    # Hook into material name property to sync names
-    def material_name_update(self, context):
-        update_material_name(self, context)
     
 def unregister():
     """Unregister the Paint System data module."""
