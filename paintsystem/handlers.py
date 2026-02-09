@@ -233,11 +233,35 @@ def on_addon_enable():
 
 
 owner = object()
+_uv_edit_mode_guard_active = False
 
 def brush_color_callback(*args):
     context = bpy.context
     if context.scene and hasattr(context.scene, 'ps_scene_data'):
         context.scene.ps_scene_data.update_hsv_color(context)
+
+
+def uv_edit_mode_guard(*args):
+    global _uv_edit_mode_guard_active
+    if _uv_edit_mode_guard_active:
+        return
+    context = bpy.context
+    scene = context.scene
+    if not scene or not hasattr(scene, 'ps_scene_data'):
+        return
+    if not scene.ps_scene_data.uv_edit_enabled:
+        return
+    obj = context.object
+    if not obj or obj.type != 'MESH':
+        return
+    if obj.mode in {'OBJECT', 'EDIT'}:
+        return
+    _uv_edit_mode_guard_active = True
+    try:
+        bpy.ops.object.mode_set(mode='EDIT')
+    except Exception:
+        pass
+    _uv_edit_mode_guard_active = False
 
 
 def register():
@@ -265,6 +289,12 @@ def register():
         owner=owner,
         args=(None,),
         notify=brush_color_callback,
+    )
+    bpy.msgbus.subscribe_rna(
+        key=(bpy.types.Object, "mode"),
+        owner=owner,
+        args=(None,),
+        notify=uv_edit_mode_guard,
     )
 
 def unregister():

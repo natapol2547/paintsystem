@@ -14,7 +14,10 @@ from .common import (
     line_separator,
     scale_content,
     check_group_multiuser,
-    toggle_paint_mode_ui
+    toggle_paint_mode_ui,
+    draw_uv_edit_alert,
+    draw_uv_edit_checker,
+    is_uv_edit_active
 )
 
 from ..paintsystem.data import LegacyPaintSystemContextParser
@@ -185,8 +188,9 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
         layout = self.layout
         ps_ctx = self.parse_context(context)
         row = layout.row(align=True)
-        groups = ps_ctx.ps_mat_data.groups
-        if ps_ctx.ps_mat_data and groups:
+        ps_mat_data = getattr(ps_ctx, "ps_mat_data", None)
+        groups = ps_mat_data.groups if ps_mat_data else None
+        if groups:
             if len(groups) > 1:
                 row.popover("MAT_PT_PaintSystemGroups", text="", icon="NODETREE")
             row.operator("paint_system.new_group", icon='ADD', text="")
@@ -227,13 +231,8 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
             
             return
         ps_ctx = self.parse_context(context)
-        if context.scene and context.scene.ps_scene_data and context.scene.ps_scene_data.uv_edit_enabled:
-            alert_box = layout.box()
-            alert_box.alert = True
-            alert_box.label(text="UV Edit Mode Active", icon="ERROR")
-            alert_row = alert_box.row(align=True)
-            alert_row.operator("paint_system.exit_uv_edit", text="Exit UV Edit", icon="CANCEL")
-            alert_box.alert = False
+        if draw_uv_edit_alert(layout, context):
+            draw_uv_edit_checker(layout, context, show_apply=True)
         if is_online() and ps_ctx.ps_settings:
             # Trigger version check (non-blocking)
             get_latest_version()
@@ -284,6 +283,8 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
             return
 
         if not ps_ctx.active_group:
+            if is_uv_edit_active(context):
+                return
             row = layout.row()
             row.scale_x = 2
             row.scale_y = 2

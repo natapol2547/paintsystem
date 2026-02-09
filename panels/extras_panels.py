@@ -3,7 +3,7 @@ import bpy
 from bpy.types import NodeTree, Panel, Menu, UILayout
 from bpy.utils import register_classes_factory
 
-from .common import PSContextMixin, draw_layer_icon, get_event_icons, find_keymap, find_keymap_by_name, get_icon_from_channel, scale_content, get_icon
+from .common import PSContextMixin, draw_layer_icon, get_event_icons, find_keymap, find_keymap_by_name, get_icon_from_channel, scale_content, get_icon, is_uv_edit_active
 from ..utils.version import is_newer_than
 from ..utils.unified_brushes import get_unified_settings
 from ..utils.nodes import is_in_nodetree
@@ -69,6 +69,8 @@ class MAT_PT_Brush(PSContextMixin, Panel, UnifiedPaintPanel):
 
     @classmethod
     def poll(cls, context):
+        if is_uv_edit_active(context):
+            return False
         mode = cls.get_brush_mode(context)
         return mode in ['PAINT_TEXTURE', 'PAINT_GREASE_PENCIL', 'VERTEX_GREASE_PENCIL', 'WEIGHT_GREASE_PENCIL', 'SCULPT_GREASE_PENCIL']
 
@@ -166,6 +168,8 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
 
     @classmethod
     def poll(cls, context):
+        if is_uv_edit_active(context):
+            return False
         ps_ctx = cls.parse_context(context)
         settings = cls.paint_settings(context)
         if not settings:
@@ -315,6 +319,8 @@ class MAT_PT_TexPaintRMBMenu(PSContextMixin, Panel, UnifiedPaintPanel):
 
     @classmethod
     def poll(cls, context):
+        if is_uv_edit_active(context):
+            return False
         return context.mode == 'PAINT_TEXTURE'
 
     def draw(self, context):
@@ -414,6 +420,8 @@ class NODE_PT_PaintSystemShaderEditor(PSContextMixin, Panel):
     @classmethod
     def poll(cls, context):
         """Show panel only when object has Paint System data"""
+        if is_uv_edit_active(context):
+            return False
         ps_ctx = cls.parse_context(context)
         return ps_ctx.active_group is not None and context.space_data.tree_type == 'ShaderNodeTree'
     

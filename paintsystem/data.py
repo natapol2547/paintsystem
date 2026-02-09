@@ -2770,6 +2770,16 @@ class PaintSystemGlobalData(PropertyGroup):
             b = int(color[2] * 255)
             hex_color = "#{:02x}{:02x}{:02x}".format(r, g, b).upper()
             context.scene.ps_scene_data.hex_color = hex_color
+
+    def update_uv_checker(self, context):
+        if not context or not context.scene or not context.scene.ps_scene_data:
+            return
+        if not context.scene.ps_scene_data.uv_edit_enabled:
+            return
+        try:
+            bpy.ops.paint_system.update_uv_checker()
+        except Exception:
+            pass
     
     clipboard_layers: CollectionProperty(
         type=ClipboardLayer,
@@ -2912,6 +2922,26 @@ class PaintSystemGlobalData(PropertyGroup):
         description="Scale islands to bounds",
         default=False
     )
+    uv_edit_smart_margin_method: EnumProperty(
+        items=[
+            ('SCALED', "Scaled", "Scale margins based on island size"),
+            ('ADD', "Add", "Add margin in UV space"),
+            ('FRACTION', "Fraction", "Margin as fraction of island size"),
+        ],
+        name="Margin Method",
+        description="Smart UV Project margin method",
+        default='SCALED'
+    )
+    uv_edit_smart_rotate_method: EnumProperty(
+        items=[
+            ('AXIS_ALIGNED', "Axis-aligned (Vertical)", "Align islands to vertical axis"),
+            ('AXIS_ALIGNED_X', "Axis-aligned (Horizontal)", "Align islands to horizontal axis"),
+            ('MINIMUM', "Minimum", "Minimize bounding box rotation"),
+        ],
+        name="Rotation Method",
+        description="Smart UV Project rotation method",
+        default='AXIS_ALIGNED'
+    )
     uv_edit_unwrap_fill_holes: BoolProperty(
         name="Fill Holes",
         description="Fill holes when unwrapping",
@@ -3015,7 +3045,8 @@ class PaintSystemGlobalData(PropertyGroup):
         ],
         name="Checker Type",
         description="UV checker preview type",
-        default='UV_GRID'
+        default='UV_GRID',
+        update=update_uv_checker
     )
     uv_edit_checker_resolution: EnumProperty(
         items=[
@@ -3023,14 +3054,28 @@ class PaintSystemGlobalData(PropertyGroup):
             ('512', "512", "512x512"),
             ('1024', "1024", "1024x1024"),
             ('2048', "2048", "2048x2048"),
+            ('4096', "4096", "4096x4096"),
+            ('8192', "8192", "8192x8192"),
         ],
         name="Checker Resolution",
         description="UV checker resolution",
-        default='1024'
+        default='1024',
+        update=update_uv_checker
+    )
+    uv_edit_checker_enabled: BoolProperty(
+        name="Enable Checker",
+        description="Show checker preview on the object",
+        default=False,
+        update=update_uv_checker
     )
     uv_edit_checker_material: StringProperty(
         name="Checker Material",
         description="Material name for UV checker preview",
+        default=""
+    )
+    uv_edit_material_overrides: StringProperty(
+        name="UV Edit Material Overrides",
+        description="Stored material overrides for UV edit mode",
         default=""
     )
     
