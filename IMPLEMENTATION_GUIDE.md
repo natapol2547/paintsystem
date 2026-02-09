@@ -13,6 +13,7 @@ It is meant to be updated as we iterate. Keep notes brief and actionable.
 - PR #92: Color picker
 - PR #103: Naming
 - PR #106: Removed AutoUV coord type
+- PR #105: Convert to PS
 
 ## Merge Strategy (Least Destructive)
 - Keep PRs open.
