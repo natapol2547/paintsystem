@@ -3597,7 +3597,7 @@ def update_material_name(material: Material, context: Context = None, force: boo
     old_name = ps_mat_data.last_material_name or material.name
     new_name = material.name
 
-    # Update group names to material name (no PS_ prefix)
+    # Update group names to match material name (supports legacy PS_ prefixes)
     group_old_names: dict[int, str] = {}
     group_new_names: dict[int, str] = {}
     for group_idx, group in enumerate(ps_mat_data.groups):
