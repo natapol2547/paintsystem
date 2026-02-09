@@ -1113,6 +1113,7 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
             # Transform Settings
             if active_layer.type in ('IMAGE', 'TEXTURE'):
                 header, transform_panel = layout.panel("layer_transform_settings_panel", default_closed=True)
+<<<<<<< HEAD
                 effective_coord_type = 'UV' if active_layer.coord_type == 'AUTO' else active_layer.coord_type
                 if transform_panel:
                     header.label(text="Transform", icon_value=get_icon('transform'))
@@ -1131,12 +1132,25 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                                             search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
                     if ps_ctx.active_layer.type == "IMAGE" and ps_ctx.active_layer.image:
                         row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
+=======
+                header.label(text="Transform", icon_value=get_icon('transform'))
+                row = header.row(align=True)
+                if active_layer.coord_type == 'AUTO':
+                    row.label(text="UV")
+                    row.prop_search(active_layer, "uv_map_name", text="",
+                                    search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
+                else:
+                    row.prop(active_layer, "coord_type", text="")
+                if ps_ctx.active_layer.type == "IMAGE" and ps_ctx.active_layer.image:
+                    row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
+>>>>>>> 36f8a25 (Removed AutoUV coord type)
                 if transform_panel:
                     transform_panel.use_property_split = True
                     transform_panel.use_property_decorate = False
                     box = transform_panel.box()
                     ps_ctx = self.parse_context(context)
                     active_layer = ps_ctx.active_layer
+<<<<<<< HEAD
                     box = transform_panel.box()
                     col = box.column()
                     header_row = col.row(align=True)
@@ -1188,6 +1202,48 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                         parallax_node = active_layer.find_node("parallax")
                         if parallax_node:
                             col.prop(parallax_node.inputs["Depth"], "default_value", text="Depth")
+=======
+                    effective_coord_type = 'UV' if active_layer.coord_type == 'AUTO' else active_layer.coord_type
+                    if effective_coord_type not in {'OBJECT', 'CAMERA', 'WINDOW', 'REFLECTION', 'POSITION', 'GENERATED'}:
+                        col = box.column()
+                        if effective_coord_type == 'UV':
+                            col.prop_search(active_layer, "uv_map_name", text="UV Map",
+                                                search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
+                        elif effective_coord_type == 'DECAL':
+                            col.use_property_split = False
+                            empty_col = col.column(align=True)
+                            empty_col.prop(active_layer, "empty_object", text="")
+                            empty_col.operator("paint_system.select_empty", text="Select Empty", icon='OBJECT_ORIGIN')
+                            split = col.split(factor=0.35, align=True)
+                            split.prop(active_layer, "use_decal_depth_clip", text="Clip", toggle=1, icon='CHECKBOX_HLT' if active_layer.use_decal_depth_clip else 'CHECKBOX_DEHLT')
+                            decal_clip = active_layer.find_node("decal_depth_clip")
+                            if decal_clip:
+                                decal_clip_col = split.column(align=True)
+                                decal_clip_col.enabled = active_layer.use_decal_depth_clip
+                                decal_clip_col.prop(decal_clip.inputs[2], "default_value", text="Depth")
+                        elif effective_coord_type == 'PROJECT':
+                            proj_col = col.column(align=True)
+                            proj_col.scale_y = 2
+                            proj_col.operator("paint_system.projection_view_reset", text="View Current Projection", icon='CAMERA_DATA')
+                            col.operator("paint_system.set_projection_view", text="Set New Projection View", icon='FILE_REFRESH')
+                            proj_node = active_layer.find_node("proj_node")
+                            if proj_node:
+                                col.prop(proj_node.inputs["Scale"], "default_value", text="Scale")
+                                col.prop(active_layer, "projection_space", text="Space")
+                                col.use_property_split = False
+                                header, panel = col.panel("proj_node_panel", default_closed=True)
+                                header.prop(proj_node.inputs["Enable"], "default_value", text="Normal Falloff")
+                                if panel:
+                                    panel.prop(proj_node.inputs["Falloff"], "default_value", text="Degree")
+                        elif effective_coord_type == 'PARALLAX':
+                            col.prop(active_layer, "parallax_space", text="Space", expand=True)
+                            if active_layer.parallax_space == 'UV':
+                                col.prop_search(active_layer, "parallax_uv_map_name", text="UV Map",
+                                                search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
+                            parallax_node = active_layer.find_node("parallax")
+                            if parallax_node:
+                                col.prop(parallax_node.inputs["Depth"], "default_value", text="Depth")
+>>>>>>> 36f8a25 (Removed AutoUV coord type)
                     
                     mapping_node = active_layer.find_node("mapping")
                     if mapping_node:
@@ -1197,7 +1253,16 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                         col.template_node_inputs(mapping_node)
                 else:
                     effective_coord_type = 'UV' if active_layer.coord_type == 'AUTO' else active_layer.coord_type
+<<<<<<< HEAD
                     if effective_coord_type == 'DECAL':
+=======
+                    if effective_coord_type == 'UV':
+                        row = layout.row(align=True)
+                        row.label(icon="BLANK1")
+                        row.prop_search(active_layer, "uv_map_name", text="UV Map",
+                                            search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
+                    elif effective_coord_type == 'DECAL':
+>>>>>>> 36f8a25 (Removed AutoUV coord type)
                         row = layout.row(align=True)
                         row.label(icon="BLANK1")
                         row.operator("paint_system.select_empty", text="Select Empty", icon='OBJECT_ORIGIN')
