@@ -233,6 +233,13 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
             
             return
         ps_ctx = self.parse_context(context)
+        if context.scene and context.scene.ps_scene_data and context.scene.ps_scene_data.uv_edit_enabled:
+            alert_box = layout.box()
+            alert_box.alert = True
+            alert_box.label(text="UV Edit Mode Active", icon="ERROR")
+            alert_row = alert_box.row(align=True)
+            alert_row.operator("paint_system.exit_uv_edit", text="Exit UV Edit", icon="CANCEL")
+            alert_box.alert = False
         if is_online() and ps_ctx.ps_settings:
             # Trigger version check (non-blocking)
             get_latest_version()
