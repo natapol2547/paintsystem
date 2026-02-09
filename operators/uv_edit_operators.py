@@ -1,5 +1,6 @@
 import bpy
 import json
+import os
 from bpy.types import Context, Operator
 from bpy.props import BoolProperty
 from bpy.utils import register_classes_factory
@@ -8,12 +9,30 @@ from .common import PSContextMixin, MultiMaterialOperator, DEFAULT_PS_UV_MAP_NAM
 from ..paintsystem.data import create_ps_image, get_udim_tiles, set_layer_blend_type, get_layer_blend_type
 from ..paintsystem.data import update_active_image
 from ..utils import get_next_unique_name
-from ..utils.nodes import get_material_output
 
 CHECKER_IMAGE_NAME = "PS_UV_Checker"
 DEFAULT_UV_EDIT_NAME = "PS_UV_Edit"
 CHECKER_TEX_NODE_NAME = "PS_UV_Checker_Tex"
 CHECKER_UV_NODE_NAME = "PS_UV_Checker_UV"
+CHECKER_ASSET_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "references", "uv_checkers"))
+CHECKER_IMAGE_FILES = {
+    "UV_GRID": {
+        "256": "uv_checker_map_uv_grid_256x256.png",
+        "512": "uv_checker_map_uv_grid_512x512.png",
+        "1024": "uv_checker_map_uv_grid_1024x1024.png",
+        "2048": "uv_checker_map_uv_grid_2048x2048.png",
+        "4096": "uv_checker_map_uv_grid_4096x4096.png",
+        "8192": "uv_checker_map_uv_grid_8192x8192.png",
+    },
+    "COLOR_GRID": {
+        "256": "uv_checker_map_color_grid_256x256.png",
+        "512": "uv_checker_map_color_grid_512x512.png",
+        "1024": "uv_checker_map_color_grid_1024x1024.png",
+        "2048": "uv_checker_map_color_grid_2048x2048.png",
+        "4096": "uv_checker_map_color_grid_4096x4096.png",
+        "8192": "uv_checker_map_color_grid_8192x8192.png",
+    }
+}
 
 
 def _ensure_uv_map(obj: bpy.types.Object, uv_name: str) -> bpy.types.MeshUVLoopLayer | None:
@@ -106,6 +125,8 @@ def _apply_uv_unwrap(context: Context, obj: bpy.types.Object, uv_name: str, ps_s
         case _:
             bpy.ops.uv.smart_project(
                 angle_limit=ps_scene_data.uv_edit_smart_angle_limit,
+                margin_method=ps_scene_data.uv_edit_smart_margin_method,
+                rotate_method=ps_scene_data.uv_edit_smart_rotate_method,
                 island_margin=ps_scene_data.uv_edit_smart_island_margin,
                 area_weight=ps_scene_data.uv_edit_smart_area_weight,
                 correct_aspect=ps_scene_data.uv_edit_smart_correct_aspect,
@@ -117,100 +138,177 @@ def _apply_uv_unwrap(context: Context, obj: bpy.types.Object, uv_name: str, ps_s
     context.view_layer.objects.active = active
 
 
+def _get_checker_asset_path(checker_type: str, size: int) -> str | None:
+    size_key = str(size)
+    file_map = CHECKER_IMAGE_FILES.get(checker_type, {})
+    filename = file_map.get(size_key)
+    if not filename:
+        return None
+    return os.path.abspath(os.path.join(CHECKER_ASSET_DIR, filename))
+
+
 def _get_checker_image(ps_scene_data) -> bpy.types.Image:
     size = int(ps_scene_data.uv_edit_checker_resolution)
-    image = bpy.data.images.get(CHECKER_IMAGE_NAME)
+    checker_type = ps_scene_data.uv_edit_checker_type
+    image_name = f"{CHECKER_IMAGE_NAME}_{checker_type}_{size}"
+    asset_path = _get_checker_asset_path(checker_type, size)
+    if not asset_path and checker_type != "COLOR_GRID":
+        asset_path = _get_checker_asset_path("COLOR_GRID", size)
+    if asset_path and os.path.exists(asset_path):
+        image = bpy.data.images.get(image_name)
+        if not image:
+            image = bpy.data.images.load(asset_path, check_existing=True)
+            image.name = image_name
+        if image.filepath != asset_path:
+            image.filepath = asset_path
+        image.reload()
+        return image
+
+    image = bpy.data.images.get(image_name)
     if not image:
-        image = bpy.data.images.new(CHECKER_IMAGE_NAME, width=size, height=size, alpha=False)
+        image = bpy.data.images.new(image_name, width=size, height=size, alpha=False)
     if image.size[0] != size or image.size[1] != size:
         image.scale(size, size)
-    image.generated_type = ps_scene_data.uv_edit_checker_type
+    image.generated_type = checker_type
     return image
 
 
-def _apply_checker_to_uv_editors(context: Context, image: bpy.types.Image):
-    pass
-
-
-def _set_uv_checker_on_material(mat: bpy.types.Material, image: bpy.types.Image, target_uv: str):
-    if not mat or not mat.use_nodes or not mat.node_tree:
+def _enter_uv_editor_mode(context: Context) -> None:
+    if not context or not context.screen:
         return
-    output = get_material_output(mat.node_tree)
-    if not output:
-        return
-    surface_input = output.inputs.get("Surface")
-    if not surface_input:
-        return
+    for area in context.screen.areas:
+        if area.type != 'IMAGE_EDITOR':
+            continue
+        space = area.spaces.active
+        if hasattr(space, "ui_mode"):
+            space.ui_mode = 'UV'
 
-    prev_link = None
-    if surface_input.is_linked:
-        link = surface_input.links[0]
-        prev_link = {
-            "node": link.from_node.name,
-            "socket": link.from_socket.name
-        }
-        mat.node_tree.links.remove(link)
-    mat["ps_uv_edit_prev_link"] = json.dumps(prev_link) if prev_link else ""
 
-    tex_node = mat.node_tree.nodes.get(CHECKER_TEX_NODE_NAME)
+def _enter_edit_mode(ps_object: bpy.types.Object) -> None:
+    if not ps_object or ps_object.type != 'MESH':
+        return
+    if ps_object.mode == 'EDIT':
+        return
+    try:
+        bpy.ops.object.mode_set(mode='EDIT')
+    except Exception:
+        pass
+
+
+def _get_or_create_checker_material(image: bpy.types.Image, target_uv: str) -> bpy.types.Material:
+    mat = bpy.data.materials.get("PS_UV_Checker_Mat")
+    if not mat:
+        mat = bpy.data.materials.new("PS_UV_Checker_Mat")
+        mat.use_nodes = True
+    if not mat.use_nodes:
+        mat.use_nodes = True
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+    output = nodes.get("Material Output") or nodes.new("ShaderNodeOutputMaterial")
+    tex_node = nodes.get(CHECKER_TEX_NODE_NAME)
     if not tex_node:
-        tex_node = mat.node_tree.nodes.new("ShaderNodeTexImage")
+        tex_node = nodes.new("ShaderNodeTexImage")
         tex_node.name = CHECKER_TEX_NODE_NAME
         tex_node.label = "UV Checker"
-    uv_node = mat.node_tree.nodes.get(CHECKER_UV_NODE_NAME)
+    uv_node = nodes.get(CHECKER_UV_NODE_NAME)
     if not uv_node:
-        uv_node = mat.node_tree.nodes.new("ShaderNodeUVMap")
+        uv_node = nodes.new("ShaderNodeUVMap")
         uv_node.name = CHECKER_UV_NODE_NAME
         uv_node.label = "UV Checker UV"
-
     uv_node.uv_map = target_uv
     tex_node.image = image
     tex_node.interpolation = "Closest"
+    if tex_node.inputs.get("Vector") and uv_node.outputs.get("UV"):
+        for link in list(links):
+            if link.to_node == tex_node and link.to_socket == tex_node.inputs["Vector"]:
+                links.remove(link)
+        links.new(uv_node.outputs["UV"], tex_node.inputs["Vector"])
+    if output.inputs.get("Surface") and tex_node.outputs.get("Color"):
+        for link in list(output.inputs["Surface"].links):
+            links.remove(link)
+        links.new(tex_node.outputs["Color"], output.inputs["Surface"])
+    return mat
 
-    for link in list(mat.node_tree.links):
-        if link.to_node == tex_node and link.to_socket == tex_node.inputs.get("Vector"):
-            mat.node_tree.links.remove(link)
-    if uv_node.outputs.get("UV") and tex_node.inputs.get("Vector"):
-        mat.node_tree.links.new(uv_node.outputs["UV"], tex_node.inputs["Vector"])
 
-    for link in list(surface_input.links):
-        mat.node_tree.links.remove(link)
-    if tex_node.outputs.get("Color"):
-        mat.node_tree.links.new(tex_node.outputs["Color"], surface_input)
-
-
-def _restore_uv_checker_on_material(mat: bpy.types.Material):
-    if not mat or not mat.use_nodes or not mat.node_tree:
+def _apply_checker_preview(context: Context, ps_scene_data, target_uv: str, active_material: bpy.types.Material | None, target_object: bpy.types.Object | None = None):
+    if not ps_scene_data.uv_edit_checker_enabled:
+        _restore_material_overrides(ps_scene_data)
+        ps_scene_data.uv_edit_checker_material = ""
         return
-    output = get_material_output(mat.node_tree)
-    if not output:
+    if not active_material and not target_object:
         return
-    surface_input = output.inputs.get("Surface")
-    if not surface_input:
+    image = _get_checker_image(ps_scene_data)
+    checker_mat = _get_or_create_checker_material(image, target_uv)
+    ps_scene_data.uv_edit_checker_material = checker_mat.name
+    if not ps_scene_data.uv_edit_material_overrides:
+        if active_material:
+            _store_material_overrides(
+                ps_scene_data,
+                _get_objects_with_material(context, active_material),
+                active_material,
+                checker_mat,
+            )
+        else:
+            _store_material_overrides(
+                ps_scene_data,
+                [target_object] if target_object else [],
+                None,
+                checker_mat,
+            )
+
+
+def _store_material_overrides(ps_scene_data, objects: list[bpy.types.Object], original_mat: bpy.types.Material | None, checker_mat: bpy.types.Material):
+    overrides = []
+    for obj in objects:
+        if not obj or obj.type != 'MESH':
+            continue
+        if not obj.material_slots and original_mat is None:
+            obj.data.materials.append(checker_mat)
+            overrides.append({"object": obj.name, "slot": 0, "material": ""})
+            continue
+        for idx, slot in enumerate(obj.material_slots):
+            if original_mat is None:
+                if slot.material is None:
+                    overrides.append({"object": obj.name, "slot": idx, "material": ""})
+                    slot.material = checker_mat
+            elif slot.material == original_mat:
+                overrides.append({"object": obj.name, "slot": idx, "material": original_mat.name})
+                slot.material = checker_mat
+    ps_scene_data.uv_edit_material_overrides = json.dumps(overrides)
+
+
+def _restore_material_overrides(ps_scene_data):
+    data = ps_scene_data.uv_edit_material_overrides
+    if not data:
         return
+    try:
+        overrides = json.loads(data)
+    except Exception:
+        overrides = []
+    for item in overrides:
+        obj = bpy.data.objects.get(item.get("object", ""))
+        mat_name = item.get("material", "")
+        mat = bpy.data.materials.get(mat_name) if mat_name else None
+        slot_idx = item.get("slot", -1)
+        if not obj:
+            continue
+        if slot_idx < 0 or slot_idx >= len(obj.material_slots):
+            continue
+        obj.material_slots[slot_idx].material = mat
+    ps_scene_data.uv_edit_material_overrides = ""
 
-    for link in list(surface_input.links):
-        mat.node_tree.links.remove(link)
 
-    tex_node = mat.node_tree.nodes.get(CHECKER_TEX_NODE_NAME)
-    uv_node = mat.node_tree.nodes.get(CHECKER_UV_NODE_NAME)
-    if tex_node:
-        mat.node_tree.nodes.remove(tex_node)
-    if uv_node:
-        mat.node_tree.nodes.remove(uv_node)
+def _clear_checker_from_objects(objects: list[bpy.types.Object]) -> None:
+    checker_mat = bpy.data.materials.get("PS_UV_Checker_Mat")
+    if not checker_mat:
+        return
+    for obj in objects:
+        if not obj or obj.type != 'MESH':
+            continue
+        for slot in obj.material_slots:
+            if slot.material == checker_mat:
+                slot.material = None
 
-    prev_data = mat.get("ps_uv_edit_prev_link", "")
-    if prev_data:
-        try:
-            link_data = json.loads(prev_data)
-        except Exception:
-            link_data = None
-        if link_data and link_data.get("node") and link_data.get("socket"):
-            from_node = mat.node_tree.nodes.get(link_data["node"])
-            if from_node and from_node.outputs.get(link_data["socket"]):
-                mat.node_tree.links.new(from_node.outputs[link_data["socket"]], surface_input)
-    if "ps_uv_edit_prev_link" in mat:
-        del mat["ps_uv_edit_prev_link"]
 
 
 def _get_objects_with_material(context: Context, material: bpy.types.Material) -> list[bpy.types.Object]:
@@ -374,11 +472,13 @@ class PAINTSYSTEM_OT_UpdateUVChecker(PSContextMixin, Operator):
     def execute(self, context: Context):
         ps_ctx = self.parse_context(context)
         ps_scene_data = context.scene.ps_scene_data
-        image = _get_checker_image(ps_scene_data)
+        if not ps_scene_data.uv_edit_checker_enabled:
+            _restore_material_overrides(ps_scene_data)
+            _clear_checker_from_objects(ps_ctx.ps_objects or [])
+            ps_scene_data.uv_edit_checker_material = ""
+            return {'FINISHED'}
         target_uv = _get_target_uv_name(ps_scene_data, ps_ctx.ps_object)
-        if ps_ctx.active_material:
-            ps_scene_data.uv_edit_checker_material = ps_ctx.active_material.name
-            _set_uv_checker_on_material(ps_ctx.active_material, image, target_uv)
+        _apply_checker_preview(context, ps_scene_data, target_uv, ps_ctx.active_material, ps_ctx.ps_object)
         return {'FINISHED'}
 
 
@@ -407,13 +507,14 @@ class PAINTSYSTEM_OT_StartUVEdit(PSContextMixin, Operator):
                     _copy_uv_data(src_uv, dst_uv)
                 else:
                     _apply_uv_unwrap(context, obj, target_uv, ps_scene_data)
+            if obj.data.uv_layers.get(target_uv):
+                obj.data.uv_layers.active = obj.data.uv_layers[target_uv]
         ps_scene_data.uv_edit_enabled = True
+        ps_scene_data.uv_edit_checker_enabled = True
         update_active_image(context=context)
-        image = _get_checker_image(ps_scene_data)
-        target_uv = _get_target_uv_name(ps_scene_data, ps_ctx.ps_object)
-        if ps_ctx.active_material:
-            ps_scene_data.uv_edit_checker_material = ps_ctx.active_material.name
-            _set_uv_checker_on_material(ps_ctx.active_material, image, target_uv)
+        _apply_checker_preview(context, ps_scene_data, target_uv, ps_ctx.active_material, ps_ctx.ps_object)
+        _enter_uv_editor_mode(context)
+        _enter_edit_mode(ps_ctx.ps_object)
         return {'FINISHED'}
 
 
@@ -483,15 +584,13 @@ class PAINTSYSTEM_OT_ApplyUVEdit(PSContextMixin, MultiMaterialOperator, Operator
         context.window.cursor_set('WAIT')
         result = super().execute(context)
         context.window.cursor_set('DEFAULT')
+        ps_ctx = self.parse_context(context)
         ps_scene_data = context.scene.ps_scene_data
         ps_scene_data.uv_edit_enabled = False
+        ps_scene_data.uv_edit_checker_enabled = False
         update_active_image(context=context)
-        ps_ctx = self.parse_context(context)
-        material_name = ps_scene_data.uv_edit_checker_material
-        if material_name:
-            mat = bpy.data.materials.get(material_name)
-            if mat:
-                _restore_uv_checker_on_material(mat)
+        _restore_material_overrides(ps_scene_data)
+        _clear_checker_from_objects(ps_ctx.ps_objects or [])
         ps_scene_data.uv_edit_checker_material = ""
         return result
 
@@ -536,13 +635,12 @@ class PAINTSYSTEM_OT_ExitUVEdit(PSContextMixin, Operator):
         return context.scene and context.scene.ps_scene_data and context.scene.ps_scene_data.uv_edit_enabled
 
     def execute(self, context: Context):
+        ps_ctx = self.parse_context(context)
         ps_scene_data = context.scene.ps_scene_data
         ps_scene_data.uv_edit_enabled = False
-        material_name = ps_scene_data.uv_edit_checker_material
-        if material_name:
-            mat = bpy.data.materials.get(material_name)
-            if mat:
-                _restore_uv_checker_on_material(mat)
+        ps_scene_data.uv_edit_checker_enabled = False
+        _restore_material_overrides(ps_scene_data)
+        _clear_checker_from_objects(ps_ctx.ps_objects or [])
         ps_scene_data.uv_edit_checker_material = ""
         update_active_image(context=context)
         return {'FINISHED'}

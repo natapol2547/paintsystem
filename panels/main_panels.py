@@ -15,8 +15,9 @@ from .common import (
     scale_content,
     check_group_multiuser,
     toggle_paint_mode_ui,
-    ensure_invoke_context,
-    draw_warning_box,
+    draw_uv_edit_alert,
+    draw_uv_edit_checker,
+    is_uv_edit_active
 )
 
 from ..paintsystem.data import LegacyPaintSystemContextParser
@@ -101,12 +102,10 @@ class MAT_MT_PaintSystemMaterialSelectMenu(PSContextMixin, Menu):
         for idx, material_slot in enumerate(ob.material_slots):
             is_selected = ob.active_material_index == idx
             mat = material_slot.material is not None
-            op = layout.operator(
-                "paint_system.select_material_index",
-                text=material_slot.material.name if mat else "Empty Material",
-                icon="MATERIAL" if mat else "MESH_CIRCLE",
-                depress=is_selected,
-            )
+            if mat and hasattr(mat, "paint_system") and mat.paint_system.groups:
+                op = layout.operator("paint_system.select_material_index", text=material_slot.material.name if mat else "Empty Material", icon="MATERIAL" if mat else "MESH_CIRCLE", depress=is_selected)
+            else:
+                op = layout.operator("paint_system.select_material_index", text=material_slot.material.name if mat else "Empty Material", icon="MATERIAL" if mat else "MESH_CIRCLE", depress=is_selected)
             op.index = idx
 
 
@@ -189,10 +188,9 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
         layout = self.layout
         ps_ctx = self.parse_context(context)
         row = layout.row(align=True)
-        if ps_ctx.ps_mat_data is None:
-            return
-        groups = ps_ctx.ps_mat_data.groups
-        if ps_ctx.ps_mat_data and groups:
+        ps_mat_data = getattr(ps_ctx, "ps_mat_data", None)
+        groups = ps_mat_data.groups if ps_mat_data else None
+        if groups:
             if len(groups) > 1:
                 row.popover("MAT_PT_PaintSystemGroups", text="", icon="NODETREE")
             row.operator("paint_system.new_group", icon='ADD', text="")
@@ -233,13 +231,8 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
             
             return
         ps_ctx = self.parse_context(context)
-        if context.scene and context.scene.ps_scene_data and context.scene.ps_scene_data.uv_edit_enabled:
-            alert_box = layout.box()
-            alert_box.alert = True
-            alert_box.label(text="UV Edit Mode Active", icon="ERROR")
-            alert_row = alert_box.row(align=True)
-            alert_row.operator("paint_system.exit_uv_edit", text="Exit UV Edit", icon="CANCEL")
-            alert_box.alert = False
+        if draw_uv_edit_alert(layout, context):
+            draw_uv_edit_checker(layout, context, show_apply=True)
         if is_online() and ps_ctx.ps_settings:
             # Trigger version check (non-blocking)
             get_latest_version()
@@ -280,15 +273,18 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
         
 
         if ps_ctx.active_group and check_group_multiuser(ps_ctx.active_group.node_tree):
-            warning_col = draw_warning_box(layout, [
-                ("Duplicated Paint System Data", 'ERROR'),
-            ])
-            row = warning_col.row(align=True)
+            # Show a warning
+            box = layout.box()
+            box.alert = True
+            box.label(text="Duplicated Paint System Data", icon="ERROR")
+            row = box.row(align=True)
             scale_content(context, row, 1.5, 1.5)
             row.operator("paint_system.duplicate_paint_system_data", text="Fix Data Duplication")
             return
 
         if not ps_ctx.active_group:
+            if is_uv_edit_active(context):
+                return
             row = layout.row()
             row.scale_x = 2
             row.scale_y = 2
@@ -304,7 +300,10 @@ class MAT_MT_DeleteGroupMenu(PSContextMixin, Menu):
     def draw(self, context):
         layout = self.layout
         ps_ctx = self.parse_context(context)
-        ensure_invoke_context(layout)
+        
+        if layout.operator_context == 'EXEC_REGION_WIN':
+            layout.operator_context = 'INVOKE_REGION_WIN'
+        layout.operator_context = 'INVOKE_REGION_WIN'
         
         layout.alert = True
         layout.operator("paint_system.delete_group", text="Remove Paint System", icon="TRASH")

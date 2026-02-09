@@ -10,7 +10,7 @@ from .common import (
     get_icon_from_channel,
     check_group_multiuser,
     get_icon,
-    ensure_invoke_context,
+    is_uv_edit_active,
 )
 
 class MAT_MT_PaintSystemChannelsMergeAndExport(PSContextMixin, Menu):
@@ -98,6 +98,10 @@ class MAT_PT_ChannelsSelect(PSContextMixin, Panel):
     bl_label = "Channels"
     bl_options = {"INSTANCED"}
     bl_ui_units_x = 10
+
+    @classmethod
+    def poll(cls, context):
+        return not is_uv_edit_active(context)
     
     def draw(self, context):
         layout = self.layout
@@ -117,6 +121,8 @@ class MAT_PT_ChannelsPanel(PSContextMixin, Panel):
     
     @classmethod
     def poll(cls, context):
+        if is_uv_edit_active(context):
+            return False
         ps_ctx = cls.parse_context(context)
         if ps_ctx.active_group and check_group_multiuser(ps_ctx.active_group.node_tree):
             return False
@@ -155,6 +161,8 @@ class MAT_PT_ChannelsSettings(PSContextMixin, Panel):
     
     @classmethod
     def poll(cls, context):
+        if is_uv_edit_active(context):
+            return False
         ps_ctx = cls.parse_context(context)
         return ps_ctx.active_channel is not None and len(ps_ctx.active_group.channels) > 0
     
@@ -188,7 +196,7 @@ class MAT_PT_ChannelsSettings(PSContextMixin, Panel):
             col.prop(active_channel, "default_value", text="Default Value")
             box = col.box()
             box.use_property_split = False
-            header, panel = box.panel("vector_space_settings_panel")
+            header, panel = box.panel("vector_space_settings_panel", default_closed=True)
             header.label(text="Vector Transform")
             if panel:
                 row = panel.row(align=True)
@@ -201,7 +209,7 @@ class MAT_PT_ChannelsSettings(PSContextMixin, Panel):
                 row.prop(active_channel, "input_vector_space", text="Input Space")
                 row = panel.row(align=True)
                 row.enabled = active_channel.use_space_transform_output or active_channel.use_space_transform_input
-                row.prop(active_channel, "vector_space", text="Layer Space")
+                row.prop(active_channel, "vector_space", text="Painting Space")
                 if active_channel.vector_space != "TANGENT":
                     row.prop(active_channel, "normalize_input", text="", icon="NORMALS_VERTEX_FACE")
                 row = panel.row(align=True)
@@ -229,7 +237,10 @@ class MAT_MT_AddChannelMenu(PSContextMixin, Menu):
 
     def draw(self, context):
         layout = self.layout
-        ensure_invoke_context(layout)
+        
+        if layout.operator_context == 'EXEC_REGION_WIN':
+            layout.operator_context = 'INVOKE_REGION_WIN'
+        layout.operator_context = 'INVOKE_REGION_WIN'
         
         ps_ctx = self.parse_context(context)
         col = layout.column()
