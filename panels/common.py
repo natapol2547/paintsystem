@@ -214,7 +214,9 @@ def image_node_settings(layout: bpy.types.UILayout, image_node: bpy.types.Node, 
         row = header.row(align=True)
         row.prop(data, propname, text="")
         if simple_ui:
-            row.operator("paint_system.export_image", text="", icon="EXPORT").image_name = image_node.image.name
+            op = row.operator("paint_system.export_image", text="", icon="EXPORT")
+            if op and image_node and image_node.image:
+                op.image_name = image_node.image.name
             row.menu("MAT_MT_ImageMenu",
                     text="", icon='COLLAPSEMENU')
     else:
@@ -228,7 +230,7 @@ def image_node_settings(layout: bpy.types.UILayout, image_node: bpy.types.Node, 
             col.separator()
         col.use_property_split = True
         col.use_property_decorate = False
-        image = image_node.image
+        image = image_node.image if image_node else None
         if not simple_ui and image:
             row = col.row(align=True)
             row.operator("paint_system.export_image", text="Export As...", icon="EXPORT").image_name = image.name
