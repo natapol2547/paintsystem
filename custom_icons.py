@@ -31,11 +31,19 @@ def unload_icons():
 
 
 def get_icon(custom_icon_name):
-    if custom_icons is None:
-        return None
-    if custom_icon_name not in custom_icons:
-        return None
-    return custom_icons[custom_icon_name].icon_id
+    def resolve_icon_id():
+        if custom_icons is None:
+            return 0
+        if custom_icon_name not in custom_icons:
+            return 0
+        icon_id = custom_icons[custom_icon_name].icon_id
+        return icon_id or 0
+
+    icon_id = resolve_icon_id()
+    if icon_id:
+        return icon_id
+    load_icons()
+    return resolve_icon_id()
 
     
 def get_icon_from_socket_type(socket_type: str) -> int:
