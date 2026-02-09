@@ -32,6 +32,12 @@ class PaintSystemPreferences(AddonPreferences):
         description="Show the opacity in the layer list",
         default=True
     )
+    
+    show_opacity_in_layer_list: BoolProperty(
+        name="Show Opacity in Layer List",
+        description="Show the opacity in the layer list",
+        default=True
+    )
 
     use_compact_design: BoolProperty(
         name="Use Compact Design",
