@@ -15,7 +15,11 @@ class IMAGE_PT_PaintSystemUVEdit(PSContextMixin, Panel):
 
     @classmethod
     def poll(cls, context):
-        return context.space_data and context.space_data.ui_mode == 'UV'
+        if not context.space_data or context.space_data.type != 'IMAGE_EDITOR':
+            return False
+        if not hasattr(context.space_data, "ui_mode"):
+            return True
+        return context.space_data.ui_mode in {'UV', 'UV_EDIT'}
 
     def draw(self, context):
         layout = self.layout
@@ -77,6 +81,7 @@ class IMAGE_PT_PaintSystemUVEdit(PSContextMixin, Panel):
             action_col.operator("paint_system.grab_active_layer_uv", text="Grab Current Layer UV", icon='EYEDROPPER')
             action_col.operator("paint_system.sync_uv_names", text="Sync UV Names", icon='FILE_REFRESH')
             action_col.operator("paint_system.clear_unused_uvs", text="Clear Unused UVs", icon='TRASH')
+            action_col.prop(ps_scene_data, "uv_edit_keep_ps_prefix_uvs", text="Keep PS_ UVs")
 
             target_box = fix_box.box()
             target_box.use_property_split = False
