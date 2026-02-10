@@ -123,7 +123,7 @@ class MAT_PT_PaintSystemQuickToolsPaint(PSContextMixin, Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_label = "Paint"
-    bl_category = 'Paint System'
+    bl_category = 'Quick Tools'
     # bl_parent_id = 'MAT_PT_PaintSystemQuickTools'
     
     @classmethod

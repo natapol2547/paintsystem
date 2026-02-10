@@ -2409,21 +2409,28 @@ class Channel(BaseNestedListManager):
             if from_socket:
                 connect_sockets(surface_socket, from_socket)
             
-                if force_alpha and orig_use_alpha is not None:
+            if force_alpha and orig_use_alpha is not None:
                 self.use_alpha = orig_use_alpha
                 
             if as_tangent_normal:
-                self.tangent_uv_map = orig_tangent_uv_map
-                self.output_vector_space = orig_output_vector_space
+                if orig_tangent_uv_map is not None:
+                    self.tangent_uv_map = orig_tangent_uv_map
+                if orig_output_vector_space is not None:
+                    self.output_vector_space = orig_output_vector_space
             else:
-                self.disable_output_transform = orig_disable_output_transform
+                if orig_disable_output_transform is not None:
+                    self.disable_output_transform = orig_disable_output_transform
         except Exception as e:
             print(f"Error baking channel: {e}")
             try:
-                self.use_alpha = orig_use_alpha
-                self.tangent_uv_map = orig_tangent_uv_map
-                self.output_vector_space = orig_output_vector_space
-                self.disable_output_transform = orig_disable_output_transform
+                if orig_use_alpha is not None:
+                    self.use_alpha = orig_use_alpha
+                if orig_tangent_uv_map is not None:
+                    self.tangent_uv_map = orig_tangent_uv_map
+                if orig_output_vector_space is not None:
+                    self.output_vector_space = orig_output_vector_space
+                if orig_disable_output_transform is not None:
+                    self.disable_output_transform = orig_disable_output_transform
             except Exception as e:
                 print(f"Error restoring channel settings: {e}")
         
