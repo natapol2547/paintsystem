@@ -974,8 +974,8 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
     bl_options = {'REGISTER', 'UNDO'}
     
     group_name: bpy.props.StringProperty(
-        name="Group Name",
-        description="Name of the new paint system group",
+        name="Setup Name",
+        description="Name of the new paint system setup",
         default="Paint System",
     )
     
@@ -1456,8 +1456,8 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
         box = layout.box()
         row = box.row()
         row.alignment = "CENTER"
-        row.label(text="Group Settings:", icon="NODETREE")
-        box.prop(self, "group_name", text="Name", icon='NODETREE')
+        row.label(text="Setup Settings:", icon="NODETREE")
+        box.prop(self, "group_name", text="Setup Name", icon='NODETREE')
 
 
 classes = (
