@@ -262,7 +262,10 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
             elif update_state == 'LOADING':
                 box = layout.box()
                 box.label(text="Checking for updates...", icon="INFO")
-            draw_uv_edit_alert(layout, context)
+            elif update_state == 'LOADING':
+                box = layout.box()
+                box.label(text="Checking for updates...", icon="INFO")
+        draw_uv_edit_alert(layout, context)
         if ps_ctx.ps_settings and not ps_ctx.ps_settings.use_legacy_ui and ps_ctx.active_channel:
             toggle_paint_mode_ui(layout, context)
         ob = ps_ctx.ps_object
