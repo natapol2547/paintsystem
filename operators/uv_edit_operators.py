@@ -153,6 +153,12 @@ def _create_new_uv_map(context: Context, obj: bpy.types.Object, ps_scene_data) -
             [uv.name for uv in uv_layers]
         )
     target_uv = ps_scene_data.uv_edit_target_uv
+    if uv_layers.get(target_uv):
+        target_uv = get_next_unique_name(
+            target_uv,
+            [uv.name for uv in uv_layers]
+        )
+        ps_scene_data.uv_edit_target_uv = target_uv
     target_layer = _ensure_uv_map(obj, target_uv)
     uv_layers.active = target_layer
 
@@ -371,7 +377,10 @@ def _bake_layer_to_uv(context: Context, channel, layer, target_uv: str, ps_scene
         layer.uv_map_name = target_uv
         layer.update_node_tree(context)
     else:
-        if ps_scene_data.uv_edit_image_resolution != 'CUSTOM':
+        if ps_scene_data.uv_edit_inherit_image_sizes:
+            image_width = max(1, int(layer.image.size[0]))
+            image_height = max(1, int(layer.image.size[1]))
+        elif ps_scene_data.uv_edit_image_resolution != 'CUSTOM':
             image_width = int(ps_scene_data.uv_edit_image_resolution)
             image_height = int(ps_scene_data.uv_edit_image_resolution)
         else:
@@ -661,9 +670,15 @@ class PAINTSYSTEM_OT_ApplyUVEdit(PSContextMixin, MultiMaterialOperator, Operator
         box = layout.box()
         box.label(text="Image Resolution", icon='IMAGE_DATA')
         row = box.row(align=True)
+        row.prop(ps_scene_data, "uv_edit_inherit_image_sizes", text="Inherit Sizes")
+        if ps_scene_data.uv_edit_inherit_image_sizes:
+            row.label(text="Uses each image's original size")
+        row = box.row(align=True)
+        row.enabled = not ps_scene_data.uv_edit_inherit_image_sizes
         row.prop(ps_scene_data, "uv_edit_image_resolution", expand=True)
         if ps_scene_data.uv_edit_image_resolution == 'CUSTOM':
             col = box.column(align=True)
+            col.enabled = not ps_scene_data.uv_edit_inherit_image_sizes
             col.prop(ps_scene_data, "uv_edit_image_width")
             col.prop(ps_scene_data, "uv_edit_image_height")
         scope_box = box.box()
@@ -779,11 +794,6 @@ class PAINTSYSTEM_OT_ApplyUVEdit(PSContextMixin, MultiMaterialOperator, Operator
                 bake_all_layers(bpy.context)
         else:
             bake_all_layers(context)
-
-        if (ps_scene_data.uv_edit_checker_enabled
-            and ps_scene_data.uv_edit_material_overrides
-            and not ps_scene_data.uv_edit_apply_in_progress):
-            _apply_checker_materials(ps_scene_data, objects_with_mat, bake_material)
 
         return True
 

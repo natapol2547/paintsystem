@@ -333,6 +333,12 @@ def material_name_update_handler(scene: bpy.types.Scene, depsgraph: bpy.types.De
         return
     if not depsgraph.id_type_updated('MATERIAL'):
         return
+    def _strip_numeric_suffix(name: str) -> str:
+        if "." in name:
+            base, suffix = name.rsplit(".", 1)
+            if suffix.isdigit():
+                return base
+        return name
     try:
         for update in depsgraph.updates:
             material = update.id
@@ -348,8 +354,10 @@ def material_name_update_handler(scene: bpy.types.Scene, depsgraph: bpy.types.De
                 if material.ps_mat_data.groups:
                     for group in material.ps_mat_data.groups:
                         if group.name.startswith("PS_"):
-                            inferred_old = group.name[3:]
+                            inferred_old = _strip_numeric_suffix(group.name[3:])
                             break
+                        if not inferred_old:
+                            inferred_old = _strip_numeric_suffix(group.name)
                 if inferred_old and inferred_old != material.name:
                     material.ps_mat_data.last_material_name = inferred_old
                     update_material_name(material, bpy.context)
