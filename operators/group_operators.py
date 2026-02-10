@@ -88,8 +88,8 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
     )
 
     group_name: bpy.props.StringProperty(
-        name="Name",
-        description="Name of the new group",
+        name="Setup Name",
+        description="Name of the new setup",
         default="",
     )
 
@@ -345,10 +345,10 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
             col.prop(self, "pbr_add_roughness", text="Roughness", icon_value=get_icon('float_socket'))
             col.prop(self, "pbr_add_normal", text="Normal", icon_value=get_icon('vector_socket'))
         
-        # Group name above the "Add Template Layers" toggle
+        # Setup name above the "Add Template Layers" toggle
         row = layout.row()
         scale_content(context, row, 1.5, 1.5)
-        row.prop(self, "group_name", text="Group Name", icon='NODETREE')
+        row.prop(self, "group_name", text="Setup Name", icon='NODETREE')
         row = layout.row()
         scale_content(context, row, 1.5, 1.5)
         row.prop(self, "add_layers", text="Add Template Layers",
@@ -495,8 +495,8 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
     bl_options = {'REGISTER', 'UNDO'}
     
     group_name: bpy.props.StringProperty(
-        name="Group Name",
-        description="Name of the new paint system group",
+        name="Setup Name",
+        description="Name of the new paint system setup",
         default="Paint System",
     )
     
@@ -977,8 +977,8 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
         box = layout.box()
         row = box.row()
         row.alignment = "CENTER"
-        row.label(text="Group Settings:", icon="NODETREE")
-        box.prop(self, "group_name", text="Name", icon='NODETREE')
+        row.label(text="Setup Settings:", icon="NODETREE")
+        box.prop(self, "group_name", text="Setup Name", icon='NODETREE')
 
 
 classes = (
