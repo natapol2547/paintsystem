@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+﻿from dataclasses import dataclass
 from typing import Dict, Generator, List, Literal
 import re
 import mathutils
