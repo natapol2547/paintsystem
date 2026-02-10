@@ -1,20 +1,16 @@
 import bpy
 from bpy.types import Panel
 
-from .common import scale_content, PSContextMixin, is_uv_edit_active
+from .common import scale_content, PSContextMixin
 from bpy.utils import register_classes_factory
 
 
 class MAT_PT_PaintSystemQuickTools(PSContextMixin, Panel):
-    bl_label = "Display"
+    bl_label = "Quick Tools"
     bl_idname = "MAT_PT_PaintSystemQuickTools"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Paint System"
-
-    @classmethod
-    def poll(cls, context):
-        return not is_uv_edit_active(context)
+    bl_category = "Quick Tools"
     
     def draw(self, context):
         layout = self.layout
@@ -66,28 +62,8 @@ class MAT_PT_PaintSystemQuickTools(PSContextMixin, Panel):
         row.prop(space, "show_gizmo_object_translate", text="", icon='EMPTY_ARROWS')
         row.prop(space, "show_gizmo_object_rotate", text="", icon='FILE_REFRESH')
         row.prop(space, "show_gizmo_object_scale", text="", icon='MOD_MESHDEFORM')
-
-
-class MAT_PT_PaintSystemQuickToolsMesh(PSContextMixin, Panel):
-    bl_idname = 'MAT_PT_PaintSystemQuickToolsMesh'
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_label = "Mesh"
-    bl_category = 'Paint System'
-    # bl_parent_id = 'MAT_PT_PaintSystemQuickTools'
-
-    def draw_header(self, context):
-        layout = self.layout
-        ps_ctx = self.parse_context(context)
-        layout.label(icon="MESH_CUBE")
-
-    def draw(self, context):
-        ps_ctx = self.parse_context(context)
-        obj = ps_ctx.active_object
-        layout = self.layout
-        space = context.area.spaces[0]
-        overlay = space.overlay
-
+        
+        # ===== MESH SECTION =====
         box = layout.box()
         row = box.row()
         row.alignment = "CENTER"
@@ -145,15 +121,13 @@ class MAT_PT_PaintSystemQuickToolsPaint(PSContextMixin, Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_label = "Paint"
-    bl_category = 'Paint System'
+    bl_category = 'Quick Tools'
     # bl_parent_id = 'MAT_PT_PaintSystemQuickTools'
     
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
         obj = ps_ctx.active_object
-        if is_uv_edit_active(context):
-            return False
         return hasattr(obj, "mode") and obj.mode == 'TEXTURE_PAINT'
     
     def draw_header(self, context):
@@ -169,7 +143,6 @@ class MAT_PT_PaintSystemQuickToolsPaint(PSContextMixin, Panel):
 
 classes = (
     MAT_PT_PaintSystemQuickTools,
-    MAT_PT_PaintSystemQuickToolsMesh,
     MAT_PT_PaintSystemQuickToolsPaint,
 )
 

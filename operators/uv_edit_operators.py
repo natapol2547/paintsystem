@@ -5,14 +5,10 @@ from bpy.types import Context, Operator
 from bpy.utils import register_classes_factory
 
 from .common import MultiMaterialOperator, PSContextMixin
-<<<<<<< HEAD
 from ..panels.common import scale_content
 from ..paintsystem.data import create_ps_image, get_layer_blend_type, set_layer_blend_type, update_active_image, get_udim_tiles
 from ..paintsystem.context import parse_material
 from ..paintsystem.image import blender_image_to_numpy, set_image_pixels
-=======
-from ..paintsystem.data import create_ps_image, get_layer_blend_type, set_layer_blend_type, update_active_image
->>>>>>> e1b940f (Uv edit actually works somewhat)
 from ..paintsystem.graph.common import DEFAULT_PS_UV_MAP_NAME
 from ..utils import get_next_unique_name
 
@@ -31,51 +27,10 @@ def _get_uv_editor_spaces(context: Context):
     return spaces
 
 
-<<<<<<< HEAD
-def _set_space_uv_mode(space) -> None:
-    mode_set = False
-
-    if hasattr(space, "mode"):
-        try:
-            mode_prop = space.bl_rna.properties.get("mode")
-            mode_items = {item.identifier for item in mode_prop.enum_items} if mode_prop else set()
-            if "UV" in mode_items:
-                space.mode = 'UV'
-                mode_set = True
-        except Exception:
-            pass
-
-    if hasattr(space, "ui_mode"):
-        try:
-            ui_mode_prop = space.bl_rna.properties.get("ui_mode")
-            ui_mode_items = {item.identifier for item in ui_mode_prop.enum_items} if ui_mode_prop else set()
-            if "UV" in ui_mode_items:
-                space.ui_mode = 'UV'
-                mode_set = True
-            elif not mode_set and "VIEW" in ui_mode_items:
-                space.ui_mode = 'VIEW'
-        except Exception:
-            pass
-
-
-def _set_uv_editor_image(context: Context, image: bpy.types.Image | None) -> None:
-    for space in _get_uv_editor_spaces(context):
-        space.image = image
-        _set_space_uv_mode(space)
-
-
-def _clear_uv_editor_image(context: Context) -> None:
-    for space in _get_uv_editor_spaces(context):
-        space.image = None
-        _set_space_uv_mode(space)
-        if hasattr(space, "use_image_pin"):
-            space.use_image_pin = False
-=======
 def _set_uv_editor_image(context: Context, image: bpy.types.Image | None) -> None:
     for space in _get_uv_editor_spaces(context):
         space.image = image
         space.ui_mode = 'UV'
->>>>>>> e1b940f (Uv edit actually works somewhat)
 
 
 def _store_uv_editor_image(ps_scene_data, context: Context) -> None:
@@ -92,12 +47,9 @@ def _restore_uv_editor_image(ps_scene_data, context: Context) -> None:
         return
     image = bpy.data.images.get(ps_scene_data.uv_edit_previous_image)
     _set_uv_editor_image(context, image)
-<<<<<<< HEAD
     for space in _get_uv_editor_spaces(context):
         if hasattr(space, "use_image_pin"):
             space.use_image_pin = False
-=======
->>>>>>> e1b940f (Uv edit actually works somewhat)
     ps_scene_data.uv_edit_previous_image = ""
 
 
@@ -114,7 +66,6 @@ def _get_checker_image(ps_scene_data) -> bpy.types.Image:
     return image
 
 
-<<<<<<< HEAD
 def _get_checker_material(ps_scene_data) -> bpy.types.Material:
     image = _get_checker_image(ps_scene_data)
     material_name = f"PS_UVChecker_Mat_{image.name}"
@@ -136,37 +87,25 @@ def _get_checker_material(ps_scene_data) -> bpy.types.Material:
     return material
 
 
-=======
->>>>>>> e1b940f (Uv edit actually works somewhat)
 def _update_checker_preview(context: Context) -> None:
     if not context or not context.scene or not context.scene.ps_scene_data:
         return
     ps_scene_data = context.scene.ps_scene_data
     if not ps_scene_data.uv_edit_enabled:
         return
-<<<<<<< HEAD
     ps_ctx = PSContextMixin.parse_context(context)
     objects = ps_ctx.ps_objects or ([ps_ctx.ps_object] if ps_ctx.ps_object else [])
-    _store_previous_uvs(ps_scene_data, objects)
-    if ps_scene_data.uv_edit_checker_viewport_enabled:
-        _apply_checker_uv(ps_scene_data, objects, ps_scene_data.uv_edit_target_uv)
-        _apply_checker_materials(ps_scene_data, objects, ps_ctx.active_material)
-    else:
-        _restore_checker_materials(ps_scene_data)
-    _store_uv_editor_image(ps_scene_data, context)
-    if ps_scene_data.uv_edit_checker_enabled:
-        checker_image = _get_checker_image(ps_scene_data)
-        _set_uv_editor_image(context, checker_image)
-    else:
-        _clear_uv_editor_image(context)
-=======
     if not ps_scene_data.uv_edit_checker_enabled:
         _restore_uv_editor_image(ps_scene_data, context)
+        _restore_previous_uvs(ps_scene_data, restore_render=not ps_scene_data.uv_edit_enabled)
+        _restore_checker_materials(ps_scene_data)
         return
+    _store_previous_uvs(ps_scene_data, objects)
+    _apply_checker_uv(ps_scene_data, objects, ps_scene_data.uv_edit_target_uv)
+    _apply_checker_materials(ps_scene_data, objects, ps_ctx.active_material)
     _store_uv_editor_image(ps_scene_data, context)
     checker_image = _get_checker_image(ps_scene_data)
     _set_uv_editor_image(context, checker_image)
->>>>>>> e1b940f (Uv edit actually works somewhat)
 
 
 def _ensure_uv_map(obj: bpy.types.Object, uv_name: str) -> bpy.types.MeshUVLoopLayer:
@@ -214,15 +153,6 @@ def _create_new_uv_map(context: Context, obj: bpy.types.Object, ps_scene_data) -
             [uv.name for uv in uv_layers]
         )
     target_uv = ps_scene_data.uv_edit_target_uv
-<<<<<<< HEAD
-    if uv_layers.get(target_uv):
-        target_uv = get_next_unique_name(
-            target_uv,
-            [uv.name for uv in uv_layers]
-        )
-        ps_scene_data.uv_edit_target_uv = target_uv
-=======
->>>>>>> e1b940f (Uv edit actually works somewhat)
     target_layer = _ensure_uv_map(obj, target_uv)
     uv_layers.active = target_layer
 
@@ -317,7 +247,6 @@ def _remove_created_uvs(ps_scene_data) -> None:
     ps_scene_data.uv_edit_created_uvs.clear()
 
 
-<<<<<<< HEAD
 def _store_previous_uvs(ps_scene_data, objects: list[bpy.types.Object]) -> None:
     if ps_scene_data.uv_edit_previous_uvs:
         return
@@ -430,25 +359,19 @@ def _restore_checker_materials_temp(ps_scene_data) -> None:
         obj.material_slots[entry.slot_index].material = material
 
 
-=======
->>>>>>> e1b940f (Uv edit actually works somewhat)
 def _bake_layer_to_uv(context: Context, channel, layer, target_uv: str, ps_scene_data, obj, mat) -> None:
     if layer.type != 'IMAGE' or not layer.image:
         return
     if layer.coord_type not in {'UV', 'AUTO'}:
         return
 
-<<<<<<< HEAD
     if ps_scene_data.uv_edit_override_existing_images:
         new_image = layer.image
         layer.coord_type = 'UV'
         layer.uv_map_name = target_uv
         layer.update_node_tree(context)
     else:
-        if ps_scene_data.uv_edit_inherit_image_sizes:
-            image_width = max(1, int(layer.image.size[0]))
-            image_height = max(1, int(layer.image.size[1]))
-        elif ps_scene_data.uv_edit_image_resolution != 'CUSTOM':
+        if ps_scene_data.uv_edit_image_resolution != 'CUSTOM':
             image_width = int(ps_scene_data.uv_edit_image_resolution)
             image_height = int(ps_scene_data.uv_edit_image_resolution)
         else:
@@ -469,29 +392,6 @@ def _bake_layer_to_uv(context: Context, channel, layer, target_uv: str, ps_scene
             uv_layer_name=target_uv,
             use_float=ps_scene_data.uv_edit_use_float,
         )
-=======
-    if ps_scene_data.uv_edit_image_resolution != 'CUSTOM':
-        image_width = int(ps_scene_data.uv_edit_image_resolution)
-        image_height = int(ps_scene_data.uv_edit_image_resolution)
-    else:
-        image_width = ps_scene_data.uv_edit_image_width
-        image_height = ps_scene_data.uv_edit_image_height
-
-    image_name = get_next_unique_name(
-        f"{layer.image.name}_{target_uv}",
-        [image.name for image in bpy.data.images]
-    )
-    new_image = create_ps_image(
-        name=image_name,
-        width=image_width,
-        height=image_height,
-        use_udim_tiles=ps_scene_data.uv_edit_use_udim_tiles,
-        objects=[obj] if obj else None,
-        uv_layer_name=target_uv,
-        use_float=ps_scene_data.uv_edit_use_float,
-    )
-    if layer.image:
->>>>>>> e1b940f (Uv edit actually works somewhat)
         new_image.colorspace_settings.name = layer.image.colorspace_settings.name
 
     to_restore = []
@@ -506,7 +406,6 @@ def _bake_layer_to_uv(context: Context, channel, layer, target_uv: str, ps_scene
     if layer.is_clip:
         layer.is_clip = False
 
-<<<<<<< HEAD
     force_alpha = ps_scene_data.uv_edit_alpha_mode in {'PRESERVE', 'PREMULTIPLY'}
     channel.bake(
         context,
@@ -518,16 +417,12 @@ def _bake_layer_to_uv(context: Context, channel, layer, target_uv: str, ps_scene
         margin=ps_scene_data.uv_edit_bake_margin,
         margin_type=ps_scene_data.uv_edit_bake_margin_type,
     )
-=======
-    channel.bake(context, mat, new_image, target_uv, use_group_tree=False, force_alpha=True)
->>>>>>> e1b940f (Uv edit actually works somewhat)
 
     if layer.is_clip != original_is_clip:
         layer.is_clip = original_is_clip
     set_layer_blend_type(layer, original_blend_mode)
     layer.coord_type = 'UV'
     layer.uv_map_name = target_uv
-<<<<<<< HEAD
     if not ps_scene_data.uv_edit_override_existing_images:
         layer.image = new_image
     layer.update_node_tree(context)
@@ -541,9 +436,6 @@ def _bake_layer_to_uv(context: Context, channel, layer, target_uv: str, ps_scene
                 else:
                     tile[:, :, 0:3] *= tile[:, :, 3:4]
             set_image_pixels(new_image, pixels)
-=======
-    layer.image = new_image
->>>>>>> e1b940f (Uv edit actually works somewhat)
 
     for restore_layer in to_restore:
         restore_layer.enabled = True
@@ -589,18 +481,14 @@ class PAINTSYSTEM_OT_SyncUVNames(PSContextMixin, Operator):
         ps_ctx = self.parse_context(context)
         ps_scene_data = context.scene.ps_scene_data
         uv_name = ps_scene_data.uv_edit_source_uv
-<<<<<<< HEAD
         if not uv_name and ps_ctx.active_layer and ps_ctx.active_layer.coord_type == 'UV':
             uv_name = ps_ctx.active_layer.uv_map_name
-=======
->>>>>>> e1b940f (Uv edit actually works somewhat)
         if not uv_name and ps_ctx.ps_object and ps_ctx.ps_object.data.uv_layers.active:
             uv_name = ps_ctx.ps_object.data.uv_layers.active.name
         if not uv_name:
             self.report({'WARNING'}, "No UV map to sync")
             return {'CANCELLED'}
 
-<<<<<<< HEAD
         objects = ps_ctx.ps_objects or ([ps_ctx.ps_object] if ps_ctx.ps_object else [])
         for obj in objects:
             if not obj or obj.type != 'MESH' or not obj.data.uv_layers:
@@ -614,8 +502,6 @@ class PAINTSYSTEM_OT_SyncUVNames(PSContextMixin, Operator):
             if obj.data.uv_layers.active:
                 obj.data.uv_layers.active.active_render = True
 
-=======
->>>>>>> e1b940f (Uv edit actually works somewhat)
         for group in ps_ctx.ps_mat_data.groups:
             if group.coord_type == 'UV':
                 group.uv_map_name = uv_name
@@ -659,13 +545,10 @@ class PAINTSYSTEM_OT_ClearUnusedUVs(PSContextMixin, Operator):
                         used_uvs.add(DEFAULT_PS_UV_MAP_NAME)
                     elif layer.coord_type == 'UV' and layer.uv_map_name:
                         used_uvs.add(layer.uv_map_name)
-<<<<<<< HEAD
         if ps_scene_data.uv_edit_keep_ps_prefix_uvs:
             for uv_layer in obj.data.uv_layers:
                 if uv_layer.name.startswith("PS_"):
                     used_uvs.add(uv_layer.name)
-=======
->>>>>>> e1b940f (Uv edit actually works somewhat)
         uv_layers = obj.data.uv_layers
         if len(uv_layers) <= 1:
             return {'FINISHED'}
@@ -725,7 +608,6 @@ class PAINTSYSTEM_OT_StartUVEdit(PSContextMixin, Operator):
         obj.data.uv_layers.active = obj.data.uv_layers.get(ps_scene_data.uv_edit_target_uv)
         if obj.data.uv_layers.active:
             obj.data.uv_layers.active.active_render = True
-<<<<<<< HEAD
         try:
             bpy.ops.object.mode_set(mode='EDIT')
         except Exception:
@@ -733,11 +615,6 @@ class PAINTSYSTEM_OT_StartUVEdit(PSContextMixin, Operator):
         _set_uv_editor_image(context, _get_checker_image(ps_scene_data))
         ps_scene_data.uv_edit_enabled = True
         ps_scene_data.uv_edit_checker_enabled = True
-        ps_scene_data.uv_edit_checker_viewport_enabled = True
-=======
-        ps_scene_data.uv_edit_enabled = True
-        ps_scene_data.uv_edit_checker_enabled = False
->>>>>>> e1b940f (Uv edit actually works somewhat)
         update_active_image(context=context)
         return {'FINISHED'}
 
@@ -753,7 +630,6 @@ class PAINTSYSTEM_OT_ApplyUVEdit(PSContextMixin, MultiMaterialOperator, Operator
 
     def draw(self, context):
         layout = self.layout
-<<<<<<< HEAD
         ps_ctx = self.parse_context(context)
         ps_scene_data = context.scene.ps_scene_data
         layout.use_property_split = False
@@ -785,15 +661,9 @@ class PAINTSYSTEM_OT_ApplyUVEdit(PSContextMixin, MultiMaterialOperator, Operator
         box = layout.box()
         box.label(text="Image Resolution", icon='IMAGE_DATA')
         row = box.row(align=True)
-        row.prop(ps_scene_data, "uv_edit_inherit_image_sizes", text="Inherit Sizes")
-        if ps_scene_data.uv_edit_inherit_image_sizes:
-            row.label(text="Uses each image's original size")
-        row = box.row(align=True)
-        row.enabled = not ps_scene_data.uv_edit_inherit_image_sizes
         row.prop(ps_scene_data, "uv_edit_image_resolution", expand=True)
         if ps_scene_data.uv_edit_image_resolution == 'CUSTOM':
             col = box.column(align=True)
-            col.enabled = not ps_scene_data.uv_edit_inherit_image_sizes
             col.prop(ps_scene_data, "uv_edit_image_width")
             col.prop(ps_scene_data, "uv_edit_image_height")
         scope_box = box.box()
@@ -826,56 +696,28 @@ class PAINTSYSTEM_OT_ApplyUVEdit(PSContextMixin, MultiMaterialOperator, Operator
         context.scene.ps_scene_data.uv_edit_apply_in_progress = True
         result = super().execute(context)
         context.scene.ps_scene_data.uv_edit_apply_in_progress = False
-=======
-        ps_scene_data = context.scene.ps_scene_data
-        layout.use_property_split = True
-        layout.use_property_decorate = False
-        box = layout.box()
-        box.label(text="New Image Settings", icon='IMAGE_DATA')
-        box.prop(ps_scene_data, "uv_edit_image_resolution")
-        if ps_scene_data.uv_edit_image_resolution == 'CUSTOM':
-            box.prop(ps_scene_data, "uv_edit_image_width")
-            box.prop(ps_scene_data, "uv_edit_image_height")
-        box.prop(ps_scene_data, "uv_edit_use_udim_tiles")
-        box.prop(ps_scene_data, "uv_edit_use_float")
-        layout.prop(ps_scene_data, "uv_edit_keep_old_uv")
-
-    def execute(self, context: Context):
-        context.window.cursor_set('WAIT')
-        result = super().execute(context)
->>>>>>> e1b940f (Uv edit actually works somewhat)
         context.window.cursor_set('DEFAULT')
         ps_ctx = self.parse_context(context)
         ps_scene_data = context.scene.ps_scene_data
         ps_scene_data.uv_edit_enabled = False
         ps_scene_data.uv_edit_checker_enabled = False
-<<<<<<< HEAD
-        ps_scene_data.uv_edit_checker_viewport_enabled = False
         update_active_image(context=context)
         _restore_uv_editor_image(ps_scene_data, context)
         _restore_previous_uvs(ps_scene_data, restore_render=False)
         _restore_checker_materials(ps_scene_data)
-=======
-        update_active_image(context=context)
-        _restore_uv_editor_image(ps_scene_data, context)
->>>>>>> e1b940f (Uv edit actually works somewhat)
         if not ps_scene_data.uv_edit_keep_old_uv:
             source_uv = (ps_scene_data.uv_edit_source_uv or "").strip()
             target_uv = (ps_scene_data.uv_edit_target_uv or "").strip()
             if ps_ctx.ps_object and source_uv and source_uv != target_uv:
                 if ps_ctx.ps_object.data.uv_layers.get(source_uv):
                     ps_ctx.ps_object.data.uv_layers.remove(ps_ctx.ps_object.data.uv_layers.get(source_uv))
-<<<<<<< HEAD
         objects = ps_ctx.ps_objects or ([ps_ctx.ps_object] if ps_ctx.ps_object else [])
         _set_active_uv(objects, ps_scene_data.uv_edit_target_uv)
-=======
->>>>>>> e1b940f (Uv edit actually works somewhat)
         ps_scene_data.uv_edit_created_uvs.clear()
         return result
 
     def process_material(self, context: Context):
         ps_ctx = self.parse_context(context)
-<<<<<<< HEAD
         ps_scene_data = context.scene.ps_scene_data
         bake_material = ps_ctx.active_material
         ps_mat_data = ps_ctx.ps_mat_data
@@ -887,9 +729,6 @@ class PAINTSYSTEM_OT_ApplyUVEdit(PSContextMixin, MultiMaterialOperator, Operator
                 bake_material = source_material
                 ps_mat_data, _, active_channel, _ = parse_material(source_material)
         if not ps_mat_data or not ps_mat_data.groups:
-=======
-        if not ps_ctx.ps_mat_data or not ps_ctx.ps_mat_data.groups:
->>>>>>> e1b940f (Uv edit actually works somewhat)
             return True
         ps_scene_data = context.scene.ps_scene_data
         obj = ps_ctx.ps_object
@@ -898,7 +737,6 @@ class PAINTSYSTEM_OT_ApplyUVEdit(PSContextMixin, MultiMaterialOperator, Operator
             return True
         _ensure_uv_map(obj, target_uv)
 
-<<<<<<< HEAD
         objects_with_mat = []
         if ps_scene_data.uv_edit_material_overrides:
             seen = set()
@@ -935,23 +773,17 @@ class PAINTSYSTEM_OT_ApplyUVEdit(PSContextMixin, MultiMaterialOperator, Operator
 
         if ps_scene_data.uv_edit_material_overrides:
             _restore_checker_materials_temp(ps_scene_data)
-=======
-        objects_with_mat = _get_objects_with_material(context, ps_ctx.active_material)
-        if obj and obj not in objects_with_mat:
-            objects_with_mat.append(obj)
-
-        def bake_all_layers(bake_context: Context):
-            for group in ps_ctx.ps_mat_data.groups:
-                for channel in group.channels:
-                    for layer in channel.flattened_layers:
-                        _bake_layer_to_uv(bake_context, channel, layer, target_uv, ps_scene_data, obj, ps_ctx.active_material)
->>>>>>> e1b940f (Uv edit actually works somewhat)
 
         if objects_with_mat:
             with context.temp_override(selected_objects=objects_with_mat, active_object=obj, object=obj):
                 bake_all_layers(bpy.context)
         else:
             bake_all_layers(context)
+
+        if (ps_scene_data.uv_edit_checker_enabled
+            and ps_scene_data.uv_edit_material_overrides
+            and not ps_scene_data.uv_edit_apply_in_progress):
+            _apply_checker_materials(ps_scene_data, objects_with_mat, bake_material)
 
         return True
 
@@ -971,14 +803,9 @@ class PAINTSYSTEM_OT_ExitUVEdit(PSContextMixin, Operator):
         ps_scene_data = context.scene.ps_scene_data
         ps_scene_data.uv_edit_enabled = False
         ps_scene_data.uv_edit_checker_enabled = False
-<<<<<<< HEAD
-        ps_scene_data.uv_edit_checker_viewport_enabled = False
         _restore_uv_editor_image(ps_scene_data, context)
         _restore_previous_uvs(ps_scene_data, restore_render=True)
         _restore_checker_materials(ps_scene_data)
-=======
-        _restore_uv_editor_image(ps_scene_data, context)
->>>>>>> e1b940f (Uv edit actually works somewhat)
         _remove_created_uvs(ps_scene_data)
         update_active_image(context=context)
         return {'FINISHED'}

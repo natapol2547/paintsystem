@@ -1695,8 +1695,15 @@ def ps_bake(context, objects: list[Object], mat: Material, uv_layer, bake_image,
     ensure_udim_tiles(bake_image, objects, uv_layer)
     
     for obj in objects:
-        if mat.name in obj.data.materials:
-            bake_objects.append(obj)
+        if obj.type != 'MESH':
+            continue
+        for slot in obj.material_slots:
+            if slot.material == mat:
+                bake_objects.append(obj)
+                break
+
+    if not bake_objects:
+        raise ValueError("No objects found for baking")
     
     cycles_settings = save_cycles_settings()
     # Switch to Cycles if needed
@@ -2161,6 +2168,11 @@ class Channel(BaseNestedListManager):
             context.view_layer.objects.active = ps_context.ps_object
         
         ps_context = parse_context(context)
+        orig_use_alpha = None
+        orig_tangent_uv_map = None
+        orig_output_vector_space = None
+        orig_disable_output_transform = None
+
         if force_alpha:
             orig_use_alpha = bool(self.use_alpha)
             self.use_alpha = True
@@ -2253,21 +2265,28 @@ class Channel(BaseNestedListManager):
             if from_socket:
                 connect_sockets(surface_socket, from_socket)
             
-            if force_alpha:
+            if force_alpha and orig_use_alpha is not None:
                 self.use_alpha = orig_use_alpha
                 
             if as_tangent_normal:
-                self.tangent_uv_map = orig_tangent_uv_map
-                self.output_vector_space = orig_output_vector_space
+                if orig_tangent_uv_map is not None:
+                    self.tangent_uv_map = orig_tangent_uv_map
+                if orig_output_vector_space is not None:
+                    self.output_vector_space = orig_output_vector_space
             else:
-                self.disable_output_transform = orig_disable_output_transform
+                if orig_disable_output_transform is not None:
+                    self.disable_output_transform = orig_disable_output_transform
         except Exception as e:
             print(f"Error baking channel: {e}")
             try:
-                self.use_alpha = orig_use_alpha
-                self.tangent_uv_map = orig_tangent_uv_map
-                self.output_vector_space = orig_output_vector_space
-                self.disable_output_transform = orig_disable_output_transform
+                if orig_use_alpha is not None:
+                    self.use_alpha = orig_use_alpha
+                if orig_tangent_uv_map is not None:
+                    self.tangent_uv_map = orig_tangent_uv_map
+                if orig_output_vector_space is not None:
+                    self.output_vector_space = orig_output_vector_space
+                if orig_disable_output_transform is not None:
+                    self.disable_output_transform = orig_disable_output_transform
             except Exception as e:
                 print(f"Error restoring channel settings: {e}")
         
@@ -2779,6 +2798,41 @@ class UVEditCreatedUV(PropertyGroup):
         description="Created UV map name"
     )
 
+
+class UVEditPreviousUV(PropertyGroup):
+    object_name: StringProperty(
+        name="Object Name",
+        description="Object name for stored UV"
+    )
+    active_uv: StringProperty(
+        name="Active UV",
+        description="Previously active UV name"
+    )
+    render_uv: StringProperty(
+        name="Render UV",
+        description="Previously render UV name"
+    )
+    clone_uv: StringProperty(
+        name="Clone UV",
+        description="Previously clone UV name"
+    )
+
+
+class UVEditMaterialOverride(PropertyGroup):
+    object_name: StringProperty(
+        name="Object Name",
+        description="Object name for material override"
+    )
+    slot_index: IntProperty(
+        name="Slot Index",
+        description="Material slot index",
+        default=0
+    )
+    material_name: StringProperty(
+        name="Material Name",
+        description="Original material name"
+    )
+
 class PaintSystemGlobalData(PropertyGroup):
     """Custom data for the Paint System"""
 
@@ -3037,6 +3091,58 @@ class PaintSystemGlobalData(PropertyGroup):
         description="Keep the original UV map after applying",
         default=True
     )
+    uv_edit_override_existing_images: BoolProperty(
+        name="Override Existing Images",
+        description="Reuse current images and only update UVs",
+        default=False
+    )
+    uv_edit_udim_policy: EnumProperty(
+        items=[
+            ('AUTO', "Auto UDIM", "Auto-generate UDIM tiles based on UVs"),
+            ('SINGLE', "Single Tile", "Use a single tile only"),
+        ],
+        default='AUTO'
+    )
+    uv_edit_channel_scope: EnumProperty(
+        items=[
+            ('ALL', "All Channels", "Bake all channels"),
+            ('ACTIVE', "Active Channel", "Bake only the active channel"),
+            ('EXCLUDE', "Exclude Channels", "Bake all except excluded channels"),
+        ],
+        default='ALL'
+    )
+    uv_edit_exclude_channels: StringProperty(
+        name="Exclude Channels",
+        description="Comma-separated channel names to exclude",
+        default=""
+    )
+    uv_edit_alpha_mode: EnumProperty(
+        items=[
+            ('PRESERVE', "Preserve Alpha", "Preserve alpha from bake"),
+            ('OPAQUE', "Force Opaque", "Force alpha to 1.0"),
+            ('PREMULTIPLY', "Premultiply", "Premultiply RGB by alpha"),
+        ],
+        default='PRESERVE'
+    )
+    uv_edit_bake_margin: IntProperty(
+        name="Margin",
+        description="Bake margin",
+        default=8,
+        min=0,
+        max=100
+    )
+    uv_edit_bake_margin_type: EnumProperty(
+        items=[
+            ('ADJACENT_FACES', "Adjacent Faces", "Adjacent Faces"),
+            ('EXTEND', "Extend", "Extend"),
+        ],
+        default='ADJACENT_FACES'
+    )
+    uv_edit_keep_ps_prefix_uvs: BoolProperty(
+        name="Keep PS_ UVs",
+        description="Keep UVs with PS_ prefix when clearing",
+        default=True
+    )
     uv_edit_image_resolution: EnumProperty(
         items=[
             ('1024', "1024", "1024x1024"),
@@ -3072,7 +3178,7 @@ class PaintSystemGlobalData(PropertyGroup):
     uv_edit_checker_enabled: BoolProperty(
         name="UV Checker Enabled",
         description="Enable UV checker preview",
-        default=False,
+        default=True,
         update=update_uv_checker
     )
     uv_edit_checker_type: EnumProperty(
@@ -3105,6 +3211,29 @@ class PaintSystemGlobalData(PropertyGroup):
         type=UVEditCreatedUV,
         name="Created UVs",
         description="UV maps created during UV edit",
+        options={'SKIP_SAVE'}
+    )
+    uv_edit_previous_uvs: CollectionProperty(
+        type=UVEditPreviousUV,
+        name="Previous UVs",
+        description="Stored UVs before checker toggle",
+        options={'SKIP_SAVE'}
+    )
+    uv_edit_material_overrides: CollectionProperty(
+        type=UVEditMaterialOverride,
+        name="Material Overrides",
+        description="Stored material overrides for UV checker",
+        options={'SKIP_SAVE'}
+    )
+    uv_edit_apply_in_progress: BoolProperty(
+        name="UV Edit Apply In Progress",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    uv_edit_source_material_name: StringProperty(
+        name="Source Material",
+        description="Original material used for UV edit",
+        default="",
         options={'SKIP_SAVE'}
     )
     
@@ -3644,6 +3773,8 @@ classes = (
     ClipboardLayer,
     TempMaterial,
     UVEditCreatedUV,
+    UVEditPreviousUV,
+    UVEditMaterialOverride,
     PaintSystemGlobalData,
     MaterialData,
     LegacyPaintSystemLayer,
