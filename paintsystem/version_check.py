@@ -48,7 +48,6 @@ def load_version_cache() -> Optional[str]:
 
 def thread_check_update():
     """Check for updates in a background thread - combines latest version check and update availability."""
-    print(f"Checking for updates...")
     ps_ctx = parse_context(bpy.context)
     
     try:

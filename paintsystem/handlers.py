@@ -110,7 +110,11 @@ def load_post(scene):
         return
     ensure_color_history_palette(ps_scene_data)
     load_paint_system_data()
-    get_latest_version()
+    # Check for donation info
+    # get_donation_info()
+    # if donation_info:
+    #     print(f"Donation info: {donation_info}")
+    # Version check runs on addon enable.
 
 @bpy.app.handlers.persistent
 def save_handler(scene: bpy.types.Scene):
@@ -359,6 +363,7 @@ def material_name_update_handler(scene: bpy.types.Scene, depsgraph: bpy.types.De
 # --- On Addon Enable ---
 def on_addon_enable():
     load_post(bpy.context.scene)
+    get_latest_version()
     try:
         for material in bpy.data.materials:
             if hasattr(material, 'ps_mat_data') and material.ps_mat_data:
