@@ -920,7 +920,10 @@ class Layer(BaseNestedListItem):
         
         # Update node tree name
         if self.name:
-            self.node_tree.name = f"PS {self.name} ({self.uid[:8]})"
+            try:
+                self.node_tree.name = f"PS {self.name} ({self.uid[:8]})"
+            except AttributeError:
+                pass
         
         if self.coord_type == "DECAL":
             if not self.empty_object:
@@ -2585,9 +2588,13 @@ class Group(PropertyGroup):
                         mat = material
                         break
         if mat:
-            node_tree.name = f"PS {self.name} ({mat.name})"
+            new_name = self.name if self.name == mat.name else f"{self.name} ({mat.name})"
         else:
-            node_tree.name = f"PS {self.name} (None)"
+            new_name = self.name
+        try:
+            node_tree.name = new_name
+        except AttributeError:
+            pass
         # node_tree.name = f"Paint System ({self.name})"
         if not isinstance(node_tree, bpy.types.NodeTree):
             return
@@ -3154,6 +3161,11 @@ class PaintSystemGlobalData(PropertyGroup):
         description="Keep UVs with PS_ prefix when clearing",
         default=True
     )
+    uv_edit_inherit_image_sizes: BoolProperty(
+        name="Inherit Sizes",
+        description="Use each layer's original image size when creating new images",
+        default=True
+    )
     uv_edit_image_resolution: EnumProperty(
         items=[
             ('1024', "1024", "1024x1024"),
@@ -3408,17 +3420,23 @@ def _replace_prefix(name: str, old_prefix: str, new_prefix: str) -> str | None:
 
 
 def ensure_group_name_prefix(group_name: str, material_name: str, old_material_name: str | None = None) -> str:
-    new_prefix = f"PS_{material_name}"
+    new_prefix = material_name
     if group_name == new_prefix or group_name.startswith(f"{new_prefix}_"):
         return group_name
     if old_material_name:
-        old_prefix = f"PS_{old_material_name}"
-        renamed = _replace_prefix(group_name, old_prefix, new_prefix)
+        renamed = _replace_prefix(group_name, old_material_name, new_prefix)
         if renamed:
             return renamed
-    if group_name.startswith("PS_") and "_" in group_name[3:]:
-        suffix = group_name.split("_", 2)[2]
-        return f"{new_prefix}_{suffix}"
+        renamed = _replace_prefix(group_name, f"PS_{old_material_name}", new_prefix)
+        if renamed:
+            return renamed
+    if group_name.startswith("PS_"):
+        stripped = group_name[3:]
+        if stripped == new_prefix or stripped.startswith(f"{new_prefix}_"):
+            return stripped
+        if "_" in stripped:
+            suffix = stripped.split("_", 1)[1]
+            return f"{new_prefix}_{suffix}"
     return new_prefix
 
 
@@ -3448,7 +3466,7 @@ def update_material_name(material: Material, context: Context = None, force: boo
     old_name = ps_mat_data.last_material_name or material.name
     new_name = material.name
 
-    # Update group names with PS_ prefix
+    # Update group names to material name (no PS_ prefix)
     group_old_names: dict[int, str] = {}
     group_new_names: dict[int, str] = {}
     for group_idx, group in enumerate(ps_mat_data.groups):
@@ -3470,9 +3488,9 @@ def update_material_name(material: Material, context: Context = None, force: boo
                 new_group_name = group_new_names.get(group_idx, group.name)
                 new_bake_name = _replace_prefix(bake_image.name, old_group_name, new_group_name)
                 if not new_bake_name:
-                    new_bake_name = _replace_prefix(bake_image.name, f"PS_{old_name}", f"PS_{new_name}")
-                if not new_bake_name:
                     new_bake_name = _replace_prefix(bake_image.name, old_name, new_name)
+                if not new_bake_name:
+                    new_bake_name = _replace_prefix(bake_image.name, f"PS_{old_name}", f"PS_{new_name}")
                 if new_bake_name and bake_image.name != new_bake_name:
                     bake_image.name = new_bake_name
             for layer in channel.layers:
