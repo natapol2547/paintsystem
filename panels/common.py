@@ -1,4 +1,4 @@
-import bpy
+﻿import bpy
 from bpy.types import Image, ImagePreview
 import numpy as np
 

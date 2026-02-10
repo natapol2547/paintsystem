@@ -1,4 +1,4 @@
-import bpy
+﻿import bpy
 
 from .versioning import get_layer_parent_map, migrate_global_layer_data, migrate_blend_mode, migrate_source_node, migrate_socket_names, migrate_texture_masks_to_image, update_layer_name, update_layer_version, update_library_nodetree_version
 from .version_check import get_latest_version

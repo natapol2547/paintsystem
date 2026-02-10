@@ -1,4 +1,4 @@
-import bpy
+﻿import bpy
 from bpy.types import Panel
 from bpy.utils import register_classes_factory
 
