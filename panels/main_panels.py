@@ -23,10 +23,14 @@ from .common import (
     scale_content,
     check_group_multiuser,
     toggle_paint_mode_ui,
+<<<<<<< HEAD
     ensure_invoke_context,
     draw_warning_box,
     draw_uv_edit_alert,
     is_uv_edit_active
+=======
+    draw_uv_edit_alert
+>>>>>>> e1b940f (Uv edit actually works somewhat)
 )
 
 from ..paintsystem.data import LegacyPaintSystemContextParser
@@ -267,9 +271,15 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
                 row = box.row()
                 scale_content(context, row)
                 row.operator("paint_system.open_extension_preferences", text="Update Paint System", icon="FILE_REFRESH")
+<<<<<<< HEAD
             elif update_state == 'LOADING':
                 box = layout.box()
                 box.label(text="Checking for updates...", icon="INFO")
+=======
+            # elif update_state == 'LOADING':
+            #     box = layout.box()
+            #     box.label(text="Checking for updates...", icon="INFO")
+>>>>>>> e1b940f (Uv edit actually works somewhat)
         draw_uv_edit_alert(layout, context)
         if ps_ctx.ps_settings and not ps_ctx.ps_settings.use_legacy_ui and ps_ctx.active_channel:
             toggle_paint_mode_ui(layout, context)
