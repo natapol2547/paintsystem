@@ -50,6 +50,91 @@ class MAT_PT_BrushTooltips(Panel):
         kmi = find_keymap_by_name("Radial Control")
         if kmi:
             self.draw_shortcut(col, kmi, "Scale Brush Size")
+        # col.label(text="Scale Brush Size", icon='EVENT_F')
+        layout.separator()
+        layout.operator('paint_system.open_paint_system_preferences', text="Preferences", icon='PREFERENCES')
+        layout.operator('wm.url_open', text="Suggest more!",
+                        icon='URL').url = "https://github.com/natapol2547/paintsystem/issues"
+        # layout.operator("paint_system.disable_tool_tips",
+        #                 text="Disable Tooltips", icon='CANCEL')
+
+class MAT_PT_Brush(PSContextMixin, Panel, UnifiedPaintPanel):
+    bl_idname = 'MAT_PT_Brush'
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_label = "Brush"
+    bl_category = 'Paint System'
+    bl_parent_id = 'MAT_PT_PaintSystemMainPanel'
+    bl_options = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        mode = cls.get_brush_mode(context)
+        return mode in ['PAINT_TEXTURE', 'PAINT_GREASE_PENCIL', 'VERTEX_GREASE_PENCIL', 'WEIGHT_GREASE_PENCIL', 'SCULPT_GREASE_PENCIL']
+
+    def draw_header(self, context):
+        layout = self.layout
+        layout.label(icon_value=get_icon('brush'))
+
+    def draw_header_preset(self, context):
+        layout = self.layout
+        ps_ctx = self.parse_context(context)
+        if ps_ctx.ps_settings.show_tooltips:
+            layout.popover(
+                panel="MAT_PT_BrushTooltips",
+                text="Shortcuts!",
+                icon='INFO_LARGE' if is_newer_than(4,3) else 'INFO'
+            )
+
+    #     settings = self.paint_settings(context)
+    #     brush = settings.brush
+    #     obj = ps_ctx.ps_object
+    #     row = layout.row()
+    #     match obj.type:
+    #         case 'GREASEPENCIL':
+    #             row.label(text="Grease Pencil", icon="GREASEPENCIL")
+    #         case 'MESH':
+    #             self.prop_unified(row, context, brush, "size",
+    #                 "use_unified_size", icon="WORLD", text="Size", slider=True, header=True)
+    #         case _:
+    #             pass
+            
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = False
+        layout.use_property_decorate = False
+        ps_ctx = self.parse_context(context)
+        settings = self.paint_settings(context)
+        brush = settings.brush
+        # Check blender version
+        if not is_newer_than(4, 3):
+            layout.template_ID_preview(settings, "brush",
+                                       new="brush.add", rows=3, cols=8, hide_buttons=False)
+        box = layout.box()
+        col = box.column(align=True)
+        brush_settings(col, context, brush, popover=self.is_popover)
+        
+        brush_imported = False
+        for brush in bpy.data.brushes:
+            if brush.name.startswith("PS_"):
+                brush_imported = True
+                break
+        if not brush_imported:
+            layout.operator("paint_system.add_preset_brushes",
+                            text="Add Preset Brushes", icon="IMPORT")
+        
+        header, panel = layout.panel("advanced_brush_settings_panel", default_closed=True)
+        header.label(text="Advanced Settings", icon="BRUSH_DATA")
+        if panel:
+            image_paint = context.tool_settings.image_paint
+            panel.prop(image_paint, "use_occlude", text="Occlude Faces")
+            panel.prop(image_paint, "use_backface_culling", text="Backface Culling")
+            
+            panel.prop(image_paint, "use_normal_falloff", text="Normal Falloff")
+            col = panel.column(align=True)
+            col.use_property_split = True
+            col.use_property_decorate = False
+            col.prop(image_paint, "normal_angle", text="Angle")
 
 
 class MAT_PT_BrushColorSettings(PSContextMixin, Panel):
@@ -423,7 +508,8 @@ def draw_paint_system_material(self, context):
         scale_content(context, row, 1.3, 1.2)
         row.popover("MAT_PT_PaintSystemGroups", text="", icon="NODETREE")
         row.prop(ps_ctx.active_group, "name", text="")
-        row.operator("paint_system.new_group", icon='ADD', text="")
+        if context.mode == 'OBJECT':
+            row.operator("paint_system.new_group", icon='ADD', text="")
         row.operator("paint_system.delete_group", icon='REMOVE', text="")
         row.operator("paint_system.sync_names", icon='FILE_REFRESH', text="")
     elif ps_ctx.active_material and ps_ctx.active_material.use_nodes:
@@ -435,7 +521,8 @@ def draw_paint_system_material(self, context):
             box.label(text="Convert to Paint System:", icon_value=get_icon("sunflower"))
             row = box.row()
             scale_content(context, row, 1.3, 1.2)
-            row.operator("paint_system.convert_material_to_ps", text="Convert Material", icon="FILE_REFRESH")
+            if context.mode == 'OBJECT':
+                row.operator("paint_system.convert_material_to_ps", text="Convert Material", icon="FILE_REFRESH")
 
 classes = (
     MAT_PT_BrushTooltips,
