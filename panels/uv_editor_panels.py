@@ -11,15 +11,11 @@ class IMAGE_PT_PaintSystemUVEdit(PSContextMixin, Panel):
     bl_region_type = "UI"
     bl_label = "Paint System"
     bl_category = "Paint System"
-    bl_options = {"DEFAULT_CLOSED"}
+    bl_options = set()
 
     @classmethod
     def poll(cls, context):
-        if not context.space_data or context.space_data.type != 'IMAGE_EDITOR':
-            return False
-        if not hasattr(context.space_data, "ui_mode"):
-            return True
-        return context.space_data.ui_mode in {'UV', 'UV_EDIT'}
+        return bool(context.space_data and context.space_data.type == 'IMAGE_EDITOR')
 
     def draw(self, context):
         layout = self.layout

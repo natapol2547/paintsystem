@@ -3,7 +3,7 @@ import bpy
 from bpy.types import NodeTree, Panel, Menu, UILayout
 from bpy.utils import register_classes_factory
 
-from .common import PSContextMixin, draw_layer_icon, get_event_icons, find_keymap, find_keymap_by_name, get_icon_from_channel, scale_content, get_icon
+from .common import PSContextMixin, draw_layer_icon, get_event_icons, find_keymap, find_keymap_by_name, get_icon_from_channel, scale_content, get_icon, is_uv_edit_active
 from ..utils.version import is_newer_than
 from ..utils.unified_brushes import get_unified_settings
 from ..utils.nodes import is_in_nodetree
@@ -509,6 +509,14 @@ def draw_paint_system_material(self, context):
             scale_content(context, row, 1.3, 1.2)
             if context.mode == 'OBJECT':
                 row.operator("paint_system.convert_material_to_ps", text="Convert Material", icon="FILE_REFRESH")
+    elif not ps_ctx.active_material:
+        if is_uv_edit_active(context) or context.mode != 'OBJECT':
+            return
+        box = layout.box()
+        box.label(text="Add Paint System:", icon_value=get_icon("sunflower"))
+        row = box.row()
+        scale_content(context, row, 1.3, 1.2)
+        row.operator("paint_system.new_group", text="Add Paint System", icon="ADD")
 
 classes = (
     MAT_PT_BrushTooltips,
