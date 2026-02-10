@@ -95,6 +95,14 @@ Manual changes beyond original branch:
 - Added Advanced options: alpha mode, bake margin/margin type, UDIM policy, override mode.
 - Image Resolution exposed outside Advanced; new image settings moved into Advanced.
 - Quick tools moved into its own category.
+ - UI: Add Paint System and Convert to PS only show in Object mode.
+ - UI: Add Paint System is hidden while UV Edit mode is active.
+ - UI: Brush Shortcuts popover moved into the Brush panel header; Settings header removed.
+ - Updates: version check runs on addon enable, and console log is silenced.
+
+Layer Settings UI changes:
+- panels/layers_panels.py
+   - Image/Transform panel headers and body layout are split between open/closed states.
 
 Conflict-sensitive areas:
 - panels/common.py: add UV edit alert/guard without breaking existing UI.
@@ -161,8 +169,24 @@ UV Edit Workflow (UV-EditWorkflow)
    - UV edit state: mode, target, unwrap settings, bake options, checker settings, and temporary override storage.
 - paintsystem/handlers.py
    - `uv_edit_mode_guard` msgbus hook forces exit from Texture Paint while UV Edit is active.
+   - Update check runs on addon enable instead of on every load.
+- paintsystem/version_check.py
+   - Update check log line removed.
 - panels/__init__.py and operators/__init__.py
    - Register `uv_editor_panels` and `uv_edit_operators` modules.
+Additional UI and mode gating
+- panels/main_panels.py
+   - Add Paint System and Convert to PS only appear in Object mode.
+   - Add Paint System is hidden during UV Edit mode.
+- panels/extras_panels.py
+   - Brush Shortcuts popover moved to the Brush panel header.
+   - Settings header removed from the Brush panel.
+- operators/group_operators.py
+   - `paint_system.new_group` and `paint_system.convert_material_to_ps` require Object mode.
+
+Layer Settings UI changes
+- panels/layers_panels.py
+   - Image/Transform panel headers and body layout are split between open/closed states.
 
 #### UV Edit Operators: Behavior Notes
 - Start UV Edit

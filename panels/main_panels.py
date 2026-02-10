@@ -15,7 +15,8 @@ from .common import (
     scale_content,
     check_group_multiuser,
     toggle_paint_mode_ui,
-    draw_uv_edit_alert
+    draw_uv_edit_alert,
+    is_uv_edit_active
 )
 
 from ..paintsystem.data import LegacyPaintSystemContextParser
@@ -190,7 +191,8 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
             groups = ps_ctx.ps_mat_data.groups
             if len(groups) > 1:
                 row.popover("MAT_PT_PaintSystemGroups", text="", icon="NODETREE")
-            row.operator("paint_system.new_group", icon='ADD', text="")
+            if context.mode == 'OBJECT' and not is_uv_edit_active(context):
+                row.operator("paint_system.new_group", icon='ADD', text="")
             row.operator("wm.call_menu", text="", icon="REMOVE").name = "MAT_MT_DeleteGroupMenu"
         else:
             row.popover("MAT_PT_Support", icon="FUND", text="Wah!")
@@ -228,11 +230,7 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
             
             return
         ps_ctx = self.parse_context(context)
-        if is_online() and ps_ctx.ps_settings:
-            # Trigger version check (non-blocking)
-            get_latest_version()
-            
-            # Check update state
+        if ps_ctx.ps_settings:
             update_state = ps_ctx.ps_settings.update_state
             if update_state == 'AVAILABLE':
                 box = layout.box()
@@ -243,9 +241,6 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
                 row = box.row()
                 scale_content(context, row)
                 row.operator("paint_system.open_extension_preferences", text="Update Paint System", icon="FILE_REFRESH")
-            # elif update_state == 'LOADING':
-            #     box = layout.box()
-            #     box.label(text="Checking for updates...", icon="INFO")
         draw_uv_edit_alert(layout, context)
         if ps_ctx.ps_settings and not ps_ctx.ps_settings.use_legacy_ui and ps_ctx.active_channel:
             toggle_paint_mode_ui(layout, context)
@@ -279,6 +274,10 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
             return
 
         if not ps_ctx.active_group:
+            if is_uv_edit_active(context):
+                return
+            if context.mode != 'OBJECT':
+                return
             row = layout.row()
             row.scale_x = 2
             row.scale_y = 2

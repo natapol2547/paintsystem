@@ -593,21 +593,27 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
             # Image Settings
             if active_layer.type == 'IMAGE':
                 header, panel = layout.panel("image_settings_panel", default_closed=True)
-                header.label(text="Image", icon_value=get_icon('image'))
+                if panel:
+                    header.label(text="Image", icon_value=get_icon('image'))
+                    header.operator("wm.call_menu", text="Filters", icon="IMAGE_DATA").name = "MAT_MT_ImageFilterMenu"
+                elif active_layer.image:
+                    row = header.row(align=True)
+                    row.prop(active_layer, "image", text="")
+                    row.operator("paint_system.export_image", text="", icon="EXPORT").image_name = active_layer.image.name
+                    row.menu("MAT_MT_ImageMenu", text="", icon='COLLAPSEMENU')
+                else:
+                    header.template_ID(active_layer, "image", text="", new="image.new", open="image.open")
                 if panel:
                     box = panel.box()
                     col = box.column()
                     image_node = active_layer.source_node
-                    panel = image_node_settings(col, image_node, active_layer, "image", simple_ui=True)
+                    panel = image_node_settings(col, image_node, active_layer, "image", simple_ui=True, default_closed=False)
                     if panel:
                         line_separator(col)
                     draw_input_sockets(col, context, only_output=True)
                     row = col.row(align=True)
                     row.label(icon="BLANK1")
                     row.prop(active_layer, "correct_image_aspect", text="Correct Aspect", toggle=1, icon='CHECKBOX_HLT' if active_layer.correct_image_aspect else 'CHECKBOX_DEHLT')
-                row = header.row()
-                row.alignment = 'LEFT'
-                row.operator("wm.call_menu", text="Filters").name = "MAT_MT_ImageFilterMenu"
             if active_layer.type == 'GRADIENT':
                 gradient_node = active_layer.source_node
                 map_range_node = active_layer.find_node("map_range")
@@ -662,29 +668,46 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
             # Transform Settings
             if active_layer.type in ('IMAGE', 'TEXTURE'):
                 header, transform_panel = layout.panel("layer_transform_settings_panel", default_closed=True)
-                header.label(text="Transform", icon_value=get_icon('transform'))
-                row = header.row(align=True)
-                if active_layer.coord_type == 'AUTO':
-                    row.label(text="UV")
-                    row.prop_search(active_layer, "uv_map_name", text="",
-                                    search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
+                effective_coord_type = 'UV' if active_layer.coord_type == 'AUTO' else active_layer.coord_type
+                if transform_panel:
+                    header.label(text="Transform", icon_value=get_icon('transform'))
                 else:
-                    row.prop(active_layer, "coord_type", text="")
-                if ps_ctx.active_layer.type == "IMAGE" and ps_ctx.active_layer.image:
-                    row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
+                    header.label(text="", icon_value=get_icon('transform'))
+                if not transform_panel:
+                    row = header.row(align=True)
+                    if active_layer.coord_type == 'AUTO':
+                        row.label(text="UV")
+                        row.prop_search(active_layer, "uv_map_name", text="",
+                                        search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
+                    else:
+                        row.prop(active_layer, "coord_type", text="")
+                        if effective_coord_type == 'UV':
+                            row.prop_search(active_layer, "uv_map_name", text="",
+                                            search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
+                    if ps_ctx.active_layer.type == "IMAGE" and ps_ctx.active_layer.image:
+                        row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
                 if transform_panel:
                     transform_panel.use_property_split = True
                     transform_panel.use_property_decorate = False
                     box = transform_panel.box()
                     ps_ctx = self.parse_context(context)
                     active_layer = ps_ctx.active_layer
-                    effective_coord_type = 'UV' if active_layer.coord_type == 'AUTO' else active_layer.coord_type
                     if effective_coord_type not in {'OBJECT', 'CAMERA', 'WINDOW', 'REFLECTION', 'POSITION', 'GENERATED'}:
                         col = box.column()
-                        if effective_coord_type == 'UV':
-                            col.prop_search(active_layer, "uv_map_name", text="UV Map",
-                                                search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
-                        elif effective_coord_type == 'DECAL':
+                        header_row = col.row(align=True)
+                        if active_layer.coord_type == 'AUTO':
+                            header_row.label(text="UV")
+                            header_row.prop_search(active_layer, "uv_map_name", text="",
+                                                   search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
+                        else:
+                            header_row.prop(active_layer, "coord_type", text="")
+                            if effective_coord_type == 'UV':
+                                header_row.prop_search(active_layer, "uv_map_name", text="",
+                                                       search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
+                        if ps_ctx.active_layer.type == "IMAGE" and ps_ctx.active_layer.image:
+                            header_row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
+                        line_separator(col)
+                        if effective_coord_type == 'DECAL':
                             col.use_property_split = False
                             empty_col = col.column(align=True)
                             empty_col.prop(active_layer, "empty_object", text="")
@@ -721,20 +744,13 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     
                     mapping_node = active_layer.find_node("mapping")
                     if mapping_node:
-                        header, panel = box.panel("mapping_panel", default_closed=True)
-                        header.label(text="Mapping Settings:", icon_value=get_icon('vector_socket'))
-                        if panel:
-                            panel.use_property_split = False
-                            col = panel.column()
-                            col.template_node_inputs(mapping_node)
+                        col = box.column()
+                        col.label(text="Mapping Settings:", icon_value=get_icon('vector_socket'))
+                        col.use_property_split = False
+                        col.template_node_inputs(mapping_node)
                 else:
                     effective_coord_type = 'UV' if active_layer.coord_type == 'AUTO' else active_layer.coord_type
-                    if effective_coord_type == 'UV':
-                        row = layout.row(align=True)
-                        row.label(icon="BLANK1")
-                        row.prop_search(active_layer, "uv_map_name", text="UV Map",
-                                            search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
-                    elif effective_coord_type == 'DECAL':
+                    if effective_coord_type == 'DECAL':
                         row = layout.row(align=True)
                         row.label(icon="BLANK1")
                         row.operator("paint_system.select_empty", text="Select Empty", icon='OBJECT_ORIGIN')

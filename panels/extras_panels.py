@@ -76,6 +76,16 @@ class MAT_PT_Brush(PSContextMixin, Panel, UnifiedPaintPanel):
         layout = self.layout
         layout.label(icon_value=get_icon('brush'))
 
+    def draw_header_preset(self, context):
+        layout = self.layout
+        ps_ctx = self.parse_context(context)
+        if ps_ctx.ps_settings.show_tooltips:
+            layout.popover(
+                panel="MAT_PT_BrushTooltips",
+                text="Shortcuts!",
+                icon='INFO_LARGE' if is_newer_than(4,3) else 'INFO'
+            )
+
     # def draw_header_preset(self, context):
     #     layout = self.layout
     #     ps_ctx = self.parse_context(context)
@@ -104,14 +114,6 @@ class MAT_PT_Brush(PSContextMixin, Panel, UnifiedPaintPanel):
             layout.template_ID_preview(settings, "brush",
                                        new="brush.add", rows=3, cols=8, hide_buttons=False)
         box = layout.box()
-        row = box.row()
-        row.label(text="Settings:", icon="SETTINGS")
-        if ps_ctx.ps_settings.show_tooltips:
-            row.popover(
-                panel="MAT_PT_BrushTooltips",
-                text='Shortcuts!',
-                icon='INFO_LARGE' if is_newer_than(4,3) else 'INFO'
-            )
         col = box.column(align=True)
         scale_content(context, col, scale_x=1, scale_y=1.2)
         brush_settings(col, context, brush, popover=self.is_popover)
@@ -492,7 +494,8 @@ def draw_paint_system_material(self, context):
         scale_content(context, row, 1.3, 1.2)
         row.popover("MAT_PT_PaintSystemGroups", text="", icon="NODETREE")
         row.prop(ps_ctx.active_group, "name", text="")
-        row.operator("paint_system.new_group", icon='ADD', text="")
+        if context.mode == 'OBJECT':
+            row.operator("paint_system.new_group", icon='ADD', text="")
         row.operator("paint_system.delete_group", icon='REMOVE', text="")
         row.operator("paint_system.sync_names", icon='FILE_REFRESH', text="")
     elif ps_ctx.active_material and ps_ctx.active_material.use_nodes:
@@ -504,7 +507,8 @@ def draw_paint_system_material(self, context):
             box.label(text="Convert to Paint System:", icon_value=get_icon("sunflower"))
             row = box.row()
             scale_content(context, row, 1.3, 1.2)
-            row.operator("paint_system.convert_material_to_ps", text="Convert Material", icon="FILE_REFRESH")
+            if context.mode == 'OBJECT':
+                row.operator("paint_system.convert_material_to_ps", text="Convert Material", icon="FILE_REFRESH")
 
 classes = (
     MAT_PT_BrushTooltips,
