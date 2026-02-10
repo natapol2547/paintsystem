@@ -1,36 +1,18 @@
-﻿import bpy
+import bpy
 
-from .versioning import get_layer_parent_map, migrate_global_layer_data, migrate_blend_mode, migrate_source_node, migrate_socket_names, migrate_texture_masks_to_image, update_layer_name, update_layer_version, update_library_nodetree_version
+from .versioning import get_layer_parent_map, migrate_global_layer_data, migrate_blend_mode, migrate_source_node, migrate_socket_names, update_layer_name, update_layer_version, update_library_nodetree_version
 from .version_check import get_latest_version
-from .context import parse_context
-from .data import sort_actions, get_all_layers, is_valid_uuidv4, iter_all_layers, update_material_name
+from .data import sort_actions, parse_context, get_all_layers, is_valid_uuidv4, update_material_name
 from .image import save_image
 from .graph.basic_layers import get_layer_version_for_type
 import time
 from .graph.nodetree_builder import get_nodetree_version
 import uuid
-from ..utils.logging import get_logger
-
-logger = get_logger(__name__)
-
-_COLOR_HISTORY_PALETTE_NAME = "Paint System History"
-
 
 def get_ps_scene_data(scene: bpy.types.Scene):
     if not hasattr(scene, 'ps_scene_data'):
         return None
     return scene.ps_scene_data
-
-
-def ensure_color_history_palette(ps_scene_data) -> bpy.types.Palette:
-    """Return the colour-history palette, creating it if necessary."""
-    palette = ps_scene_data.color_history_palette
-    if not palette:
-        palette = bpy.data.palettes.get(_COLOR_HISTORY_PALETTE_NAME)
-        if not palette:
-            palette = bpy.data.palettes.new(_COLOR_HISTORY_PALETTE_NAME)
-        ps_scene_data.color_history_palette = palette
-    return palette
 
 @bpy.app.handlers.persistent
 def frame_change_pre(scene: bpy.types.Scene):
@@ -45,7 +27,7 @@ def frame_change_pre(scene: bpy.types.Scene):
             match action.action_bind:
                 case 'FRAME':
                     if action.frame <= scene.frame_current:
-                        # logger.debug(f"Frame {action.frame} found at frame {scene.frame_current}")
+                        # print(f"Frame {action.frame} found at frame {scene.frame_current}")
                         if action.action_type == 'ENABLE' and update_task.get(layer, layer.enabled) == False:
                             update_task[layer] = True
                         elif action.action_type == 'DISABLE' and update_task.get(layer, layer.enabled) == True:
@@ -53,7 +35,7 @@ def frame_change_pre(scene: bpy.types.Scene):
                 case 'MARKER':
                     marker = scene.timeline_markers.get(action.marker_name)
                     if marker and marker.frame <= scene.frame_current:
-                        # logger.debug(f"Marker {marker.frame} found at frame {scene.frame_current}")
+                        # print(f"Marker {marker.frame} found at frame {scene.frame_current}")
                         if action.action_type == 'ENABLE' and update_task.get(layer, layer.enabled) == False:
                             update_task[layer] = True
                         elif action.action_type == 'DISABLE' and update_task.get(layer, layer.enabled) == True:
@@ -64,13 +46,11 @@ def frame_change_pre(scene: bpy.types.Scene):
         if layer.enabled != enabled:
             layer.enabled = enabled
 
-def load_paint_system_data(scene: bpy.types.Scene = None):
-    logger.debug("Loading Paint System data...")
+
+def load_paint_system_data():
+    print(f"Loading Paint System data...")
     start_time = time.time()
-    scene = scene or bpy.context.scene
-    if not scene:
-        return
-    ps_scene_data = get_ps_scene_data(scene)
+    ps_scene_data = get_ps_scene_data(bpy.context.scene)
     if not ps_scene_data:
         return
     
@@ -78,11 +58,11 @@ def load_paint_system_data(scene: bpy.types.Scene = None):
     for global_layer in ps_scene_data.layers:
         target_version = get_layer_version_for_type(global_layer.type)
         if get_nodetree_version(global_layer.node_tree) != target_version:
-            logger.info(f"Updating layer {global_layer.name} to version {target_version}")
+            print(f"Updating layer {global_layer.name} to version {target_version}")
             try:
                 global_layer.update_node_tree(bpy.context)
             except Exception as e:
-                logger.error(f"Error updating layer {global_layer.name}: {e}")
+                print(f"Error updating layer {global_layer.name}: {e}")
     
     layer_parent_map = get_layer_parent_map()
     for layer, layer_parent in layer_parent_map.items():
@@ -94,48 +74,55 @@ def load_paint_system_data(scene: bpy.types.Scene = None):
     migrate_blend_mode(layer_parent_map)
     migrate_source_node(layer_parent_map)
     migrate_socket_names(layer_parent_map)
-    update_library_nodetree_version()
-    migrate_texture_masks_to_image(layer_parent_map)
     update_layer_version(layer_parent_map)
     update_layer_name(layer_parent_map)
+    update_library_nodetree_version()
 
     # As layers in ps_scene_data is not used anymore, we can remove it in the future
     if ps_scene_data and hasattr(ps_scene_data, 'layers') and len(ps_scene_data.layers) > 0:
-        # logger.debug(f"Removing ps_scene_data")
+        # print(f"Removing ps_scene_data")
         ps_scene_data.layers.clear()
         ps_scene_data.last_selected_ps_object = None
         ps_scene_data.last_selected_material = None
             
-    logger.debug(f"Paint System: Checked layers in {round((time.time() - start_time) * 1000, 2)} ms")
+    print(f"Paint System: Checked layers in {round((time.time() - start_time) * 1000, 2)} ms")
 
 
 @bpy.app.handlers.persistent
 def load_post(scene):
-    scene = scene or bpy.context.scene
-    if not scene:
-        return
-    ps_scene_data = get_ps_scene_data(scene)
+    
+    # Ensure color history palette is created
+    ps_scene_data = get_ps_scene_data(bpy.context.scene)
     if not ps_scene_data:
         return
-    ensure_color_history_palette(ps_scene_data)
-    load_paint_system_data(scene)
-    get_latest_version()
+    if not ps_scene_data.color_history_palette:
+        palette_name = "Paint System History"
+        palette = bpy.data.palettes.get(palette_name)
+        if not palette:
+            palette = bpy.data.palettes.new(palette_name)
+    
+    load_paint_system_data()
+    # Check for donation info
+    # get_donation_info()
+    # if donation_info:
+    #     print(f"Donation info: {donation_info}")
+    # Version check runs on addon enable.
 
 @bpy.app.handlers.persistent
 def save_handler(scene: bpy.types.Scene):
     images = set()
     
-    seen_channels = set()
-    for _mat, _grp, channel, layer in iter_all_layers():
-        # Collect bake images once per channel
-        ch_id = id(channel)
-        if ch_id not in seen_channels:
-            seen_channels.add(ch_id)
-            if channel.bake_image and channel.bake_image.is_dirty:
-                images.add(channel.bake_image)
-        # Collect layer images
-        if layer.image:
-            images.add(layer.image)
+    for mat in bpy.data.materials:
+        if hasattr(mat, 'ps_mat_data'):
+            for group in mat.ps_mat_data.groups:
+                for channel in group.channels:
+                    image = channel.bake_image
+                    if image and image.is_dirty:
+                        images.add(image)
+                    for layer in channel.layers:
+                        image = layer.image
+                        if image:
+                            images.add(image)
             
     for image in images:
         save_image(image)
@@ -164,7 +151,14 @@ def color_history_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph
             return
         image: bpy.types.Image = active_layer.image
         if active_layer and active_layer.type == "IMAGE" and image and image.is_dirty:
-            palette = ensure_color_history_palette(ps_scene_data)
+            if not ps_scene_data.color_history_palette:
+                palette_name = "Paint System History"
+                palette = bpy.data.palettes.get(palette_name)
+                if not palette:
+                    palette = bpy.data.palettes.new(palette_name)
+                ps_scene_data.color_history_palette = palette
+            
+            palette = ps_scene_data.color_history_palette
             current_color = ps_scene_data.get_brush_color(bpy.context)
             
             should_add = True
@@ -181,7 +175,7 @@ def color_history_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph
 
                 item = palette.colors.new()
                 item.color = (current_color[0], current_color[1], current_color[2])
-                # logger.debug(f"Color added: {item.color[:]}")
+                # print(f"Color added: {item.color[:]}")
                 
                 for col in colors_to_save:
                     if len(palette.colors) >= 20:
@@ -189,13 +183,12 @@ def color_history_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph
                     item = palette.colors.new()
                     item.color = col
     except Exception as e:
-        logger.error(f"Color History Error: {e}")
+        print(f"Color History Error: {e}")
         pass
 
 @bpy.app.handlers.persistent
 def transform_gizmo_mode_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph = None):
     """Automatically disable transform gizmos in paint-like modes,
-    and restore based on stored preferences when exiting paint modes.
     and restore based on stored preferences when exiting paint modes.
     """
     try:
@@ -226,9 +219,6 @@ def transform_gizmo_mode_handler(scene: bpy.types.Scene, depsgraph: bpy.types.De
         'PAINT_WEIGHT',
         'PAINT_GREASE_PENCIL',
         'SCULPT_GREASE_PENCIL',
-        'PAINT_GPENCIL',
-        'PAINT_GPENCIL_LEGACY',
-        'SCULPT_GPENCIL',
     }
     
     current_mode = obj.mode if (obj and hasattr(obj, 'mode')) else None
@@ -304,7 +294,7 @@ def paint_system_object_update(scene: bpy.types.Scene, depsgraph: bpy.types.Deps
     try: 
         obj = bpy.context.object
         mat = obj.active_material if obj else None
-    except Exception:
+    except: 
         return
     
     if not obj or not get_ps_scene_data(bpy.context.scene):
@@ -339,23 +329,15 @@ def paint_system_object_update(scene: bpy.types.Scene, depsgraph: bpy.types.Deps
 
 @bpy.app.handlers.persistent
 def material_name_update_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph = None):
-    if depsgraph and hasattr(depsgraph, 'id_type_updated') and not depsgraph.id_type_updated('MATERIAL'):
+    if not depsgraph:
         return
-
-    def _strip_numeric_suffix(name: str) -> str:
-        if "." in name:
-            base, suffix = name.rsplit(".", 1)
-            if suffix.isdigit():
-                return base
-        return name
-
+    if not depsgraph.id_type_updated('MATERIAL'):
+        return
     try:
-        if depsgraph and hasattr(depsgraph, 'updates'):
-            candidates = [u.id for u in depsgraph.updates if isinstance(u.id, bpy.types.Material)]
-        else:
-            candidates = bpy.data.materials
-
-        for material in candidates:
+        for update in depsgraph.updates:
+            material = update.id
+            if not isinstance(material, bpy.types.Material):
+                continue
             if not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
                 continue
             last_name = material.ps_mat_data.last_material_name
@@ -366,10 +348,8 @@ def material_name_update_handler(scene: bpy.types.Scene, depsgraph: bpy.types.De
                 if material.ps_mat_data.groups:
                     for group in material.ps_mat_data.groups:
                         if group.name.startswith("PS_"):
-                            inferred_old = _strip_numeric_suffix(group.name[3:])
+                            inferred_old = group.name[3:]
                             break
-                        if not inferred_old:
-                            inferred_old = _strip_numeric_suffix(group.name)
                 if inferred_old and inferred_old != material.name:
                     material.ps_mat_data.last_material_name = inferred_old
                     update_material_name(material, bpy.context)
@@ -381,34 +361,7 @@ def material_name_update_handler(scene: bpy.types.Scene, depsgraph: bpy.types.De
 
 # --- On Addon Enable ---
 def on_addon_enable():
-    context = bpy.context
-    window = getattr(context, "window", None)
-    screen = getattr(window, "screen", None) if window else None
-    scene = getattr(context, "scene", None)
-
-    if screen and getattr(screen, "areas", None):
-        try:
-            for area in screen.areas:
-                if area.type != 'IMAGE_EDITOR':
-                    continue
-                for space in area.spaces:
-                    if space.type != 'IMAGE_EDITOR' or not hasattr(space, "ui_mode"):
-                        continue
-                    ui_mode_prop = space.bl_rna.properties.get("ui_mode")
-                    ui_mode_items = [item.identifier for item in ui_mode_prop.enum_items] if ui_mode_prop else []
-                    if not ui_mode_items:
-                        continue
-                    if 'VIEW' in ui_mode_items:
-                        space.ui_mode = 'VIEW'
-                    else:
-                        space.ui_mode = ui_mode_items[0]
-        except Exception:
-            pass
-
-    if not scene or not window or not screen or not getattr(screen, "areas", None):
-        return 0.25
-
-    load_post(scene)
+    load_post(bpy.context.scene)
     get_latest_version()
     try:
         for material in bpy.data.materials:
@@ -418,7 +371,6 @@ def on_addon_enable():
     except Exception:
         pass
 
-    return None
 
 owner = object()
 
@@ -441,6 +393,7 @@ def uv_edit_mode_guard(*args):
             bpy.ops.object.mode_set(mode='OBJECT')
         except Exception:
             pass
+
 
 def material_name_msgbus_callback(*args):
     try:

@@ -1,57 +1,77 @@
 import bpy
+import json
 import sys
+import os
+import time
 import threading
 from typing import Optional, Tuple
-from .context import parse_context
+from .data import parse_context
 from ..utils.version import is_newer_than, is_online
-from .cache_utils import JsonFileCache
-from ..utils.logging import get_logger
-
-logger = get_logger(__name__)
 
 ADDON_ID = 'paint_system'
 
-_version_cache = JsonFileCache("version_cache.json", label="version")
 
-
-def _get_version_cache_max_age() -> float:
-    """Compute the cache validity interval (in seconds) from user preferences.
-    
-    Returns 0 when caching should be bypassed.
-    """
-    try:
-        ps_ctx = parse_context(bpy.context)
-        if ps_ctx.ps_settings is None:
-            return 0
-        prefs = ps_ctx.ps_settings
-        return (
-            prefs.version_check_interval_days * 86400 +
-            prefs.version_check_interval_hours * 3600 +
-            prefs.version_check_interval_minutes * 60
-        )
-    except Exception:
-        return 0
+def get_cache_path() -> str:
+    """Get the path to the cache file in the addon root directory."""
+    # Go up one level from this file's directory (paintsystem/paintsystem/ -> paintsystem/)
+    addon_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(addon_root, "version_cache.json")
 
 
 def save_version_cache(version: str) -> None:
     """Save version data to cache with timestamp."""
-    _version_cache.save({"version": version})
+    cache_path = get_cache_path()
+    cache_data = {
+        "timestamp": time.time(),
+        "version": version
+    }
+    try:
+        with open(cache_path, 'w') as f:
+            json.dump(cache_data, f, indent=2)
+    except Exception as e:
+        print(f"Error saving version cache: {e}", file=sys.stderr)
 
 
 def load_version_cache() -> Optional[str]:
     """Load version data from cache if valid based on user preferences."""
-    max_age = _get_version_cache_max_age()
-    if max_age == 0:
+    cache_path = get_cache_path()
+    if not os.path.exists(cache_path):
         return None
-    cached = _version_cache.load(max_age)
-    if cached is not None:
-        return cached.get("version")
-    return None
+    
+    try:
+        ps_ctx = parse_context(bpy.context)
+        if ps_ctx.ps_settings is None:
+            return None
+        
+        prefs = ps_ctx.ps_settings
+        
+        # Calculate cache validity interval in seconds
+        interval_seconds = (
+            prefs.version_check_interval_days * 86400 +
+            prefs.version_check_interval_hours * 3600 +
+            prefs.version_check_interval_minutes * 60
+        )
+        
+        # If interval is 0, don't use cache
+        if interval_seconds == 0:
+            return None
+        
+        with open(cache_path, 'r') as f:
+            cache_data = json.load(f)
+            
+        timestamp = cache_data.get("timestamp", 0)
+        # Check if cache is older than the configured interval
+        if time.time() - timestamp > interval_seconds:
+            return None
+            
+        return cache_data.get("version")
+    except Exception as e:
+        print(f"Error loading version cache: {e}", file=sys.stderr)
+        return None
 
 
 def thread_check_update():
     """Check for updates in a background thread - combines latest version check and update availability."""
-    logger.debug(f"Checking for updates...")
     ps_ctx = parse_context(bpy.context)
     
     try:
@@ -60,8 +80,6 @@ def thread_check_update():
         
         # Get latest version and check if update is available in one go
         latest_version, update_available = _get_latest_version_and_check_update_internal(current_version)
-        
-        logger.debug(f"Latest version: {latest_version}, Update available: {update_available}")
         
         if latest_version is not None:
             save_version_cache(latest_version)
@@ -74,10 +92,11 @@ def thread_check_update():
                 ps_ctx.ps_settings.update_state = 'AVAILABLE'
             else:
                 ps_ctx.ps_settings.update_state = 'UNAVAILABLE'
-    except Exception as e:
-        logger.error(f"Error checking for updates: {e}")
-        if ps_ctx.ps_settings is not None:
+        else:
             ps_ctx.ps_settings.update_state = 'ERROR'
+    except Exception as e:
+        print(f"Error checking for updates: {e}", file=sys.stderr)
+        ps_ctx.ps_settings.update_state = 'ERROR'
     finally:
         if ps_ctx.ps_settings is not None and ps_ctx.ps_settings.update_state != 'ERROR':
             if ps_ctx.ps_settings.update_state == 'LOADING':
@@ -180,6 +199,7 @@ def get_latest_version() -> Optional[str]:
     import addon_utils
     from ..preferences import addon_package
     module_name = addon_package()
+    ps_ctx = parse_context(bpy.context)
     if not is_newer_than(4, 2):
         return None
     
@@ -189,8 +209,6 @@ def get_latest_version() -> Optional[str]:
     is_extension = addon_utils.check_extension(module_name)
     if not is_extension:
         return None
-
-    ps_ctx = parse_context(bpy.context)
     
     if ps_ctx.ps_settings is None:
         return None
@@ -218,7 +236,10 @@ def get_latest_version() -> Optional[str]:
 
 def reset_version_cache() -> None:
     """Reset the version cache."""
-    _version_cache.reset()
+    cache_path = get_cache_path()
+    if os.path.exists(cache_path):
+        os.remove(cache_path)
+    print("Version cache reset")
 
 
 def _get_current_version_internal() -> Optional[str]:
@@ -293,7 +314,7 @@ def _get_current_version_internal() -> Optional[str]:
             pass
         return None
     except Exception as e:
-        logger.error(f"Error getting current version: {e}")
+        print(f"Error getting current version: {e}", file=sys.stderr)
         return None
     
     return None

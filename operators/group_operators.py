@@ -1045,6 +1045,8 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
+        if context.mode != 'OBJECT':
+            return False
         if ps_ctx.ps_object is None or ps_ctx.active_material is None:
             return False
         # Check if material has a Principled BSDF

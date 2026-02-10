@@ -1,13 +1,7 @@
-﻿import bpy
+import bpy
 from datetime import datetime
 from bpy.utils import register_classes_factory
 from bpy.types import Panel, Menu, UIList
-from bl_ui.properties_paint_common import (
-    UnifiedPaintPanel
-)
-
-from .channels_panels import draw_channels_settings_panel, poll_channels_panel, draw_channels_panel
-from .extras_panels import poll_brush_color_settings, draw_brush_color_settings, poll_brush_settings, draw_brush_settings
 
 from ..paintsystem.version_check import get_latest_version
 
@@ -16,21 +10,13 @@ from ..utils.version import is_newer_than, is_online
 from ..paintsystem.donations import get_donation_info
 from .common import (
     PSContextMixin,
-    draw_indent,
     get_icon,
-    get_icon_from_channel,
     line_separator,
     scale_content,
     check_group_multiuser,
     toggle_paint_mode_ui,
-<<<<<<< HEAD
-    ensure_invoke_context,
-    draw_warning_box,
     draw_uv_edit_alert,
     is_uv_edit_active
-=======
-    draw_uv_edit_alert
->>>>>>> e1b940f (Uv edit actually works somewhat)
 )
 
 from ..paintsystem.data import LegacyPaintSystemContextParser
@@ -54,10 +40,6 @@ class MAT_PT_Support(PSContextMixin, Panel):
     bl_label = "Support"
     bl_options = {"INSTANCED"}
     bl_ui_units_x = 10
-
-    @classmethod
-    def poll(cls, context):
-        return not is_uv_edit_active(context)
     
 
     def draw(self, context):
@@ -119,12 +101,10 @@ class MAT_MT_PaintSystemMaterialSelectMenu(PSContextMixin, Menu):
         for idx, material_slot in enumerate(ob.material_slots):
             is_selected = ob.active_material_index == idx
             mat = material_slot.material is not None
-            op = layout.operator(
-                "paint_system.select_material_index",
-                text=material_slot.material.name if mat else "Empty Material",
-                icon="MATERIAL" if mat else "MESH_CIRCLE",
-                depress=is_selected,
-            )
+            if mat and hasattr(mat, "paint_system") and mat.paint_system.groups:
+                op = layout.operator("paint_system.select_material_index", text=material_slot.material.name if mat else "Empty Material", icon="MATERIAL" if mat else "MESH_CIRCLE", depress=is_selected)
+            else:
+                op = layout.operator("paint_system.select_material_index", text=material_slot.material.name if mat else "Empty Material", icon="MATERIAL" if mat else "MESH_CIRCLE", depress=is_selected)
             op.index = idx
 
 
@@ -155,11 +135,6 @@ class MAT_PT_PaintSystemGroups(PSContextMixin, Panel):
     bl_options = {"INSTANCED"}
     bl_ui_units_x = 12
 
-    @classmethod
-    def poll(cls, context):
-        ps_ctx = cls.parse_context(context)
-        return ps_ctx.ps_object is not None and not is_uv_edit_active(context)
-
     def draw(self, context):
         ps_ctx = self.parse_context(context)
         layout = self.layout
@@ -175,11 +150,6 @@ class MAT_PT_PaintSystemMaterialSettings(PSContextMixin, Panel):
     bl_region_type = "WINDOW"
     bl_options = {"INSTANCED"}
     bl_ui_units_x = 12
-
-    @classmethod
-    def poll(cls, context):
-        ps_ctx = cls.parse_context(context)
-        return ps_ctx.ps_object is not None and not is_uv_edit_active(context)
     
     def draw(self, context):
         ps_ctx = self.parse_context(context)
@@ -230,7 +200,7 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        return ps_ctx.ps_object is not None and not is_uv_edit_active(context)
+        return ps_ctx.ps_object is not None
     
     def draw_header(self, context):
         layout = self.layout
@@ -271,15 +241,6 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
                 row = box.row()
                 scale_content(context, row)
                 row.operator("paint_system.open_extension_preferences", text="Update Paint System", icon="FILE_REFRESH")
-<<<<<<< HEAD
-            elif update_state == 'LOADING':
-                box = layout.box()
-                box.label(text="Checking for updates...", icon="INFO")
-=======
-            # elif update_state == 'LOADING':
-            #     box = layout.box()
-            #     box.label(text="Checking for updates...", icon="INFO")
->>>>>>> e1b940f (Uv edit actually works somewhat)
         draw_uv_edit_alert(layout, context)
         if ps_ctx.ps_settings and not ps_ctx.ps_settings.use_legacy_ui and ps_ctx.active_channel:
             toggle_paint_mode_ui(layout, context)
@@ -303,10 +264,11 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
         
 
         if ps_ctx.active_group and check_group_multiuser(ps_ctx.active_group.node_tree):
-            warning_col = draw_warning_box(layout, [
-                ("Duplicated Paint System Data", 'ERROR'),
-            ])
-            row = warning_col.row(align=True)
+            # Show a warning
+            box = layout.box()
+            box.alert = True
+            box.label(text="Duplicated Paint System Data", icon="ERROR")
+            row = box.row(align=True)
             scale_content(context, row, 1.5, 1.5)
             row.operator("paint_system.duplicate_paint_system_data", text="Fix Data Duplication")
             return
@@ -334,59 +296,6 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
             return
         # layout.label(text="Welcome to the Paint System!")
         # layout.operator("paint_system.new_image_layer", text="Create New Image Layer")
-        
-        if poll_channels_panel(context):
-            header, panel = layout.panel("MAT_PT_ChannelsPanel", default_closed=True)
-            header.label(text="Channels", icon_value=get_icon('channel'))
-            if panel:
-                draw_channels_panel(panel, context)
-            else:
-                row = header.row(align=True)
-                row.scale_x = 1.1
-                row.alignment = 'RIGHT'
-                row.popover(
-                    panel="MAT_PT_ChannelsSelect",
-                    text=ps_ctx.active_channel.name if ps_ctx.active_channel else "No Channel",
-                    icon_value=get_icon_from_channel(ps_ctx.active_channel)
-                )
-        if poll_brush_settings(context):
-            header, panel = layout.panel("MAT_PT_Brush", default_closed=True)
-            header.label(text="Brush", icon_value=get_icon('brush'))
-            if ps_ctx.ps_settings.show_tooltips:
-                header.popover(
-                    panel="MAT_PT_BrushTooltips",
-                    text='',
-                    icon='INFO_LARGE' if is_newer_than(4,3) else 'INFO'
-                )
-            if panel:
-                draw_brush_settings(panel, context)
-        if poll_brush_color_settings(context):
-            header, panel = layout.panel("MAT_PT_BrushColor", default_closed=True)
-            header.label(text="Color", icon_value=get_icon('color'))
-            if panel:
-                row = header.row(align=True)
-                row.scale_x = 1.1
-                row.alignment = 'RIGHT'
-                row.popover(
-                    panel="MAT_PT_BrushColorSettings",
-                    text="Settings",
-                    icon="SETTINGS"
-                )
-                draw_brush_color_settings(panel, context)
-            else:
-                settings = UnifiedPaintPanel.paint_settings(context)
-                brush = settings.brush
-                row = header.row(align=True)
-                row.alignment = 'RIGHT'
-                if ps_ctx.ps_object.type == 'MESH':
-                    split = row.split(factor=0.5, align=True)
-                    split.scale_x = 1
-                    split.alignment = 'RIGHT'
-                    UnifiedPaintPanel.prop_unified_color(split, context, brush, "color", text="")
-                    UnifiedPaintPanel.prop_unified_color(split, context, brush, "secondary_color", text="")
-                    row.operator('paint.brush_colors_flip', icon='FILE_REFRESH', text="")
-                elif ps_ctx.ps_object.type == 'GREASEPENCIL':
-                    row.prop(brush, "color", text="")
 
 class MAT_MT_DeleteGroupMenu(PSContextMixin, Menu):
     bl_label = "Delete Group"
@@ -395,7 +304,10 @@ class MAT_MT_DeleteGroupMenu(PSContextMixin, Menu):
     def draw(self, context):
         layout = self.layout
         ps_ctx = self.parse_context(context)
-        ensure_invoke_context(layout)
+        
+        if layout.operator_context == 'EXEC_REGION_WIN':
+            layout.operator_context = 'INVOKE_REGION_WIN'
+        layout.operator_context = 'INVOKE_REGION_WIN'
         
         layout.alert = True
         layout.operator("paint_system.delete_group", text="Remove Paint System", icon="TRASH")

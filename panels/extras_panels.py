@@ -1,9 +1,9 @@
 from bl_ui.properties_material import EEVEE_MATERIAL_PT_context_material
 import bpy
-from bpy.types import NodeTree, Panel, Menu, UILayout, Context
+from bpy.types import NodeTree, Panel, Menu, UILayout
 from bpy.utils import register_classes_factory
 
-from .common import PSContextMixin, draw_layer_icon, get_event_icons, find_keymap, find_keymap_by_name, get_icon_from_channel, scale_content, get_icon, is_uv_edit_active
+from .common import PSContextMixin, draw_layer_icon, get_event_icons, find_keymap, find_keymap_by_name, get_icon_from_channel, scale_content, get_icon
 from ..utils.version import is_newer_than
 from ..utils.unified_brushes import get_unified_settings
 from ..utils.nodes import is_in_nodetree
@@ -30,10 +30,6 @@ class MAT_PT_BrushTooltips(Panel):
     bl_region_type = "WINDOW"
     bl_options = {"INSTANCED"}
     bl_ui_units_x = 8
-
-    @classmethod
-    def poll(cls, context):
-        return not is_uv_edit_active(context)
 
     def draw_shortcut(self, layout, kmi, text):
         row = layout.row(align=True)
@@ -74,8 +70,6 @@ class MAT_PT_Brush(PSContextMixin, Panel, UnifiedPaintPanel):
     @classmethod
     def poll(cls, context):
         mode = cls.get_brush_mode(context)
-        if is_uv_edit_active(context):
-            return False
         return mode in ['PAINT_TEXTURE', 'PAINT_GREASE_PENCIL', 'VERTEX_GREASE_PENCIL', 'WEIGHT_GREASE_PENCIL', 'SCULPT_GREASE_PENCIL']
 
     def draw_header(self, context):
@@ -92,6 +86,9 @@ class MAT_PT_Brush(PSContextMixin, Panel, UnifiedPaintPanel):
                 icon='INFO_LARGE' if is_newer_than(4,3) else 'INFO'
             )
 
+    # def draw_header_preset(self, context):
+    #     layout = self.layout
+    #     ps_ctx = self.parse_context(context)
     #     settings = self.paint_settings(context)
     #     brush = settings.brush
     #     obj = ps_ctx.ps_object
@@ -118,6 +115,7 @@ class MAT_PT_Brush(PSContextMixin, Panel, UnifiedPaintPanel):
                                        new="brush.add", rows=3, cols=8, hide_buttons=False)
         box = layout.box()
         col = box.column(align=True)
+        scale_content(context, col, scale_x=1, scale_y=1.2)
         brush_settings(col, context, brush, popover=self.is_popover)
         
         brush_imported = False
@@ -145,15 +143,11 @@ class MAT_PT_Brush(PSContextMixin, Panel, UnifiedPaintPanel):
 
 class MAT_PT_BrushColorSettings(PSContextMixin, Panel):
     bl_idname = "MAT_PT_BrushColorSettings"
-    bl_label = "Brush Color Settings"
+    bl_label = "Color Picker Settings"
     bl_space_type = "VIEW_3D"
     bl_region_type = "WINDOW"
     bl_options = {"INSTANCED"}
     bl_ui_units_x = 10
-
-    @classmethod
-    def poll(cls, context):
-        return (not is_uv_edit_active(context)) and poll_brush_color_settings(context)
     
     def draw(self, context):
         layout = self.layout
@@ -162,145 +156,6 @@ class MAT_PT_BrushColorSettings(PSContextMixin, Panel):
         layout.prop(ps_ctx.ps_settings, "color_picker_scale", text="Color Picker Scale", slider=True)
         layout.prop(ps_ctx.ps_settings, "show_hex_color", text="Show Hex Color")
         layout.prop(ps_ctx.ps_settings, "show_more_color_picker_settings", text="Show HSV Sliders")
-
-def poll_brush_color_settings(context: Context):
-    ps_ctx = PSContextMixin.parse_context(context)
-    settings = UnifiedPaintPanel.paint_settings(context)
-    if not settings:
-        return False
-    brush = settings.brush
-    if ps_ctx.ps_object is None or brush is None:
-        return False
-
-    if ps_ctx.ps_object.type == 'MESH':
-        if context.image_paint_object:
-            capabilities = brush.image_paint_capabilities
-            return capabilities.has_color
-    elif ps_ctx.ps_object.type == 'GREASEPENCIL':
-        from bl_ui.space_toolsystem_common import ToolSelectPanelHelper
-        tool = ToolSelectPanelHelper.tool_active_from_context(context)
-        if is_newer_than(5,0):
-            gpencil_brush_type = brush.gpencil_brush_type
-        else:
-            gpencil_brush_type = brush.gpencil_tool
-        if tool and tool.idname in {"builtin.cutter", "builtin.eyedropper", "builtin.interpolate"}:
-            return False
-        if gpencil_brush_type == 'TINT':
-            return True
-        if gpencil_brush_type not in {'DRAW', 'FILL'}:
-            return False
-        return True
-    return False
-
-
-def draw_brush_color_settings(layout: UILayout, context: Context):
-    ps_ctx = PSContextMixin.parse_context(context)
-    settings = UnifiedPaintPanel.paint_settings(context)
-    if not settings or ps_ctx.ps_object is None:
-        return
-    brush = settings.brush
-    if not brush:
-        return
-
-    col = layout.column()
-    use_unified_paint = True
-    if ps_ctx.ps_object.type == 'MESH':
-        row = col.row(align=True)
-        row.scale_y = 1.2
-        row.popover(
-            panel="MAT_PT_BrushColorSettings",
-            icon="SETTINGS"
-        )
-
-        prop_owner = get_unified_settings(context, "use_unified_color")
-        row = col.row()
-        row.scale_y = ps_ctx.ps_settings.color_picker_scale
-        row.template_color_picker(prop_owner, "color", value_slider=True)
-
-        # Color cards: primary + secondary swatches with related actions
-        sub_row = col.row(align=True)
-        sub_row.scale_y = 1.0
-        UnifiedPaintPanel.prop_unified_color(sub_row, context, brush, "color", text="")
-        UnifiedPaintPanel.prop_unified_color(sub_row, context, brush, "secondary_color", text="")
-        sub_row.operator("paint.brush_colors_flip", icon='FILE_REFRESH', text="")
-        sub_row.operator("paint_system.color_sampler", icon='EYEDROPPER', text="")
-        if ps_ctx.ps_settings.show_more_color_picker_settings:
-            hsv_col = col.column(align=True)
-            if not context.preferences.view.color_picker_type == "SQUARE_SV":
-                hsv_col.prop(ps_ctx.ps_scene_data, "hue", text="Hue")
-            hsv_col.prop(ps_ctx.ps_scene_data, "saturation", text="Saturation")
-            hsv_col.prop(ps_ctx.ps_scene_data, "value", text="Value")
-        if ps_ctx.ps_settings.show_hex_color:
-            row = col.row()
-            row.prop(ps_ctx.ps_scene_data, "hex_color", text="Hex")
-        if is_newer_than(4, 5):
-            # Bforartists/Blender variants may not expose color_jitter_panel; fail gracefully
-            try:
-                from bl_ui.properties_paint_common import color_jitter_panel
-                color_jitter_panel(col, context, brush)
-            except Exception:
-                pass
-            try:
-                header, panel = col.panel("paintsystem_color_history_palette", default_closed=False)
-                header.label(text="Color History")
-                if panel:
-                    if not ps_ctx.ps_scene_data.color_history_palette:
-                        panel.label(text="No color history yet")
-                    else:
-                        panel.template_palette(ps_ctx.ps_scene_data, "color_history_palette", color=True)
-                header, panel = col.panel("paintsystem_color_palette", default_closed=False)
-                header.label(text="Color Palette")
-                panel.template_ID(settings, "palette", new="palette.new")
-                if panel and settings.palette:
-                    panel.template_palette(settings, "palette", color=True)
-            except Exception:
-                pass
-
-    if ps_ctx.ps_object.type == 'GREASEPENCIL':
-        row = col.row()
-        row.prop(settings, "color_mode", expand=True)
-        use_unified_paint = (context.object.mode != 'PAINT_GREASE_PENCIL')
-        if hasattr(context.tool_settings, "unified_paint_settings"):
-            ups = context.tool_settings.unified_paint_settings
-            prop_owner = ups if use_unified_paint and ups.use_unified_color else brush
-        else:
-            prop_owner = brush
-        enable_color_picker = settings.color_mode == 'VERTEXCOLOR'
-        if not enable_color_picker:
-            ma = ps_ctx.ps_object.active_material
-            icon_id = 0
-            txt_ma = ""
-            if ma:
-                ma.id_data.preview_ensure()
-                if ma.id_data.preview:
-                    icon_id = ma.id_data.preview.icon_id
-                    txt_ma = ma.name
-                    maxw = 25
-                    if len(txt_ma) > maxw:
-                        txt_ma = txt_ma[:maxw - 5] + '..' + txt_ma[-3:]
-            col.popover(
-                panel="TOPBAR_PT_grease_pencil_materials",
-                text=txt_ma,
-                icon_value=icon_id,
-            )
-            return
-        # This panel is only used for Draw mode, which does not use unified paint settings.
-        row = col.row(align=True)
-        row.scale_y = 1.2
-        row.prop(context.preferences.view, "color_picker_type", text="")
-        row = col.row()
-        row.scale_y = ps_ctx.ps_settings.color_picker_scale
-        row.template_color_picker(prop_owner, "color", value_slider=True)
-
-    sub_row = col.row(align=True)
-    if use_unified_paint:
-        UnifiedPaintPanel.prop_unified_color(sub_row, context, brush, "color", text="")
-        UnifiedPaintPanel.prop_unified_color(sub_row, context, brush, "secondary_color", text="")
-    else:
-        sub_row.prop(brush, "color", text="")
-        sub_row.prop(brush, "secondary_color", text="")
-
-    sub_row.operator("paint.brush_colors_flip", icon='FILE_REFRESH', text="")
 
 class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
     bl_idname = 'MAT_PT_BrushColor'
@@ -313,7 +168,33 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
 
     @classmethod
     def poll(cls, context):
-        return (not is_uv_edit_active(context)) and poll_brush_color_settings(context)
+        ps_ctx = cls.parse_context(context)
+        settings = cls.paint_settings(context)
+        if not settings:
+            return False
+        brush = settings.brush
+        if ps_ctx.ps_object is None or brush is None:
+            return False
+
+        if ps_ctx.ps_object.type == 'MESH':
+            if context.image_paint_object:
+                capabilities = brush.image_paint_capabilities
+                return capabilities.has_color
+        elif ps_ctx.ps_object.type == 'GREASEPENCIL':
+            from bl_ui.space_toolsystem_common import ToolSelectPanelHelper
+            tool = ToolSelectPanelHelper.tool_active_from_context(context)
+            if is_newer_than(5,0):
+                gpencil_brush_type = brush.gpencil_brush_type
+            else:
+                gpencil_brush_type = brush.gpencil_tool
+            if tool and tool.idname in {"builtin.cutter", "builtin.eyedropper", "builtin.interpolate"}:
+                return False
+            if gpencil_brush_type == 'TINT':
+                return True
+            if gpencil_brush_type not in {'DRAW', 'FILL'}:
+                return False
+            return True
+        return False
 
     def draw_header(self, context):
         layout = self.layout
@@ -330,7 +211,99 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
 
     def draw(self, context):
         layout = self.layout
-        draw_brush_color_settings(layout, context)
+        ps_ctx = self.parse_context(context)
+        col = layout.column()
+        settings = self.paint_settings(context)
+        brush = settings.brush
+        if ps_ctx.ps_object.type == 'MESH':
+            prop_owner = get_unified_settings(context, "use_unified_color")
+            row = col.row()
+            row.scale_y = ps_ctx.ps_settings.color_picker_scale
+            self.prop_unified_color_picker(row, context, brush, "color", value_slider=True)
+            # Color cards: primary + secondary swatches with related actions
+            sub_row = col.row(align=True)
+            sub_row.scale_y = 1.0
+            self.prop_unified_color(sub_row, context, brush, "color", text="")
+            self.prop_unified_color(sub_row, context, brush, "secondary_color", text="")
+            sub_row.operator("paint.brush_colors_flip", icon='FILE_REFRESH', text="")
+            if ps_ctx.ps_settings.show_more_color_picker_settings:
+                hsv_col = col.column(align=True)
+                if not context.preferences.view.color_picker_type == "SQUARE_SV":
+                    hsv_col.prop(ps_ctx.ps_scene_data, "hue", text="Hue")
+                hsv_col.prop(ps_ctx.ps_scene_data, "saturation", text="Saturation")
+                hsv_col.prop(ps_ctx.ps_scene_data, "value", text="Value")
+            if ps_ctx.ps_settings.show_hex_color:
+                row = col.row()
+                row.prop(ps_ctx.ps_scene_data, "hex_color", text="Hex")
+            if is_newer_than(4,5):
+                # Bforartists/Blender variants may not expose color_jitter_panel; fail gracefully
+                try:
+                    from bl_ui.properties_paint_common import color_jitter_panel
+                    color_jitter_panel(col, context, brush)
+                except Exception:
+                    pass
+                try:
+                    # Always show Color History and Palette cards expanded under the color wheel
+                    header, panel = col.panel("paintsystem_color_history_palette", default_closed=False)
+                    header.label(text="Color History")
+                    if panel:
+                        if not ps_ctx.ps_scene_data.color_history_palette:
+                            panel.label(text="No color history yet")
+                        else:
+                            panel.template_palette(ps_ctx.ps_scene_data, "color_history_palette", color=True)
+                    header, panel = col.panel("paintsystem_color_palette", default_closed=False)
+                    header.label(text="Color Palette")
+                    panel.template_ID(settings, "palette", new="palette.new")
+                    if panel and settings.palette:
+                        panel.template_palette(settings, "palette", color=True)
+                except Exception:
+                    pass
+            # draw_color_settings(context, col, brush)
+        if ps_ctx.ps_object.type == 'GREASEPENCIL':
+            row = col.row()
+            row.prop(settings, "color_mode", expand=True)
+            use_unified_paint = (context.object.mode != 'PAINT_GREASE_PENCIL')
+            if hasattr(context.tool_settings, "unified_paint_settings"):
+                ups = context.tool_settings.unified_paint_settings
+                prop_owner = ups if use_unified_paint and ups.use_unified_color else brush
+            else:
+                prop_owner = brush
+            enable_color_picker = settings.color_mode == 'VERTEXCOLOR'
+            if not enable_color_picker:
+                ma = ps_ctx.ps_object.active_material
+                icon_id = 0
+                txt_ma = ""
+                if ma:
+                    ma.id_data.preview_ensure()
+                    if ma.id_data.preview:
+                        icon_id = ma.id_data.preview.icon_id
+                        txt_ma = ma.name
+                        maxw = 25
+                        if len(txt_ma) > maxw:
+                            txt_ma = txt_ma[:maxw - 5] + '..' + txt_ma[-3:]
+                col.popover(
+                    panel="TOPBAR_PT_grease_pencil_materials",
+                    text=txt_ma,
+                    icon_value=icon_id,
+                )
+                return
+            # This panel is only used for Draw mode, which does not use unified paint settings.
+            row = col.row(align=True)
+            row.scale_y = 1.2
+            row.prop(context.preferences.view, "color_picker_type", text="")
+            row = col.row()
+            row.scale_y = ps_ctx.ps_settings.color_picker_scale
+            row.template_color_picker(prop_owner, "color", value_slider=True)
+
+            sub_row = col.row(align=True)
+            if use_unified_paint:
+                self.prop_unified_color(sub_row, context, brush, "color", text="")
+                self.prop_unified_color(sub_row, context, brush, "secondary_color", text="")
+            else:
+                sub_row.prop(brush, "color", text="")
+                sub_row.prop(brush, "secondary_color", text="")
+
+            sub_row.operator("paint.brush_colors_flip", icon='FILE_REFRESH', text="")
 
 
 class MAT_PT_TexPaintRMBMenu(PSContextMixin, Panel, UnifiedPaintPanel):
@@ -344,8 +317,6 @@ class MAT_PT_TexPaintRMBMenu(PSContextMixin, Panel, UnifiedPaintPanel):
 
     @classmethod
     def poll(cls, context):
-        if is_uv_edit_active(context):
-            return False
         return context.mode == 'PAINT_TEXTURE'
 
     def draw(self, context):
@@ -446,10 +417,7 @@ class NODE_PT_PaintSystemShaderEditor(PSContextMixin, Panel):
     def poll(cls, context):
         """Show panel only when object has Paint System data"""
         ps_ctx = cls.parse_context(context)
-        if is_uv_edit_active(context):
-            return False
-        space_data = getattr(context, "space_data", None)
-        return ps_ctx.active_group is not None and bool(space_data and space_data.tree_type == 'ShaderNodeTree')
+        return ps_ctx.active_group is not None and context.space_data.tree_type == 'ShaderNodeTree'
     
     def draw_header(self, context):
         layout = self.layout
@@ -513,7 +481,7 @@ class NODE_PT_PaintSystemShaderEditor(PSContextMixin, Panel):
             nt = linked_layer.node_tree
             nodetree_operator(row, nt)
             op = row.operator("paint_system.inspect_layer_node_tree", text="", icon='NODETREE')
-            op.layer_id = linked_layer.id
+            op.layer_id = layer.id
             op.channel_name = channel.name
 
 def draw_paint_system_material(self, context):
@@ -541,20 +509,12 @@ def draw_paint_system_material(self, context):
             scale_content(context, row, 1.3, 1.2)
             if context.mode == 'OBJECT':
                 row.operator("paint_system.convert_material_to_ps", text="Convert Material", icon="FILE_REFRESH")
-    elif not ps_ctx.active_material:
-        if is_uv_edit_active(context) or context.mode != 'OBJECT':
-            return
-        box = layout.box()
-        box.label(text="Add Paint System:", icon_value=get_icon("sunflower"))
-        row = box.row()
-        scale_content(context, row, 1.3, 1.2)
-        row.operator("paint_system.new_group", text="Add Paint System", icon="ADD")
 
 classes = (
     MAT_PT_BrushTooltips,
-    # MAT_PT_Brush,
+    MAT_PT_Brush,
     MAT_PT_BrushColorSettings,
-    # MAT_PT_BrushColor,
+    MAT_PT_BrushColor,
     MAT_PT_TexPaintRMBMenu,
     NODE_PT_PaintSystemShaderEditor,
 )
