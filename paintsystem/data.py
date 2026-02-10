@@ -2724,9 +2724,13 @@ class Group(PropertyGroup):
                         mat = material
                         break
         if mat:
-            node_tree.name = f"PS {self.name} ({mat.name})"
+            new_name = self.name if self.name == mat.name else f"{self.name} ({mat.name})"
         else:
-            node_tree.name = f"PS {self.name} (None)"
+            new_name = self.name
+        try:
+            node_tree.name = new_name
+        except AttributeError:
+            pass
         # node_tree.name = f"Paint System ({self.name})"
         if not isinstance(node_tree, bpy.types.NodeTree):
             return
@@ -3604,7 +3608,7 @@ def update_material_name(material: Material, context: Context = None, force: boo
     old_name = ps_mat_data.last_material_name or material.name
     new_name = material.name
 
-    # Update group names to match material name (supports legacy PS_ prefixes)
+    # Update group names with PS_ prefix
     group_old_names: dict[int, str] = {}
     group_new_names: dict[int, str] = {}
     for group_idx, group in enumerate(ps_mat_data.groups):
