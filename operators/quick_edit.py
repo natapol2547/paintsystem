@@ -157,32 +157,7 @@ def set_rgb_to_zero_if_alpha_zero(image):
     # Flatten the array back and update the image pixels
     image.pixels = pixel_data.ravel()  # Update with modified data
 
-    # --- Method 2: Direct Pixel Iteration (Simpler, potentially slower) ---
-    # Uncomment this section and comment out Method 1 if you prefer
-    # or if numpy is unavailable (though it ships with Blender).
-    #
-    # if image.channels != 4:
-    #     print(f"Error: Image '{image.name}' does not have 4 channels (RGBA). Found {image.channels}.")
-    #     return False
-    #
-    # pixels = image.pixels # Get a reference (can be modified directly)
-    # num_pixels = len(pixels) // 4 # Calculate total number of pixels
-    #
-    # modified = False
-    # for i in range(num_pixels):
-    #     idx_alpha = i * 4 + 3
-    #
-    #     if pixels[idx_alpha] == 0.0:
-    #         idx_r = i * 4
-    #         idx_g = i * 4 + 1
-    #         idx_b = i * 4 + 2
-    #
-    #         # Check if modification is needed (avoids unnecessary writes)
-    #         if pixels[idx_r] != 0.0 or pixels[idx_g] != 0.0 or pixels[idx_b] != 0.0:
-    #             pixels[idx_r] = 0.0
-    #             pixels[idx_g] = 0.0
-    #             pixels[idx_b] = 0.0
-    #             modified = True
+    
 
     # --- Final Step ---
     # Mark the image as updated so Blender recognizes the changes
