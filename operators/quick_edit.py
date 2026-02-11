@@ -151,6 +151,10 @@ def set_rgb_to_zero_if_alpha_zero(image):
     # Flatten the array back and update the image pixels
     image.pixels = pixel_data.ravel()
 
+    
+
+    # --- Final Step ---
+    # Mark the image as updated so Blender recognizes the changes
     return True
 
 
