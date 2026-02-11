@@ -422,16 +422,10 @@ def register():
     bpy.app.handlers.load_post.append(load_post)
     bpy.app.handlers.save_pre.append(save_handler)
     bpy.app.handlers.load_post.append(refresh_image)
-    if hasattr(bpy.app.handlers, 'scene_update_pre'):
-        bpy.app.handlers.scene_update_pre.append(paint_system_object_update)
-        bpy.app.handlers.scene_update_pre.append(material_name_update_handler)
-        bpy.app.handlers.scene_update_pre.append(color_history_handler)
-        bpy.app.handlers.scene_update_pre.append(transform_gizmo_mode_handler)
-    else:
-        bpy.app.handlers.depsgraph_update_post.append(paint_system_object_update)
-        bpy.app.handlers.depsgraph_update_post.append(material_name_update_handler)
-        bpy.app.handlers.depsgraph_update_post.append(color_history_handler)
-        bpy.app.handlers.depsgraph_update_post.append(transform_gizmo_mode_handler)
+    bpy.app.handlers.depsgraph_update_post.append(paint_system_object_update)
+    bpy.app.handlers.depsgraph_update_post.append(material_name_update_handler)
+    bpy.app.handlers.depsgraph_update_post.append(color_history_handler)
+    bpy.app.handlers.depsgraph_update_post.append(transform_gizmo_mode_handler)
     bpy.app.timers.register(on_addon_enable, first_interval=0.1)
     bpy.msgbus.subscribe_rna(
         key=(bpy.types.UnifiedPaintSettings, "color"),
@@ -470,13 +464,7 @@ def unregister():
     bpy.app.handlers.load_post.remove(load_post)
     bpy.app.handlers.save_pre.remove(save_handler)
     bpy.app.handlers.load_post.remove(refresh_image)
-    if hasattr(bpy.app.handlers, 'scene_update_pre'):
-        bpy.app.handlers.scene_update_pre.remove(paint_system_object_update)
-        bpy.app.handlers.scene_update_pre.remove(material_name_update_handler)
-        bpy.app.handlers.scene_update_pre.remove(color_history_handler)
-        bpy.app.handlers.scene_update_pre.remove(transform_gizmo_mode_handler)
-    else:
-        bpy.app.handlers.depsgraph_update_post.remove(paint_system_object_update)
-        bpy.app.handlers.depsgraph_update_post.remove(material_name_update_handler)
-        bpy.app.handlers.depsgraph_update_post.remove(color_history_handler)
-        bpy.app.handlers.depsgraph_update_post.remove(transform_gizmo_mode_handler)
+    bpy.app.handlers.depsgraph_update_post.remove(paint_system_object_update)
+    bpy.app.handlers.depsgraph_update_post.remove(material_name_update_handler)
+    bpy.app.handlers.depsgraph_update_post.remove(color_history_handler)
+    bpy.app.handlers.depsgraph_update_post.remove(transform_gizmo_mode_handler)
