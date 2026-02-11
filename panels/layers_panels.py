@@ -19,7 +19,8 @@ from .common import (
     check_group_multiuser,
     image_node_settings,
     toggle_paint_mode_ui,
-    layer_settings_ui
+    layer_settings_ui,
+    is_uv_edit_active
 )
 
 from ..utils.nodes import find_node, traverse_connected_nodes, get_material_output
@@ -198,6 +199,8 @@ class MAT_PT_Layers(PSContextMixin, Panel):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
+        if is_uv_edit_active(context):
+            return False
         if ps_ctx.active_group and check_group_multiuser(ps_ctx.active_group.node_tree):
             return False
         return ps_ctx.ps_object and (ps_ctx.active_channel is not None or ps_ctx.ps_object.type == 'GREASEPENCIL')
@@ -380,6 +383,8 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
+        if is_uv_edit_active(context):
+            return False
         if ps_ctx.ps_object.type == 'MESH':
             if ps_ctx.active_channel.use_bake_image:
                 return False
@@ -819,6 +824,8 @@ class MAT_PT_GreasePencilMaskSettings(PSContextMixin, Panel):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
+        if is_uv_edit_active(context):
+            return False
         return ps_ctx.ps_object.type == 'GREASEPENCIL' and is_newer_than(4,3)
 
     def draw_header(self, context):
@@ -841,6 +848,8 @@ class MAT_PT_GreasePencilOnionSkinningSettings(PSContextMixin, Panel):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
+        if is_uv_edit_active(context):
+            return False
         return ps_ctx.ps_object.type == 'GREASEPENCIL' and is_newer_than(4,3)
     
     def draw(self, context):

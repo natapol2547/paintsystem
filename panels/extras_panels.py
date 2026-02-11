@@ -31,6 +31,10 @@ class MAT_PT_BrushTooltips(Panel):
     bl_options = {"INSTANCED"}
     bl_ui_units_x = 8
 
+    @classmethod
+    def poll(cls, context):
+        return not is_uv_edit_active(context)
+
     def draw_shortcut(self, layout, kmi, text):
         row = layout.row(align=True)
         icons = get_event_icons(kmi)
@@ -70,6 +74,8 @@ class MAT_PT_Brush(PSContextMixin, Panel, UnifiedPaintPanel):
     @classmethod
     def poll(cls, context):
         mode = cls.get_brush_mode(context)
+        if is_uv_edit_active(context):
+            return False
         return mode in ['PAINT_TEXTURE', 'PAINT_GREASE_PENCIL', 'VERTEX_GREASE_PENCIL', 'WEIGHT_GREASE_PENCIL', 'SCULPT_GREASE_PENCIL']
 
     def draw_header(self, context):
@@ -148,6 +154,10 @@ class MAT_PT_BrushColorSettings(PSContextMixin, Panel):
     bl_region_type = "WINDOW"
     bl_options = {"INSTANCED"}
     bl_ui_units_x = 10
+
+    @classmethod
+    def poll(cls, context):
+        return not is_uv_edit_active(context)
     
     def draw(self, context):
         layout = self.layout
@@ -171,6 +181,8 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
         ps_ctx = cls.parse_context(context)
         settings = cls.paint_settings(context)
         if not settings:
+            return False
+        if is_uv_edit_active(context):
             return False
         brush = settings.brush
         if ps_ctx.ps_object is None or brush is None:
@@ -317,6 +329,8 @@ class MAT_PT_TexPaintRMBMenu(PSContextMixin, Panel, UnifiedPaintPanel):
 
     @classmethod
     def poll(cls, context):
+        if is_uv_edit_active(context):
+            return False
         return context.mode == 'PAINT_TEXTURE'
 
     def draw(self, context):
@@ -417,6 +431,8 @@ class NODE_PT_PaintSystemShaderEditor(PSContextMixin, Panel):
     def poll(cls, context):
         """Show panel only when object has Paint System data"""
         ps_ctx = cls.parse_context(context)
+        if is_uv_edit_active(context):
+            return False
         return ps_ctx.active_group is not None and context.space_data.tree_type == 'ShaderNodeTree'
     
     def draw_header(self, context):

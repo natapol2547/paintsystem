@@ -1,6 +1,7 @@
 import bpy
-from bpy.types import UIList, Menu, UILayout, Context, Panel
+from bpy.types import UIList, Menu
 from bpy.utils import register_classes_factory
+from bpy.types import Panel
 from bpy_extras.node_utils import find_base_socket_type
 
 from ..paintsystem.data import CHANNEL_TEMPLATE_ENUM
@@ -9,7 +10,6 @@ from .common import (
     get_icon_from_channel,
     check_group_multiuser,
     get_icon,
-    ensure_invoke_context,
     is_uv_edit_active,
 )
 
@@ -111,23 +111,6 @@ class MAT_PT_ChannelsSelect(PSContextMixin, Panel):
         col.label(text="Channels")
         draw_channels_list(context, col)
 
-def poll_channels_panel(context: Context):
-    ps_ctx = PSContextMixin.parse_context(context)
-    if ps_ctx.active_group and check_group_multiuser(ps_ctx.active_group.node_tree):
-        return False
-    return ps_ctx.ps_mat_data and ps_ctx.active_group is not None
-
-def draw_channels_panel(layout: UILayout, context: Context):
-    ps_ctx = PSContextMixin.parse_context(context)
-    box = layout.box()
-    if ps_ctx.ps_settings.use_legacy_ui:
-        box.menu("MAT_MT_PaintSystemChannelsMergeAndExport", icon="TEXTURE_DATA", text="Bake and Export")
-    draw_channels_list(context, box)
-    header, panel = box.panel("MAT_PT_ChannelsSettings", default_closed=True)
-    header.label(text="Channel Settings")
-    if panel:
-        draw_channels_settings_panel(panel, context)
-
 class MAT_PT_ChannelsPanel(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_ChannelsPanel'
     bl_space_type = "VIEW_3D"
@@ -139,9 +122,12 @@ class MAT_PT_ChannelsPanel(PSContextMixin, Panel):
     
     @classmethod
     def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
         if is_uv_edit_active(context):
             return False
-        return poll_channels_panel(context)
+        if ps_ctx.active_group and check_group_multiuser(ps_ctx.active_group.node_tree):
+            return False
+        return ps_ctx.ps_mat_data and ps_ctx.active_group is not None
     
     def draw_header(self, context):
         layout = self.layout
@@ -159,64 +145,11 @@ class MAT_PT_ChannelsPanel(PSContextMixin, Panel):
 
     def draw(self, context):
         layout = self.layout
-        draw_channels_panel(layout, context)
+        ps_ctx = self.parse_context(context)
+        if ps_ctx.ps_settings.use_legacy_ui:
+            layout.menu("MAT_MT_PaintSystemChannelsMergeAndExport", icon="TEXTURE_DATA", text="Bake and Export")
+        draw_channels_list(context, layout)
 
-def draw_channels_settings_panel(layout: UILayout, context: Context):
-    ps_ctx = PSContextMixin.parse_context(context)
-    active_channel = ps_ctx.active_channel
-    if active_channel.bake_image:
-        row = layout.row(align=True)
-        row.prop(active_channel, "use_bake_image", text="Use Baked Image", icon="TEXTURE_DATA")
-        row.operator("paint_system.delete_bake_image", text="", icon="TRASH")
-    col = layout.column(align=True)
-    if active_channel.use_bake_image:
-        if active_channel.type == "VECTOR":
-            col.prop(active_channel, "bake_vector_space", text="")
-        return
-    col.use_property_split = True
-    col.use_property_decorate = False
-    col.prop(active_channel, "type", text="Type")
-    col.prop(active_channel, "color_space", text="Color Space")
-    col.prop(active_channel, "use_alpha", text="Use Alpha")
-    if active_channel.use_alpha:
-        group_node = ps_ctx.active_group.get_group_node(ps_ctx.active_material.node_tree)
-        if group_node:
-            socket = group_node.inputs[f"{active_channel.name} Alpha"]
-            if socket.enabled and len(socket.links) == 0:
-                col.prop(socket, "default_value", text="Alpha")
-    if active_channel.type == "VECTOR":
-        col.prop(active_channel, "default_value", text="Default Value")
-        box = col.box()
-        box.use_property_split = False
-        header, panel = box.panel("vector_space_settings_panel")
-        header.label(text="Vector Transform")
-        if panel:
-            row = panel.row(align=True)
-            row.prop(active_channel, "use_space_transform_input", text="Transform Input", toggle=1)
-            row.prop(active_channel, "use_space_transform_output", text="Transform Output", toggle=1)
-            panel.use_property_split = True
-            panel.prop(active_channel, "vector_type", text="Vector Type", expand=True)
-            row = panel.row(align=True)
-            row.enabled = active_channel.use_space_transform_input
-            row.prop(active_channel, "input_vector_space", text="Input Space")
-            row = panel.row(align=True)
-            row.enabled = active_channel.use_space_transform_output or active_channel.use_space_transform_input
-            row.prop(active_channel, "vector_space", text="Layer Space")
-            if active_channel.vector_space != "TANGENT":
-                row.prop(active_channel, "normalize_input", text="", icon="NORMALS_VERTEX_FACE")
-            row = panel.row(align=True)
-            row.enabled = active_channel.use_space_transform_output
-            row.prop(active_channel, "output_vector_space", text="Output Space")
-            if active_channel.vector_space == "TANGENT" or active_channel.output_vector_space == "TANGENT":
-                panel.prop_search(active_channel, "tangent_uv_map", ps_ctx.ps_object.data, "uv_layers", text="Tangent UV", icon='GROUP_UVS')
-    if active_channel.type == "FLOAT":
-        float_box = col.box()
-        col = float_box.column()
-        col.use_property_split = False
-        col.prop(active_channel, "use_max_min")
-        if active_channel.use_max_min:
-            col.prop(active_channel, "factor_min")
-            col.prop(active_channel, "factor_max")
 
 class MAT_PT_ChannelsSettings(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_ChannelsSettings'
@@ -236,7 +169,63 @@ class MAT_PT_ChannelsSettings(PSContextMixin, Panel):
     
     def draw(self, context):
         layout = self.layout
-        draw_channels_settings_panel(layout, context)
+        ps_ctx = self.parse_context(context)
+        active_channel = ps_ctx.active_channel
+        if active_channel.bake_image:
+            row = layout.row(align=True)
+            row.prop(active_channel, "use_bake_image", text="Use Baked Image", icon="TEXTURE_DATA")
+            row.operator("paint_system.delete_bake_image", text="", icon="TRASH")
+        col = layout.column(align=True)
+        if active_channel.use_bake_image:
+            if active_channel.type == "VECTOR":
+                col.prop(active_channel, "bake_vector_space", text="")
+            return
+        box = col.box()
+        col = box.column()
+        col.use_property_split = True
+        col.use_property_decorate = False
+        col.prop(active_channel, "type", text="Type")
+        col.prop(active_channel, "color_space", text="Color Space")
+        col.prop(active_channel, "use_alpha", text="Use Alpha")
+        if active_channel.use_alpha:
+            group_node = ps_ctx.active_group.get_group_node(ps_ctx.active_material.node_tree)
+            if group_node:
+                socket = group_node.inputs[f"{active_channel.name} Alpha"]
+                if socket.enabled and len(socket.links) == 0:
+                    col.prop(socket, "default_value", text="Alpha")
+        if active_channel.type == "VECTOR":
+            col.prop(active_channel, "default_value", text="Default Value")
+            box = col.box()
+            box.use_property_split = False
+            header, panel = box.panel("vector_space_settings_panel", default_closed=True)
+            header.label(text="Vector Transform")
+            if panel:
+                row = panel.row(align=True)
+                row.prop(active_channel, "use_space_transform_input", text="Transform Input", toggle=1)
+                row.prop(active_channel, "use_space_transform_output", text="Transform Output", toggle=1)
+                panel.use_property_split = True
+                panel.prop(active_channel, "vector_type", text="Vector Type", expand=True)
+                row = panel.row(align=True)
+                row.enabled = active_channel.use_space_transform_input
+                row.prop(active_channel, "input_vector_space", text="Input Space")
+                row = panel.row(align=True)
+                row.enabled = active_channel.use_space_transform_output or active_channel.use_space_transform_input
+                row.prop(active_channel, "vector_space", text="Painting Space")
+                if active_channel.vector_space != "TANGENT":
+                    row.prop(active_channel, "normalize_input", text="", icon="NORMALS_VERTEX_FACE")
+                row = panel.row(align=True)
+                row.enabled = active_channel.use_space_transform_output
+                row.prop(active_channel, "output_vector_space", text="Output Space")
+                if active_channel.vector_space == "TANGENT" or active_channel.output_vector_space == "TANGENT":
+                    panel.prop_search(active_channel, "tangent_uv_map", ps_ctx.ps_object.data, "uv_layers", text="Tangent UV", icon='GROUP_UVS')
+        if active_channel.type == "FLOAT":
+            float_box = col.box()
+            col = float_box.column()
+            col.use_property_split = False
+            col.prop(active_channel, "use_max_min")
+            if active_channel.use_max_min:
+                col.prop(active_channel, "factor_min")
+                col.prop(active_channel, "factor_max")
 
 class MAT_MT_AddChannelMenu(PSContextMixin, Menu):
     bl_label = "Add Channel"
@@ -249,7 +238,10 @@ class MAT_MT_AddChannelMenu(PSContextMixin, Menu):
 
     def draw(self, context):
         layout = self.layout
-        ensure_invoke_context(layout)
+        
+        if layout.operator_context == 'EXEC_REGION_WIN':
+            layout.operator_context = 'INVOKE_REGION_WIN'
+        layout.operator_context = 'INVOKE_REGION_WIN'
         
         ps_ctx = self.parse_context(context)
         col = layout.column()
@@ -265,8 +257,8 @@ classes = (
     MAT_MT_PaintSystemChannelsMergeAndExport,
     PAINTSYSTEM_UL_channels,
     MAT_PT_ChannelsSelect,
-    # MAT_PT_ChannelsPanel,
-    # MAT_PT_ChannelsSettings,
+    MAT_PT_ChannelsPanel,
+    MAT_PT_ChannelsSettings,
     MAT_MT_AddChannelMenu,
 )
 
