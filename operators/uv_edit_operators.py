@@ -33,6 +33,14 @@ def _set_uv_editor_image(context: Context, image: bpy.types.Image | None) -> Non
         space.ui_mode = 'UV'
 
 
+def _clear_uv_editor_image(context: Context) -> None:
+    for space in _get_uv_editor_spaces(context):
+        space.image = None
+        space.ui_mode = 'UV'
+        if hasattr(space, "use_image_pin"):
+            space.use_image_pin = False
+
+
 def _store_uv_editor_image(ps_scene_data, context: Context) -> None:
     if ps_scene_data.uv_edit_previous_image:
         return
@@ -95,17 +103,18 @@ def _update_checker_preview(context: Context) -> None:
         return
     ps_ctx = PSContextMixin.parse_context(context)
     objects = ps_ctx.ps_objects or ([ps_ctx.ps_object] if ps_ctx.ps_object else [])
-    if not ps_scene_data.uv_edit_checker_enabled:
-        _restore_uv_editor_image(ps_scene_data, context)
-        _restore_previous_uvs(ps_scene_data, restore_render=not ps_scene_data.uv_edit_enabled)
-        _restore_checker_materials(ps_scene_data)
-        return
     _store_previous_uvs(ps_scene_data, objects)
-    _apply_checker_uv(ps_scene_data, objects, ps_scene_data.uv_edit_target_uv)
-    _apply_checker_materials(ps_scene_data, objects, ps_ctx.active_material)
+    if ps_scene_data.uv_edit_checker_viewport_enabled:
+        _apply_checker_uv(ps_scene_data, objects, ps_scene_data.uv_edit_target_uv)
+        _apply_checker_materials(ps_scene_data, objects, ps_ctx.active_material)
+    else:
+        _restore_checker_materials(ps_scene_data)
     _store_uv_editor_image(ps_scene_data, context)
-    checker_image = _get_checker_image(ps_scene_data)
-    _set_uv_editor_image(context, checker_image)
+    if ps_scene_data.uv_edit_checker_enabled:
+        checker_image = _get_checker_image(ps_scene_data)
+        _set_uv_editor_image(context, checker_image)
+    else:
+        _clear_uv_editor_image(context)
 
 
 def _ensure_uv_map(obj: bpy.types.Object, uv_name: str) -> bpy.types.MeshUVLoopLayer:
@@ -624,6 +633,7 @@ class PAINTSYSTEM_OT_StartUVEdit(PSContextMixin, Operator):
         _set_uv_editor_image(context, _get_checker_image(ps_scene_data))
         ps_scene_data.uv_edit_enabled = True
         ps_scene_data.uv_edit_checker_enabled = True
+        ps_scene_data.uv_edit_checker_viewport_enabled = True
         update_active_image(context=context)
         return {'FINISHED'}
 
@@ -716,6 +726,7 @@ class PAINTSYSTEM_OT_ApplyUVEdit(PSContextMixin, MultiMaterialOperator, Operator
         ps_scene_data = context.scene.ps_scene_data
         ps_scene_data.uv_edit_enabled = False
         ps_scene_data.uv_edit_checker_enabled = False
+        ps_scene_data.uv_edit_checker_viewport_enabled = False
         update_active_image(context=context)
         _restore_uv_editor_image(ps_scene_data, context)
         _restore_previous_uvs(ps_scene_data, restore_render=False)
@@ -813,6 +824,7 @@ class PAINTSYSTEM_OT_ExitUVEdit(PSContextMixin, Operator):
         ps_scene_data = context.scene.ps_scene_data
         ps_scene_data.uv_edit_enabled = False
         ps_scene_data.uv_edit_checker_enabled = False
+        ps_scene_data.uv_edit_checker_viewport_enabled = False
         _restore_uv_editor_image(ps_scene_data, context)
         _restore_previous_uvs(ps_scene_data, restore_render=True)
         _restore_checker_materials(ps_scene_data)

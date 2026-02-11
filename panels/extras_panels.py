@@ -31,6 +31,10 @@ class MAT_PT_BrushTooltips(Panel):
     bl_options = {"INSTANCED"}
     bl_ui_units_x = 8
 
+    @classmethod
+    def poll(cls, context):
+        return not is_uv_edit_active(context)
+
     def draw_shortcut(self, layout, kmi, text):
         row = layout.row(align=True)
         icons = get_event_icons(kmi)
@@ -70,6 +74,8 @@ class MAT_PT_Brush(PSContextMixin, Panel, UnifiedPaintPanel):
     @classmethod
     def poll(cls, context):
         mode = cls.get_brush_mode(context)
+        if is_uv_edit_active(context):
+            return False
         return mode in ['PAINT_TEXTURE', 'PAINT_GREASE_PENCIL', 'VERTEX_GREASE_PENCIL', 'WEIGHT_GREASE_PENCIL', 'SCULPT_GREASE_PENCIL']
 
     def draw_header(self, context):
@@ -141,13 +147,14 @@ class MAT_PT_BrushColorSettings(PSContextMixin, Panel):
     bl_idname = "MAT_PT_BrushColorSettings"
     bl_label = "Brush Color Settings"
     bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_options = {'DEFAULT_CLOSED'}
+    bl_region_type = "WINDOW"
+    bl_options = {"INSTANCED"}
+    bl_ui_units_x = 10
 
     @classmethod
     def poll(cls, context):
-        return poll_brush_color_settings(context)
-
+        return (not is_uv_edit_active(context)) and poll_brush_color_settings(context)
+    
     def draw(self, context):
         layout = self.layout
         ps_ctx = self.parse_context(context)
@@ -298,7 +305,7 @@ class MAT_PT_BrushColor(PSContextMixin, Panel, UnifiedPaintPanel):
 
     @classmethod
     def poll(cls, context):
-        return poll_brush_color_settings(context)
+        return (not is_uv_edit_active(context)) and poll_brush_color_settings(context)
 
     def draw_header(self, context):
         layout = self.layout
@@ -331,6 +338,8 @@ class MAT_PT_TexPaintRMBMenu(PSContextMixin, Panel, UnifiedPaintPanel):
 
     @classmethod
     def poll(cls, context):
+        if is_uv_edit_active(context):
+            return False
         return context.mode == 'PAINT_TEXTURE'
 
     def draw(self, context):
@@ -431,6 +440,8 @@ class NODE_PT_PaintSystemShaderEditor(PSContextMixin, Panel):
     def poll(cls, context):
         """Show panel only when object has Paint System data"""
         ps_ctx = cls.parse_context(context)
+        if is_uv_edit_active(context):
+            return False
         return ps_ctx.active_group is not None and context.space_data.tree_type == 'ShaderNodeTree'
     
     def draw_header(self, context):

@@ -10,6 +10,7 @@ from .common import (
     check_group_multiuser,
     get_icon,
     ensure_invoke_context,
+    is_uv_edit_active,
 )
 
 class MAT_MT_PaintSystemChannelsMergeAndExport(PSContextMixin, Menu):
@@ -97,6 +98,11 @@ class MAT_PT_ChannelsSelect(PSContextMixin, Panel):
     bl_label = "Channels"
     bl_options = {"INSTANCED"}
     bl_ui_units_x = 10
+
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.ps_object is not None and not is_uv_edit_active(context)
     
     def draw(self, context):
         layout = self.layout
@@ -133,6 +139,8 @@ class MAT_PT_ChannelsPanel(PSContextMixin, Panel):
     
     @classmethod
     def poll(cls, context):
+        if is_uv_edit_active(context):
+            return False
         return poll_channels_panel(context)
     
     def draw_header(self, context):
@@ -222,6 +230,8 @@ class MAT_PT_ChannelsSettings(PSContextMixin, Panel):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
+        if is_uv_edit_active(context):
+            return False
         return ps_ctx.active_channel is not None and len(ps_ctx.active_group.channels) > 0
     
     def draw(self, context):
