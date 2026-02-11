@@ -14,7 +14,9 @@ from .common import (
     line_separator,
     scale_content,
     check_group_multiuser,
-    toggle_paint_mode_ui
+    toggle_paint_mode_ui,
+    draw_uv_edit_alert,
+    is_uv_edit_active
 )
 
 from ..paintsystem.data import LegacyPaintSystemContextParser
@@ -38,6 +40,10 @@ class MAT_PT_Support(PSContextMixin, Panel):
     bl_label = "Support"
     bl_options = {"INSTANCED"}
     bl_ui_units_x = 10
+
+    @classmethod
+    def poll(cls, context):
+        return not is_uv_edit_active(context)
     
 
     def draw(self, context):
@@ -133,6 +139,11 @@ class MAT_PT_PaintSystemGroups(PSContextMixin, Panel):
     bl_options = {"INSTANCED"}
     bl_ui_units_x = 12
 
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.ps_object is not None and not is_uv_edit_active(context)
+
     def draw(self, context):
         ps_ctx = self.parse_context(context)
         layout = self.layout
@@ -148,6 +159,11 @@ class MAT_PT_PaintSystemMaterialSettings(PSContextMixin, Panel):
     bl_region_type = "WINDOW"
     bl_options = {"INSTANCED"}
     bl_ui_units_x = 12
+
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.ps_object is not None and not is_uv_edit_active(context)
     
     def draw(self, context):
         ps_ctx = self.parse_context(context)
@@ -185,11 +201,12 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
         layout = self.layout
         ps_ctx = self.parse_context(context)
         row = layout.row(align=True)
-        groups = ps_ctx.ps_mat_data.groups
-        if ps_ctx.ps_mat_data and groups:
+        if ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.groups:
+            groups = ps_ctx.ps_mat_data.groups
             if len(groups) > 1:
                 row.popover("MAT_PT_PaintSystemGroups", text="", icon="NODETREE")
-            row.operator("paint_system.new_group", icon='ADD', text="")
+            if context.mode == 'OBJECT' and not is_uv_edit_active(context):
+                row.operator("paint_system.new_group", icon='ADD', text="")
             row.operator("wm.call_menu", text="", icon="REMOVE").name = "MAT_MT_DeleteGroupMenu"
         else:
             row.popover("MAT_PT_Support", icon="FUND", text="Wah!")
@@ -197,7 +214,7 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        return ps_ctx.ps_object is not None
+        return ps_ctx.ps_object is not None and not is_uv_edit_active(context)
     
     def draw_header(self, context):
         layout = self.layout
@@ -227,11 +244,7 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
             
             return
         ps_ctx = self.parse_context(context)
-        if is_online() and ps_ctx.ps_settings:
-            # Trigger version check (non-blocking)
-            get_latest_version()
-            
-            # Check update state
+        if ps_ctx.ps_settings:
             update_state = ps_ctx.ps_settings.update_state
             if update_state == 'AVAILABLE':
                 box = layout.box()
@@ -242,9 +255,7 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
                 row = box.row()
                 scale_content(context, row)
                 row.operator("paint_system.open_extension_preferences", text="Update Paint System", icon="FILE_REFRESH")
-            # elif update_state == 'LOADING':
-            #     box = layout.box()
-            #     box.label(text="Checking for updates...", icon="INFO")
+        draw_uv_edit_alert(layout, context)
         if ps_ctx.ps_settings and not ps_ctx.ps_settings.use_legacy_ui and ps_ctx.active_channel:
             toggle_paint_mode_ui(layout, context)
         ob = ps_ctx.ps_object
@@ -277,10 +288,25 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
             return
 
         if not ps_ctx.active_group:
+            if is_uv_edit_active(context):
+                return
+            if context.mode != 'OBJECT':
+                return
             row = layout.row()
             row.scale_x = 2
             row.scale_y = 2
             row.operator("paint_system.new_group", text="Add Paint System", icon="ADD")
+            
+            # Check if material has a Principled BSDF to offer conversion
+            if ps_ctx.active_material and ps_ctx.active_material.use_nodes:
+                from ..utils.nodes import find_node
+                principled = find_node(ps_ctx.active_material.node_tree, {'bl_idname': 'ShaderNodeBsdfPrincipled'})
+                if principled is not None:
+                    box = layout.box()
+                    box.label(text="Convert Existing Material:", icon="MATERIAL")
+                    row = box.row()
+                    row.scale_y = 1.5
+                    row.operator("paint_system.convert_material_to_ps", text="Convert to Paint System", icon="FILE_REFRESH")
             return
         # layout.label(text="Welcome to the Paint System!")
         # layout.operator("paint_system.new_image_layer", text="Create New Image Layer")

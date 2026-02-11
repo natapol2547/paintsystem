@@ -1101,6 +1101,40 @@ class PAINTSYSTEM_OT_ProjectionViewReset(PSContextMixin, Operator):
                         return {'FINISHED'}
         return {'FINISHED'}
 
+class PAINTSYSTEM_OT_RenameLayerSuffix(PSContextMixin, Operator):
+    """Rename the active layer's suffix while preserving its prefix"""
+    bl_idname = "paint_system.rename_layer_suffix"
+    bl_label = "Rename Layer"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    new_name: StringProperty(name="Layer Name", description="New layer name (without prefix)")
+
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_layer is not None
+
+    def invoke(self, context, event):
+        ps_ctx = self.parse_context(context)
+        current_name = ps_ctx.active_layer.name
+        # Pre-fill with suffix (strip prefix before first underscore)
+        self.new_name = current_name.split('_', 1)[1] if '_' in current_name else current_name
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        active_layer = ps_ctx.active_layer
+        if not active_layer:
+            return {'CANCELLED'}
+        current_name = active_layer.name
+        if '_' in current_name:
+            prefix = current_name.split('_', 1)[0]
+            active_layer.name = f"{prefix}_{self.new_name}"
+        else:
+            active_layer.name = self.new_name
+        redraw_panel(context)
+        return {'FINISHED'}
+
 classes = (
     PAINTSYSTEM_OT_NewImage,
     PAINTSYSTEM_OT_NewFolder,
@@ -1127,6 +1161,7 @@ classes = (
     PAINTSYSTEM_OT_ShowLayerWarnings,
     PAINTSYSTEM_OT_SetProjectionView,
     PAINTSYSTEM_OT_ProjectionViewReset,
+    PAINTSYSTEM_OT_RenameLayerSuffix,
 )
 
 register, unregister = register_classes_factory(classes)
