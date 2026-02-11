@@ -3193,6 +3193,12 @@ class PaintSystemGlobalData(PropertyGroup):
         default=True,
         update=update_uv_checker
     )
+    uv_edit_checker_viewport_enabled: BoolProperty(
+        name="UV Checker Viewport Enabled",
+        description="Enable UV checker on objects in the viewport",
+        default=True,
+        update=update_uv_checker
+    )
     uv_edit_checker_type: EnumProperty(
         items=[
             ('UV', "UV Grid", "UV grid checker"),
