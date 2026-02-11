@@ -574,6 +574,7 @@ class PAINTSYSTEM_OT_ToggleImageEditor(PSContextMixin, Operator):
         if new_area.x < context.area.x:
             new_area.type = context.area.type
             context.area.type = 'IMAGE_EDITOR'
+
         if image:
             space = new_area.spaces[0]
             space.show_region_ui = False
