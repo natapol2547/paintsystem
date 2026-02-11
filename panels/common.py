@@ -68,9 +68,18 @@ def draw_uv_edit_checker(layout: bpy.types.UILayout, context: bpy.types.Context,
     toggle_row.prop(
         ps_scene_data,
         "uv_edit_checker_enabled",
-        text="Enable Checker",
+        text="Show Checker Image",
         toggle=True,
         icon="HIDE_OFF" if ps_scene_data.uv_edit_checker_enabled else "HIDE_ON",
+    )
+    viewport_row = checker_box.row(align=True)
+    scale_content(context, viewport_row, 1.1, 1.1)
+    viewport_row.prop(
+        ps_scene_data,
+        "uv_edit_checker_viewport_enabled",
+        text="Show Checker on Objects",
+        toggle=True,
+        icon="HIDE_OFF" if ps_scene_data.uv_edit_checker_viewport_enabled else "HIDE_ON",
     )
     if not ps_scene_data.uv_edit_checker_enabled:
         if show_apply:

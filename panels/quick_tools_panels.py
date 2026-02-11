@@ -1,7 +1,7 @@
 import bpy
 from bpy.types import Panel
 
-from .common import scale_content, PSContextMixin
+from .common import scale_content, PSContextMixin, is_uv_edit_active
 from bpy.utils import register_classes_factory
 
 
@@ -11,6 +11,10 @@ class MAT_PT_PaintSystemQuickTools(PSContextMixin, Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = "Quick Tools"
+
+    @classmethod
+    def poll(cls, context):
+        return not is_uv_edit_active(context)
     
     def draw(self, context):
         layout = self.layout
@@ -128,6 +132,8 @@ class MAT_PT_PaintSystemQuickToolsPaint(PSContextMixin, Panel):
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
         obj = ps_ctx.active_object
+        if is_uv_edit_active(context):
+            return False
         return hasattr(obj, "mode") and obj.mode == 'TEXTURE_PAINT'
     
     def draw_header(self, context):

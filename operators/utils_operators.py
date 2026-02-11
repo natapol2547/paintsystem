@@ -541,19 +541,20 @@ class PAINTSYSTEM_OT_ToggleImageEditor(PSContextMixin, Operator):
 
         # Change the new area to Image Editor
         new_area.type = 'IMAGE_EDITOR'
-        
+
         if new_area.x < context.area.x:
             new_area.type = context.area.type
             context.area.type = 'IMAGE_EDITOR'
-        
-        if image:
-            space = new_area.spaces[0]
-            space.show_region_ui = False
-            space.image = image
-            space.ui_mode = 'PAINT'
-            space.overlay.show_overlays = active_layer.coord_type in {'AUTO', 'UV'}
-            
-            execute_operator_in_area(new_area, 'image.view_all', fit_view=True)
+
+        image_area = next((a for a in context.screen.areas if a.type == 'IMAGE_EDITOR'), None)
+        if image_area:
+            space = image_area.spaces[0]
+            space.show_region_ui = True
+            if image:
+                space.image = image
+                space.ui_mode = 'PAINT'
+                space.overlay.show_overlays = active_layer.coord_type in {'AUTO', 'UV'}
+                execute_operator_in_area(image_area, 'image.view_all', fit_view=True)
 
         return {'FINISHED'}
 

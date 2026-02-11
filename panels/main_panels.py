@@ -42,6 +42,10 @@ class MAT_PT_Support(PSContextMixin, Panel):
     bl_label = "Support"
     bl_options = {"INSTANCED"}
     bl_ui_units_x = 10
+
+    @classmethod
+    def poll(cls, context):
+        return not is_uv_edit_active(context)
     
 
     def draw(self, context):
@@ -139,6 +143,11 @@ class MAT_PT_PaintSystemGroups(PSContextMixin, Panel):
     bl_options = {"INSTANCED"}
     bl_ui_units_x = 12
 
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.ps_object is not None and not is_uv_edit_active(context)
+
     def draw(self, context):
         ps_ctx = self.parse_context(context)
         layout = self.layout
@@ -154,6 +163,11 @@ class MAT_PT_PaintSystemMaterialSettings(PSContextMixin, Panel):
     bl_region_type = "WINDOW"
     bl_options = {"INSTANCED"}
     bl_ui_units_x = 12
+
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.ps_object is not None and not is_uv_edit_active(context)
     
     def draw(self, context):
         ps_ctx = self.parse_context(context)
@@ -204,7 +218,7 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        return ps_ctx.ps_object is not None
+        return ps_ctx.ps_object is not None and not is_uv_edit_active(context)
     
     def draw_header(self, context):
         layout = self.layout
