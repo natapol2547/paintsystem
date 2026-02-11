@@ -2579,13 +2579,9 @@ class Group(PropertyGroup):
                         mat = material
                         break
         if mat:
-            new_name = self.name if self.name == mat.name else f"{self.name} ({mat.name})"
+            node_tree.name = f"PS {self.name} ({mat.name})"
         else:
-            new_name = self.name
-        try:
-            node_tree.name = new_name
-        except AttributeError:
-            pass
+            node_tree.name = f"PS {self.name} (None)"
         # node_tree.name = f"Paint System ({self.name})"
         if not isinstance(node_tree, bpy.types.NodeTree):
             return
@@ -3392,37 +3388,6 @@ def ensure_layer_name_prefix(layer_name: str, material_name: str, old_material_n
     return f"{material_name}_{suffix}"
 
 
-def _replace_prefix(name: str, old_prefix: str, new_prefix: str) -> str | None:
-    if not name or not old_prefix or not new_prefix:
-        return None
-    if name == old_prefix:
-        return new_prefix
-    if name.startswith(f"{old_prefix}_"):
-        return f"{new_prefix}_{name[len(old_prefix) + 1:]}"
-    return None
-
-
-def ensure_group_name_prefix(group_name: str, material_name: str, old_material_name: str | None = None) -> str:
-    new_prefix = material_name
-    if group_name == new_prefix or group_name.startswith(f"{new_prefix}_"):
-        return group_name
-    if old_material_name:
-        renamed = _replace_prefix(group_name, old_material_name, new_prefix)
-        if renamed:
-            return renamed
-        renamed = _replace_prefix(group_name, f"PS_{old_material_name}", new_prefix)
-        if renamed:
-            return renamed
-    if group_name.startswith("PS_"):
-        stripped = group_name[3:]
-        if stripped == new_prefix or stripped.startswith(f"{new_prefix}_"):
-            return stripped
-        if "_" in stripped:
-            suffix = stripped.split("_", 1)[1]
-            return f"{new_prefix}_{suffix}"
-    return new_prefix
-
-
 def _set_layer_name(layer: "Layer", new_name: str, context: Context):
     if not layer or not new_name:
         return
@@ -3449,33 +3414,16 @@ def update_material_name(material: Material, context: Context = None, force: boo
     old_name = ps_mat_data.last_material_name or material.name
     new_name = material.name
 
-    # Update group names to material name (no PS_ prefix)
-    group_old_names: dict[int, str] = {}
-    group_new_names: dict[int, str] = {}
-    for group_idx, group in enumerate(ps_mat_data.groups):
-        group_old_names[group_idx] = group.name
-        base_name = ensure_group_name_prefix(group.name, new_name, old_name)
-        reserved = [g.name for g in ps_mat_data.groups if g != group]
-        reserved.extend(group_new_names.values())
-        unique_name = get_next_unique_name(base_name, reserved)
-        group_new_names[group_idx] = unique_name
+    # Update group names with PS_ prefix
+    for group in ps_mat_data.groups:
+        base_name = f"PS_{new_name}"
+        unique_name = get_next_unique_name(base_name, [g.name for g in ps_mat_data.groups if g != group])
         if group.name != unique_name:
             group.name = unique_name
 
     # Update layer names (all types) and image datablocks
-    for group_idx, group in enumerate(ps_mat_data.groups):
+    for group in ps_mat_data.groups:
         for channel in group.channels:
-            bake_image = channel.bake_image
-            if bake_image:
-                old_group_name = group_old_names.get(group_idx, group.name)
-                new_group_name = group_new_names.get(group_idx, group.name)
-                new_bake_name = _replace_prefix(bake_image.name, old_group_name, new_group_name)
-                if not new_bake_name:
-                    new_bake_name = _replace_prefix(bake_image.name, old_name, new_name)
-                if not new_bake_name:
-                    new_bake_name = _replace_prefix(bake_image.name, f"PS_{old_name}", f"PS_{new_name}")
-                if new_bake_name and bake_image.name != new_bake_name:
-                    bake_image.name = new_bake_name
             for layer in channel.layers:
                 if layer.is_linked:
                     continue

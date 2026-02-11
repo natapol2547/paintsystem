@@ -333,12 +333,6 @@ def material_name_update_handler(scene: bpy.types.Scene, depsgraph: bpy.types.De
         return
     if not depsgraph.id_type_updated('MATERIAL'):
         return
-    def _strip_numeric_suffix(name: str) -> str:
-        if "." in name:
-            base, suffix = name.rsplit(".", 1)
-            if suffix.isdigit():
-                return base
-        return name
     try:
         for update in depsgraph.updates:
             material = update.id
@@ -354,10 +348,8 @@ def material_name_update_handler(scene: bpy.types.Scene, depsgraph: bpy.types.De
                 if material.ps_mat_data.groups:
                     for group in material.ps_mat_data.groups:
                         if group.name.startswith("PS_"):
-                            inferred_old = _strip_numeric_suffix(group.name[3:])
+                            inferred_old = group.name[3:]
                             break
-                        if not inferred_old:
-                            inferred_old = _strip_numeric_suffix(group.name)
                 if inferred_old and inferred_old != material.name:
                     material.ps_mat_data.last_material_name = inferred_old
                     update_material_name(material, bpy.context)
@@ -370,7 +362,6 @@ def material_name_update_handler(scene: bpy.types.Scene, depsgraph: bpy.types.De
 # --- On Addon Enable ---
 def on_addon_enable():
     load_post(bpy.context.scene)
-    get_latest_version()
     try:
         for material in bpy.data.materials:
             if hasattr(material, 'ps_mat_data') and material.ps_mat_data:
@@ -386,21 +377,6 @@ def brush_color_callback(*args):
     context = bpy.context
     if context.scene and hasattr(context.scene, 'ps_scene_data'):
         context.scene.ps_scene_data.update_hsv_color(context)
-
-
-def uv_edit_mode_guard(*args):
-    context = bpy.context
-    if not context or not context.scene or not hasattr(context.scene, 'ps_scene_data'):
-        return
-    ps_scene_data = context.scene.ps_scene_data
-    if not ps_scene_data or not ps_scene_data.uv_edit_enabled:
-        return
-    obj = context.object
-    if obj and getattr(obj, "mode", None) == 'PAINT_TEXTURE':
-        try:
-            bpy.ops.object.mode_set(mode='OBJECT')
-        except Exception:
-            pass
 
 
 def material_name_msgbus_callback(*args):
@@ -446,12 +422,6 @@ def register():
         notify=brush_color_callback,
     )
     bpy.msgbus.subscribe_rna(
-        key=(bpy.types.Object, "mode"),
-        owner=owner,
-        args=(None,),
-        notify=uv_edit_mode_guard,
-    )
-    bpy.msgbus.subscribe_rna(
         key=(bpy.types.Material, "name"),
         owner=owner,
         args=(None,),
@@ -467,4 +437,3 @@ def unregister():
     bpy.app.handlers.depsgraph_update_post.remove(paint_system_object_update)
     bpy.app.handlers.depsgraph_update_post.remove(material_name_update_handler)
     bpy.app.handlers.depsgraph_update_post.remove(color_history_handler)
-    bpy.app.handlers.depsgraph_update_post.remove(transform_gizmo_mode_handler)
