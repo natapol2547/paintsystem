@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 cd /d c:\Users\pinkn\Documents\PinkSystem1\paintsystem
 if errorlevel 1 (
 	echo Failed to enter repository directory.
