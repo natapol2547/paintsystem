@@ -11,7 +11,7 @@ git checkout Naming
 
 echo Rebasing with theirs strategy...
 set GIT_EDITOR=true
-git rebase origin/pink-system --strategy=theirs --no-edit
+git rebase origin/pink-system -X theirs --no-edit
 
 echo Pushing Naming branch...
 git push origin Naming --force-with-lease
