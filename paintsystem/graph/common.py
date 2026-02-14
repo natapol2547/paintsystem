@@ -16,7 +16,6 @@ DEFAULT_PS_UV_MAP_NAME = "PS_UVMap"
 
 LIBRARY_NODE_TREE_VERSIONS = {
     ".PS Projection": 1,
-    ".PS Tangent Normal": 2,
 }
 
 def get_layer_blend_type(layer: Layer) -> str:
@@ -80,12 +79,30 @@ def get_library_nodetree(tree_name: str, library_filename: str = LIBRARY_FILENAM
 
     # Return the newly appended node tree (now present in bpy.data.node_groups)
     appended_tree: Optional[bpy.types.NodeTree] = bpy.data.node_groups.get(tree_name)
-    
+    if appended_tree is None:
+        # Safety: In case Blender renames on conflict (shouldn't happen because we early-return if exists)
+        # fallback to the last appended group if present
+        if len(bpy.data.node_groups) > 0:
+            appended_tree = bpy.data.node_groups[-1]
+        else:
+            raise RuntimeError(
+                f"Unexpected error: Node tree '{tree_name}' was not appended from '{library_filename}'."
+            )
+
     if appended_tree and existing_tree and force_append:
-        # Remap the users to the new tree
+        # Remap users to the new tree
         existing_tree.user_remap(appended_tree)
         bpy.data.node_groups.remove(existing_tree)
     
+    # Clean up any leftover TEMP node trees matching ".PS ... (TEMP)" pattern
+    temp_pattern = re.compile(r'^\.PS .+ \(TEMP\)$')
+    temp_trees_to_remove = [
+        tree for tree in bpy.data.node_groups
+        if temp_pattern.match(tree.name)
+    ]
+    for temp_tree in temp_trees_to_remove:
+        bpy.data.node_groups.remove(temp_tree)
+
     # Clean up any leftover TEMP node trees matching ".PS ... (TEMP)" pattern
     temp_pattern = re.compile(r'^\.PS .+ \(TEMP\)$')
     temp_trees_to_remove = [

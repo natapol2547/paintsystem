@@ -11,8 +11,7 @@ from ..paintsystem.data import (
     LAYER_TYPE_ENUM,
 )
 from ..paintsystem.graph.nodetree_builder import capture_node_state, apply_node_state
-from ..utils.nodes import find_nodes
-from bpy_extras.node_utils import connect_sockets
+from ..utils.nodes import find_nodes, capture_group_links, restore_group_links
 from ..utils.version import is_online
 from ..preferences import addon_package
 import addon_utils
@@ -83,27 +82,7 @@ class PAINTSYSTEM_OT_UpdatePaintSystemData(PSContextMixin, Operator):
                 if item.item_type == 'SOCKET' and item.name == "Alpha":
                     item.name = "Color Alpha"
             legacy_group_nodes = find_nodes(ps_ctx.active_material.node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': legacy_group.node_tree})
-            relink_map = {}
-            for node_group in legacy_group_nodes:
-                # Snapshot link endpoints so we don't hold onto link objects that Blender may free
-                input_links = []
-                output_links = []
-                for input_socket in node_group.inputs[:]:
-                    for link in input_socket.links:
-                        input_links.append({
-                            'from_socket': link.from_socket,
-                            'dest_name': getattr(input_socket, "name", None),
-                        })
-                for output_socket in node_group.outputs[:]:
-                    for link in output_socket.links:
-                        output_links.append({
-                            'to_socket': link.to_socket,
-                            'src_name': getattr(link.from_socket, "name", None),
-                        })
-                relink_map[node_group] = {
-                    'input_links': input_links,
-                    'output_links': output_links,
-                }
+            relink_map = capture_group_links(legacy_group_nodes)
             new_group = ps_mat_data.create_new_group(context, legacy_group.name, legacy_group.node_tree)
             new_channel = new_group.create_channel(context, channel_name='Color', channel_type='COLOR', use_alpha=True)
             ps_ctx = self.parse_context(context)
@@ -194,19 +173,7 @@ class PAINTSYSTEM_OT_UpdatePaintSystemData(PSContextMixin, Operator):
             new_group.update_node_tree(context)
             
             # Remap the node tree
-            # Find node group
-            for node_group, links in relink_map.items():
-                node_group.node_tree = new_group.node_tree
-                for link in links['input_links']:
-                    dest_name = link.get('dest_name')
-                    from_socket = link.get('from_socket')
-                    if dest_name and dest_name in node_group.inputs and from_socket:
-                        connect_sockets(from_socket, node_group.inputs[dest_name])
-                for link in links['output_links']:
-                    src_name = link.get('src_name')
-                    to_socket = link.get('to_socket')
-                    if src_name and src_name in node_group.outputs and to_socket:
-                        connect_sockets(node_group.outputs[src_name], to_socket)
+            restore_group_links(relink_map, new_group.node_tree)
         legacy_groups.clear()
         if warning_messages:
             self.report({'WARNING'}, "\n".join(warning_messages))
