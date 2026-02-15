@@ -83,7 +83,7 @@ class MultiMaterialOperator(Operator):
             box.label(text="Applying to all selected objects", icon='INFO')
 
 
-class PSUVOptionsMixin():
+class PSUVOptionsMixin:
     
     def update_use_paint_system_uv(self, context):
         if self.use_paint_system_uv and self.coord_type != 'AUTO':
@@ -185,7 +185,7 @@ class PSUVOptionsMixin():
         layout.prop(self, "coord_type", text="")
         if self.coord_type != 'UV':
             if show_warning:
-            # Warning that painting may not work as expected
+                # Warning that painting may not work as expected
                 box = layout.box()
                 box.alert = True
                 col = box.column(align=True)
@@ -284,12 +284,13 @@ class PSImageCreateMixin(PSUVOptionsMixin):
         self.use_udim_tiles = get_udim_tiles(ps_ctx.ps_object, self.uv_map_name) != {1001}
 
 
-class PSImageFilterMixin():
+class PSImageFilterMixin:
 
     image_name: StringProperty()
     
     def invoke_get_image(self, context):
         ps_ctx = PSContextMixin.parse_context(context)
+        image = None
         if ps_ctx.active_channel.use_bake_image:
             image = ps_ctx.active_channel.bake_image
         elif ps_ctx.active_layer:
@@ -305,6 +306,7 @@ class PSImageFilterMixin():
                 return None
         else:
             ps_ctx = PSContextMixin.parse_context(context)
+            image = None
             if ps_ctx.active_channel.use_bake_image:
                 image = ps_ctx.active_channel.bake_image
             elif ps_ctx.active_layer:

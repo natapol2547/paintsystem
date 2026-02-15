@@ -1,5 +1,5 @@
 import bpy
-from bpy.types import Menu, Operator
+from bpy.types import Operator
 from bpy.props import FloatVectorProperty, StringProperty, IntProperty, EnumProperty, BoolProperty, FloatProperty
 from bpy.utils import register_classes_factory
 from .common import (

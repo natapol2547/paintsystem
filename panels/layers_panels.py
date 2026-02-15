@@ -20,11 +20,17 @@ from .common import (
     image_node_settings,
     toggle_paint_mode_ui,
     layer_settings_ui,
-    is_uv_edit_active
+    is_uv_edit_active,
+    draw_enum_operator_menu,
+    draw_socket_grid,
+    get_settings_box,
+    draw_layer_sidebar,
+    draw_warning_box,
 )
 
 from ..utils.nodes import find_node, traverse_connected_nodes, get_material_output
 from ..paintsystem.data import (
+    MASK_TYPE_ENUM,
     GlobalLayer,
     ADJUSTMENT_TYPE_ENUM, 
     GRADIENT_TYPE_ENUM, 
@@ -56,26 +62,7 @@ def draw_input_sockets(layout, context: Context, only_output: bool = False):
     if panel:
         row = panel.row(align=True)
         row.label(icon="BLANK1")
-        if only_output:
-            output_box = row
-        else:
-            input_box = row.box()
-        grid = output_box.grid_flow(columns=2, align=True, even_columns=True, row_major=True)
-        grid_col = grid.column()
-        grid_col.label(text="Color Output")
-        grid_col.prop(active_layer, "color_output_name", text="")
-        grid_col = grid.column()
-        grid_col.label(text="Alpha Output")
-        grid_col.prop(active_layer, "alpha_output_name", text="")
-        if not only_output:
-            input_box = panel.box()
-            grid = input_box.grid_flow(columns=2, align=True, even_columns=True, row_major=True)
-            grid_col = grid.column()
-            grid_col.label(text="Color Input")
-            grid_col.prop(active_layer, "color_input_name", text="")
-            grid_col = grid.column()
-            grid_col.label(text="Alpha Input")
-            grid_col.prop(active_layer, "alpha_input_name", text="")
+        draw_socket_grid(row, active_layer, include_inputs=not only_output)
 class MAT_PT_UL_LayerList(PSContextMixin, UIList):
     def draw_item(self, context: Context, layout: bpy.types.UILayout, data, item, icon, active_data, active_property, index):
         ps_ctx = self.parse_context(context)
@@ -284,11 +271,10 @@ class MAT_PT_Layers(PSContextMixin, Panel):
             group_node = find_node(mat.node_tree, {
                                 'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree})
             if not group_node:
-                warning_box = box.box()
-                warning_box.alert = True
-                warning_col = warning_box.column(align=True)
-                warning_col.label(text="Paint System not connected", icon='ERROR')
-                warning_col.label(text="to material output!", icon='BLANK1')
+                warning_col = draw_warning_box(box, [
+                    ("Paint System not connected", 'ERROR'),
+                    ("to material output!", 'BLANK1'),
+                ])
                 if not is_editor_open(context, 'NODE_EDITOR'):
                     warning_col.operator("paint_system.focus_ps_node", text="Open Shader Editor", icon="NODETREE")
 
@@ -312,33 +298,8 @@ class MAT_PT_Layers(PSContextMixin, Panel):
             )
 
             
-            if ps_ctx.ps_settings.use_legacy_ui:
-                col = row.column(align=True)
-                col.scale_x = 1.2
-                col.operator("wm.call_menu", text="", icon_value=get_icon('layer_add')).name = "MAT_MT_AddLayerMenu"
-                col.menu("MAT_MT_LayerMenu",
-                        text="", icon='DOWNARROW_HLT')
-                col.separator()
-                col.operator("paint_system.delete_item",
-                                text="", icon_value=get_icon('trash'))
-                col.separator()
-                col.operator("paint_system.move_up", icon="TRIA_UP", text="")
-                col.operator("paint_system.move_down", icon="TRIA_DOWN", text="")
-            else:
-                # main_row
-                col = row.column(align=True)
-                col.scale_x = 1.2
-                col.operator("wm.call_menu", text="", icon_value=get_icon('layer_add')).name = "MAT_MT_AddLayerMenu"
-                col.operator("paint_system.new_folder_layer",
-                     icon_value=get_icon('folder'), text="")
-                col.menu("MAT_MT_LayerMenu",
-                        text="", icon='DOWNARROW_HLT')
-                line_separator(col)
-                col.operator("paint_system.delete_item",
-                                text="", icon_value=get_icon('trash'))
-                line_separator(col)
-                col.operator("paint_system.move_up", icon="TRIA_UP", text="")
-                col.operator("paint_system.move_down", icon="TRIA_DOWN", text="")
+            col = row.column(align=True)
+            draw_layer_sidebar(col, ps_ctx.ps_settings.use_legacy_ui)
 
 
 def get_image(context) -> bpy.types.Image:
@@ -461,10 +422,11 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
             if ps_ctx.ps_settings.use_legacy_ui:
                 box = layout.box()
                 layer_settings_ui(box, context)
+            else:
+                box = None
             match active_layer.type:
                 case 'IMAGE':
-                    if not ps_ctx.ps_settings.use_legacy_ui:
-                        box = layout.box()
+                    box = get_settings_box(layout, ps_ctx.ps_settings.use_legacy_ui, box)
                     col = box.column()
                     row = col.row(align=True)
                     scale_content(context, row, 1.2, 1.2)
@@ -479,16 +441,14 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                             row.operator("paint_system.project_apply", text="Apply Edit")
                     row.operator("paint_system.toggle_image_editor", text="", depress=is_editor_open(context, 'IMAGE_EDITOR'), icon="BLENDER")
                 case 'ADJUSTMENT':
-                    if not ps_ctx.ps_settings.use_legacy_ui:
-                        box = layout.box()
+                    box = get_settings_box(layout, ps_ctx.ps_settings.use_legacy_ui, box)
                     col = box.column()
                     adjustment_node = active_layer.source_node
                     if adjustment_node:
                         col.label(text="Adjustment Settings:", icon='SHADERFX')
                         col.template_node_inputs(adjustment_node)
                 case 'NODE_GROUP':
-                    if not ps_ctx.ps_settings.use_legacy_ui:
-                        box = layout.box()
+                    box = get_settings_box(layout, ps_ctx.ps_settings.use_legacy_ui, box)
                     col = box.column()
                     node_group = active_layer.source_node
                     inputs = [i for i in node_group.inputs if not i.is_linked and i.name not in (
@@ -500,8 +460,7 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                                     text=socket.name)
                 case 'GRADIENT':
                     if active_layer.gradient_type in ('LINEAR', 'RADIAL', 'FAKE_LIGHT'):
-                        if not ps_ctx.ps_settings.use_legacy_ui:
-                            box = layout.box()
+                        box = get_settings_box(layout, ps_ctx.ps_settings.use_legacy_ui, box)
                         col = box.column()
                         col.use_property_split = True
                         col.use_property_decorate = False
@@ -516,8 +475,7 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                             err_col.label(text="Gradient Empty not found", icon='ERROR')
                             err_col.operator("paint_system.fix_missing_gradient_empty", text="Fix Missing Gradient Empty")
                 case 'SOLID_COLOR':
-                    if not ps_ctx.ps_settings.use_legacy_ui:
-                        box = layout.box()
+                    box = get_settings_box(layout, ps_ctx.ps_settings.use_legacy_ui, box)
                     col = box.column()
                     rgb_node = active_layer.source_node
                     if rgb_node:
@@ -525,8 +483,7 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                                 icon='IMAGE_RGB_ALPHA')
 
                 case 'RANDOM':
-                    if not ps_ctx.ps_settings.use_legacy_ui:
-                        box = layout.box()
+                    box = get_settings_box(layout, ps_ctx.ps_settings.use_legacy_ui, box)
                     col = box.column()
                     random_node = active_layer.find_node("add_2")
                     hue_math = active_layer.find_node("hue_multiply_add")
@@ -549,8 +506,7 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                         col.prop(
                             value_math.inputs[1], "default_value", text="Value")
                 case 'GEOMETRY':
-                    if not ps_ctx.ps_settings.use_legacy_ui:
-                        box = layout.box()
+                    box = get_settings_box(layout, ps_ctx.ps_settings.use_legacy_ui, box)
                     col = box.column()
                     geometry_type = active_layer.geometry_type
                     if geometry_type == 'VECTOR_TRANSFORM':
@@ -577,22 +533,7 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     panel.use_property_split = True
                     panel.use_property_decorate = False
                     col = panel.column()
-                    output_box = col.box()
-                    grid = output_box.grid_flow(columns=2, align=True, even_columns=True, row_major=True)
-                    grid_col = grid.column()
-                    grid_col.label(text="Color Output")
-                    grid_col.prop(active_layer, "color_output_name", text="")
-                    grid_col = grid.column()
-                    grid_col.label(text="Alpha Output")
-                    grid_col.prop(active_layer, "alpha_output_name", text="")
-                    output_box = col.box()
-                    grid = output_box.grid_flow(columns=2, align=True, even_columns=True, row_major=True)
-                    grid_col = grid.column()
-                    grid_col.label(text="Color Input")
-                    grid_col.prop(active_layer, "color_input_name", text="")
-                    grid_col = grid.column()
-                    grid_col.label(text="Alpha Input")
-                    grid_col.prop(active_layer, "alpha_input_name", text="")
+                    draw_socket_grid(col, active_layer, include_inputs=True)
             
             # Collapsed panels
             # Image Settings
@@ -658,14 +599,7 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                 if panel:
                     box = panel.box()
                     col = box.column()
-                    output_box = col.box()
-                    grid = output_box.grid_flow(columns=2, align=True, even_columns=True, row_major=True)
-                    grid_col = grid.column()
-                    grid_col.label(text="Color Output")
-                    grid_col.prop(active_layer, "color_output_name", text="")
-                    grid_col = grid.column()
-                    grid_col.label(text="Alpha Output")
-                    grid_col.prop(active_layer, "alpha_output_name", text="")
+                    draw_socket_grid(col, active_layer, include_inputs=False)
                     attribute_node = active_layer.source_node
                     if attribute_node:
                         col.label(text="Attribute Settings:", icon='MESH_DATA')
@@ -879,6 +813,143 @@ class MAT_MT_ImageMenu(PSContextMixin, Menu):
         layout.operator("paint_system.clear_image",
                         icon="X")
 
+class MAT_PT_ImageLayerSettings(PSContextMixin, Panel):
+    bl_idname = 'MAT_PT_ImageLayerSettings'
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_label = "Image"
+    bl_category = 'Paint System'
+    bl_parent_id = 'MAT_PT_LayerSettings'
+    bl_options = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        active_layer = ps_ctx.active_layer
+        if ps_ctx.ps_object.type != 'MESH' or ps_ctx.active_channel.use_bake_image:
+            return False
+        return active_layer and active_layer.type == 'IMAGE'
+    
+    def draw_header(self, context):
+        layout = self.layout
+        layout.label(icon_value=get_icon('image'))
+        
+    def draw_header_preset(self, context):
+        layout = self.layout
+        ps_ctx = self.parse_context(context)
+        layer = ps_ctx.active_layer
+        if not ps_ctx.ps_settings.use_legacy_ui:
+            if ps_ctx.ps_object.type == 'MESH' and layer.type == 'IMAGE':
+                layout.operator("wm.call_menu", text="Filters", icon="IMAGE_DATA").name = "MAT_MT_ImageFilterMenu"
+    
+    def draw(self, context):
+        ps_ctx = self.parse_context(context)
+        active_layer = ps_ctx.active_layer
+        layout = self.layout
+        layout.enabled = not active_layer.lock_layer
+        if not active_layer.external_image:
+            layout.operator("paint_system.quick_edit", text="Edit Externally")
+        else:
+            if active_layer.edit_external_mode == 'IMAGE_EDIT':
+                row = layout.row(align=True)
+                row.operator("paint_system.quick_edit", text="Open Image", icon_value=get_image_editor_icon(context.preferences.filepaths.image_editor))
+                row.operator("paint_system.reload_image", text="Reload Image", icon="FILE_REFRESH")
+            elif active_layer.edit_external_mode == 'VIEW_CAPTURE':
+                layout.operator("paint_system.project_apply", text="Apply Edit")
+        box = layout.box()
+        col = box.column()
+        image_node = active_layer.source_node
+        panel = image_node_settings(col, image_node, active_layer, "image", simple_ui=True)
+        if panel:
+            line_separator(col)
+        draw_input_sockets(col, context, only_output=True)
+        row = col.row(align=True)
+        row.label(icon="BLANK1")
+        row.prop(active_layer, "correct_image_aspect", text="Correct Aspect", toggle=1, icon='CHECKBOX_HLT' if active_layer.correct_image_aspect else 'CHECKBOX_DEHLT')
+
+class MAT_MT_LayerMaskMenu(PSContextMixin, Menu):
+    bl_label = "Layer Mask Menu"
+    bl_idname = "MAT_MT_LayerMaskMenu"
+    bl_options = {'SEARCH_ON_KEY_PRESS'}
+
+    def draw(self, context):
+        layout = self.layout
+        col = layout.column()
+        
+        if layout.operator_context == 'EXEC_REGION_WIN':
+            layout.operator_context = 'INVOKE_REGION_WIN'
+            col.operator(
+                "WM_OT_search_single_menu",
+                text="Search...",
+                icon='VIEWZOOM',
+            ).menu_idname = "MAT_MT_AddLayerMenu"
+            col.separator()
+
+        layout.operator_context = 'INVOKE_REGION_WIN'
+        col.operator("paint_system.new_image_mask", text="Solid Color",
+                     icon=icon_parser('STRIP_COLOR_03', "SEQUENCE_COLOR_03"))
+        col.operator("paint_system.new_image_mask", text="Image", icon_value=get_icon('image'))
+
+class MAT_UL_LayerMasks(PSContextMixin, UIList):
+    bl_idname = "MAT_UL_LayerMasks"
+    bl_label = "Layer Masks"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = 'Paint System'
+    
+    def draw_item(self, context, layout, data, item, icon, active_data, active_property, index):
+        layout.prop(item, "enabled", text="")
+        layout.prop(item, "name", text="")
+        layout.prop(item, "type", text="")
+class MAT_PT_LayerMaskSettings(PSContextMixin, Panel):
+    bl_idname = 'MAT_PT_LayerMaskSettings'
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_label = "Mask"
+    bl_category = 'Paint System'
+    bl_parent_id = 'MAT_PT_LayerSettings'
+    bl_options = {'DEFAULT_CLOSED'}
+    
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_layer is not None
+    
+    def draw_header(self, context):
+        layout = self.layout
+        ps_ctx = self.parse_context(context)
+        active_layer = ps_ctx.active_layer
+        layout.prop(active_layer, "use_masks", text="")
+    
+    def draw(self, context):
+        layout = self.layout
+        ps_ctx = self.parse_context(context)
+        active_layer = ps_ctx.active_layer
+        layout.enabled = not active_layer.lock_layer
+        box = layout.box()
+        row = box.row()
+        row.template_list("MAT_UL_LayerMasks", "", active_layer, "layer_masks", active_layer, "active_layer_mask_index", rows=5)
+        col = row.column(align=True)
+        col.operator("paint_system.new_image_mask", text="", icon="ADD")
+        col.operator("paint_system.new_texture_mask", text="", icon="TEXTURE")
+        col.operator("paint_system.delete_layer_mask", text="", icon="REMOVE")
+
+        if active_layer.layer_masks and 0 <= active_layer.active_layer_mask_index < len(active_layer.layer_masks):
+            active_mask = active_layer.layer_masks[active_layer.active_layer_mask_index]
+            row = box.row(align=True)
+            row.prop(active_mask, "enabled", text="Enable Mask", toggle=True)
+            if active_mask.type == 'TEXTURE':
+                box.prop(active_mask, "texture_type", text="Texture")
+                box.prop(active_mask, "coord_type", text="Coordinates")
+                if active_mask.coord_type == 'UV':
+                    box.prop_search(active_mask, "mask_uv_map", ps_ctx.ps_object.data, "uv_layers", text="UV Map")
+            row = box.row(align=True)
+            row.enabled = active_mask.type == 'IMAGE' and active_mask.mask_image is not None
+            if active_layer.edit_mask:
+                row.operator("paint_system.finish_edit_layer_mask", text="Finish Edit", icon='CHECKMARK')
+            else:
+                row.operator("paint_system.edit_layer_mask", text="Edit Mask", icon='GREASEPENCIL')
+
 class MAT_MT_LayerMenu(PSContextMixin, Menu):
     bl_label = "Layer Menu"
     bl_idname = "MAT_MT_LayerMenu"
@@ -975,12 +1046,11 @@ class MAT_MT_AddGradientLayerMenu(Menu):
     bl_idname = "MAT_MT_AddGradientLayerMenu"
     
     def draw(self, context):
-        layout = self.layout
-        for idx, (node_type, name, description) in enumerate(GRADIENT_TYPE_ENUM):
-            if node_type == 'FAKE_LIGHT':
-                continue
-            layout.operator("paint_system.new_gradient_layer",
-                text=name, icon='COLOR' if idx == 0 else 'NONE').gradient_type = node_type
+        draw_enum_operator_menu(
+            self.layout, GRADIENT_TYPE_ENUM,
+            "paint_system.new_gradient_layer", "gradient_type", 'COLOR',
+            skip_types={'FAKE_LIGHT'},
+        )
 
 
 class MAT_MT_AddAdjustmentLayerMenu(Menu):
@@ -988,10 +1058,10 @@ class MAT_MT_AddAdjustmentLayerMenu(Menu):
     bl_idname = "MAT_MT_AddAdjustmentLayerMenu"
     
     def draw(self, context):
-        layout = self.layout
-        for idx, (node_type, name, description) in enumerate(ADJUSTMENT_TYPE_ENUM):
-            layout.operator("paint_system.new_adjustment_layer",
-                text=name, icon='SHADERFX' if idx == 0 else 'NONE').adjustment_type = node_type
+        draw_enum_operator_menu(
+            self.layout, ADJUSTMENT_TYPE_ENUM,
+            "paint_system.new_adjustment_layer", "adjustment_type", 'SHADERFX',
+        )
 
 
 class MAT_MT_AddTextureLayerMenu(Menu):
@@ -999,10 +1069,10 @@ class MAT_MT_AddTextureLayerMenu(Menu):
     bl_idname = "MAT_MT_AddTextureLayerMenu"
     
     def draw(self, context):
-        layout = self.layout
-        for idx, (node_type, name, description) in enumerate(TEXTURE_TYPE_ENUM):
-            layout.operator("paint_system.new_texture_layer",
-                text=name, icon='TEXTURE' if idx == 0 else 'NONE').texture_type = node_type
+        draw_enum_operator_menu(
+            self.layout, TEXTURE_TYPE_ENUM,
+            "paint_system.new_texture_layer", "texture_type", 'TEXTURE',
+        )
 
 
 class MAT_MT_AddGeometryLayerMenu(Menu):
@@ -1010,10 +1080,10 @@ class MAT_MT_AddGeometryLayerMenu(Menu):
     bl_idname = "MAT_MT_AddGeometryLayerMenu"
     
     def draw(self, context):
-        layout = self.layout
-        for idx, (node_type, name, description) in enumerate(GEOMETRY_TYPE_ENUM):
-            layout.operator("paint_system.new_geometry_layer",
-                text=name, icon='MESH_DATA' if idx == 0 else 'NONE').geometry_type = node_type
+        draw_enum_operator_menu(
+            self.layout, GEOMETRY_TYPE_ENUM,
+            "paint_system.new_geometry_layer", "geometry_type", 'MESH_DATA',
+        )
 
 class MAT_MT_AddLayerMenu(Menu):
     bl_label = "Add Layer"
@@ -1098,6 +1168,10 @@ classes = (
     MAT_PT_LayerSettings,
     MAT_PT_GreasePencilMaskSettings,
     MAT_PT_GreasePencilOnionSkinningSettings,
+    MAT_PT_ImageLayerSettings,
+    MAT_MT_LayerMaskMenu,
+    MAT_UL_LayerMasks,
+    MAT_PT_LayerMaskSettings,
     PAINTSYSTEM_UL_Actions,
 )
 

@@ -125,9 +125,6 @@ class BakeOperator(PSContextMixin, PSImageCreateMixin, Operator):
         
     def multi_object_ui(self, layout: UILayout, context: Context):
         ps_ctx = self.parse_context(context)
-        # Always bake multiple objects
-        # if [ps_ctx.ps_object] != ps_ctx.ps_objects:
-        #     layout.prop(self, "bake_multiple_objects", text="Bake Multiple Objects")
         enabled_materials = self.get_enabled_materials(context)
         
         box = layout.box()
@@ -180,6 +177,7 @@ class PAINTSYSTEM_OT_SelectAllBakedObjects(BakeOperator):
         for obj in objects_with_mat:
             obj.select_set(True)
         return {'FINISHED'}
+
 
 class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
     """Bake the active channel"""
@@ -256,12 +254,12 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
             else:
                 bake_image = active_channel.bake_image
                 if not bake_image:
-                    # Bake image already exists, so we need to delete it
+                    # No bake image exists yet, create one
                     bake_image = self.create_image(context)
                     active_channel.bake_image = bake_image
                 elif bake_image.size[0] != self.image_width or bake_image.size[1] != self.image_height:
                     bake_image.scale(self.image_width, self.image_height)
-                bake_image.colorspace_settings.name = 'Non-Color' if ps_ctx.active_channel.color_space == 'NONCOLOR' else 'sRGB'
+                bake_image.colorspace_settings.name = 'Non-Color' if active_channel.color_space == 'NONCOLOR' else 'sRGB'
                 active_channel.bake_uv_map = self.uv_map_name
                     
                 active_channel.use_bake_image = False
@@ -333,7 +331,7 @@ class PAINTSYSTEM_OT_BakeAllChannels(BakeOperator):
                     channel.bake_image = bake_image
                 elif bake_image.size[0] != self.image_width or bake_image.size[1] != self.image_height:
                     bake_image.scale(self.image_width, self.image_height)
-                bake_image.colorspace_settings.name = 'Non-Color' if ps_ctx.active_channel.color_space == 'NONCOLOR' else 'sRGB'
+                bake_image.colorspace_settings.name = 'Non-Color' if channel.color_space == 'NONCOLOR' else 'sRGB'
                 channel.use_bake_image = False
                 channel.bake_uv_map = self.uv_map_name
                 channel.bake(context, mat, bake_image, self.uv_map_name)
@@ -679,6 +677,7 @@ class PAINTSYSTEM_OT_ConvertToImageLayer(BakeOperator):
         self.report({'INFO'}, f"Converted to image layer in {round(end_time - start_time, 2)} seconds")
         return {'FINISHED'}
 
+
 def apply_merged_image_to_layer(merged_layer: "Layer", image: Image, uv_map_name: str):
     merged_layer.name = merged_layer.name + " Merged"
     merged_layer.type = "IMAGE"
@@ -688,8 +687,7 @@ def apply_merged_image_to_layer(merged_layer: "Layer", image: Image, uv_map_name
     merged_layer.linked_layer_uid = ""
     merged_layer.linked_material = None
     merged_layer.correct_image_aspect = False
-    if image.size[0] != image.size[1]:
-        merged_layer.correct_image_aspect = False
+
 
 class PAINTSYSTEM_OT_MergeDown(BakeOperator):
     bl_idname = "paint_system.merge_down"

@@ -4,9 +4,8 @@ from bpy.types import Material
 from .graph.common import LIBRARY_NODE_TREE_VERSIONS, get_library_nodetree
 from .graph.basic_layers import get_layer_version_for_type
 from .graph.nodetree_builder import get_nodetree_version
-from .data import get_legacy_global_layer, Layer, Group, Channel
+from .data import get_legacy_global_layer, iter_all_layers, Layer, Group, Channel
 from typing import TypedDict
-from .data import get_legacy_global_layer
 
 class LayerParent(TypedDict):
     mat: Material
@@ -14,14 +13,11 @@ class LayerParent(TypedDict):
     channel: Channel
 
 def get_layer_parent_map() -> dict[Layer, LayerParent]:
-    layer_parent_map = {}
-    for mat in bpy.data.materials:
-        if hasattr(mat, 'ps_mat_data'):
-            for group in mat.ps_mat_data.groups:
-                for channel in group.channels:
-                    for layer in channel.layers:
-                        layer_parent_map[layer] = LayerParent(mat=mat, group=group, channel=channel)
-    return layer_parent_map
+    """Build a mapping from every layer to its parent material, group, and channel."""
+    return {
+        layer: LayerParent(mat=mat, group=group, channel=channel)
+        for mat, group, channel, layer in iter_all_layers()
+    }
 
 def migrate_global_layer_data(layer_parent_map: dict[Layer, LayerParent]):
     seen_global_layers_map = {}
@@ -121,7 +117,6 @@ def update_layer_name(layer_parent_map: dict[Layer, LayerParent]):
             layer.name = layer.layer_name
 
 def update_library_nodetree_version():
-    print(bpy.path.basename(bpy.context.blend_data.filepath))
     if bpy.path.basename(bpy.context.blend_data.filepath) == "library2.blend":
         return
     ps_nodetrees = []

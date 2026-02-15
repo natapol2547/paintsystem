@@ -4,6 +4,7 @@ from bpy.utils import register_submodule_factory
 submodules = [
     # "graph",
     "layers_operators",
+    "layer_mask_operators",
     "channel_operators",
     "group_operators",
     "utils_operators",

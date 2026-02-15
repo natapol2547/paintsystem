@@ -82,5 +82,3 @@ class ListManager:
         if self.active_index < len(self.collection) - 1:
             moves.append('DOWN')
         return moves
-
-

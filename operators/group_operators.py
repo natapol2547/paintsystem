@@ -217,8 +217,6 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
                     new_group.create_channel_template(context, "NORMAL", add_layers=self.add_layers)
                 ps_ctx = self.parse_context(context)
                 ps_ctx.active_group.active_index = 0
-                ps_ctx = self.parse_context(context)
-                ps_ctx.active_group.active_index = 0
 
             case 'PAINT_OVER':
                 # Check if Engine is EEVEE
@@ -364,6 +362,8 @@ def find_basic_setup_nodes(group_node: Node) -> list[Node]:
         if mat_output:
             nodes.append(mat_output)
     return nodes
+
+
 class PAINTSYSTEM_OT_DeleteGroup(PSContextMixin, Operator):
     """Delete the selected group in the Paint System"""
     bl_idname = "paint_system.delete_group"
@@ -409,7 +409,6 @@ class PAINTSYSTEM_OT_DeleteGroup(PSContextMixin, Operator):
         return {'FINISHED'}
     
     def invoke(self, context, event):
-        # return context.window_manager.invoke_confirm(self, event, title="Delete Group", icon='ERROR', message="Are you sure you want to delete Paint System?")
         return context.window_manager.invoke_props_dialog(self, title="Delete Group", width=300)
     
     def draw(self, context):
@@ -420,9 +419,6 @@ class PAINTSYSTEM_OT_DeleteGroup(PSContextMixin, Operator):
         col.alert = True
         col.label(text="Danger Zone!", icon="ERROR")
         col.label(text=f"Are you sure you want to delete Paint System?", icon="BLANK1")
-        if self.bake_channels:
-            box = layout.box()
-            
 
 
 class PAINTSYSTEM_OT_MoveGroup(PSContextMixin, MultiMaterialOperator):

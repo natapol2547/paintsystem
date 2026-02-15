@@ -38,7 +38,7 @@ type_mapping = {
     "GRADIENT": "GRADIENT",
 }
 
-def get_layer_adjustment_type(legacy_layer: LegacyPaintSystemLayer) -> str:
+def get_legacy_layer_adjustment_type(legacy_layer: LegacyPaintSystemLayer) -> str:
     adjustment_type = None
     for node in legacy_layer.node_tree.nodes:
         if node.label == "Adjustment":
@@ -46,13 +46,13 @@ def get_layer_adjustment_type(legacy_layer: LegacyPaintSystemLayer) -> str:
             break
     return adjustment_type
 
-def get_layer_gradient_type(legacy_layer: LegacyPaintSystemLayer) -> str:
+def get_legacy_layer_gradient_type(legacy_layer: LegacyPaintSystemLayer) -> str:
     for node in legacy_layer.node_tree.nodes:
         if node.bl_idname == "ShaderNodeSeparateXYZ":
             return "LINEAR"
     return "RADIAL"
 
-def get_layer_empty_object(legacy_layer: LegacyPaintSystemLayer) -> Object:
+def get_legacy_layer_empty_object(legacy_layer: LegacyPaintSystemLayer) -> Object:
     tex_coord_node = legacy_layer.node_tree.nodes["Texture Coordinate"]
     if tex_coord_node:
         return tex_coord_node.object
@@ -102,10 +102,10 @@ class PAINTSYSTEM_OT_UpdatePaintSystemData(PSContextMixin, Operator):
                         continue
                     setattr(new_layer, pid_mapping[pid], getattr(legacy_layer, pid))
                 if legacy_layer.type == "ADJUSTMENT":
-                    new_layer.adjustment_type = get_layer_adjustment_type(legacy_layer)
+                    new_layer.adjustment_type = get_legacy_layer_adjustment_type(legacy_layer)
                 if legacy_layer.type == "GRADIENT":
-                    new_layer.gradient_type = get_layer_gradient_type(legacy_layer)
-                    new_layer.empty_object = get_layer_empty_object(legacy_layer)
+                    new_layer.gradient_type = get_legacy_layer_gradient_type(legacy_layer)
+                    new_layer.empty_object = get_legacy_layer_empty_object(legacy_layer)
                 if legacy_layer.type == "IMAGE":
                     uv_map_node = legacy_ps_ctx.find_node(legacy_layer.node_tree, {'bl_idname': 'ShaderNodeUVMap'})
                     if uv_map_node:
@@ -179,6 +179,7 @@ class PAINTSYSTEM_OT_UpdatePaintSystemData(PSContextMixin, Operator):
             self.report({'WARNING'}, "\n".join(warning_messages))
         return {'FINISHED'}
 
+
 class PAINTSYSTEM_OT_CheckForUpdates(PSContextMixin, Operator):
     bl_idname = "paint_system.check_for_updates"
     bl_label = "Check for Updates"
@@ -198,6 +199,7 @@ class PAINTSYSTEM_OT_CheckForUpdates(PSContextMixin, Operator):
         # Check for updates
         get_latest_version()
         return {'FINISHED'}
+
 
 class PAINTSYSTEM_OT_OpenExtensionPreferences(Operator):
     bl_idname = "paint_system.open_extension_preferences"
@@ -223,6 +225,7 @@ class PAINTSYSTEM_OT_OpenExtensionPreferences(Operator):
         if not show_expanded:
             bpy.ops.preferences.addon_expand(module=addon_package())
         return {'FINISHED'}
+
 
 class PAINTSYSTEM_OT_DismissUpdate(PSContextMixin, Operator):
     bl_idname = "paint_system.dismiss_update"

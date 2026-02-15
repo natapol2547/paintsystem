@@ -31,53 +31,45 @@ def get_legacy_global_layer(layer: "Layer") -> "GlobalLayer" | None:
     """Get the global layer data from the context."""
     if not layer or not bpy.context.scene or not bpy.context.scene.ps_scene_data:
         return None
-    # for global_layer in bpy.context.scene.ps_scene_data.layers[layer.ref_layer_id]:
-    #     if global_layer.name == layer.ref_layer_id:
-    #         return global_layer
     return bpy.context.scene.ps_scene_data.layers.get(layer.ref_layer_id, None)
 
-def get_ps_object(obj) -> bpy.types.Object:
-    ps_object = None
-    if obj:
-        match obj.type:
-            case 'EMPTY':
-                if obj.parent and obj.parent.type == 'MESH' and hasattr(obj.parent.active_material, 'ps_mat_data'):
-                    ps_object = obj.parent
-            case 'MESH':
-                ps_object = obj
-            case 'GREASEPENCIL':
-                if is_newer_than(4,3,0):
-                    ps_object = obj
-            case _:
-                obj = None
-                ps_object = None
-    return ps_object
+def get_ps_object(obj) -> bpy.types.Object | None:
+    """Return the Paint System-relevant object for *obj*, or ``None``."""
+    if not obj:
+        return None
+    match obj.type:
+        case 'EMPTY':
+            if obj.parent and obj.parent.type == 'MESH' and hasattr(obj.parent.active_material, 'ps_mat_data'):
+                return obj.parent
+        case 'MESH':
+            return obj
+        case 'GREASEPENCIL':
+            if is_newer_than(4, 3, 0):
+                return obj
+    return None
 
 def parse_material(mat: Material) -> tuple["MaterialData", "Group", "Channel", "Layer"]:
+    """Extract active mat_data, group, channel, and layer from a material."""
     mat_data = None
-    groups = None
     active_group = None
+    active_channel = None
+    unlinked_layer = None
+
     if mat and hasattr(mat, 'ps_mat_data') and mat.ps_mat_data:
         mat_data = mat.ps_mat_data
         groups = mat_data.groups
         if groups and mat_data.active_index >= 0:
             active_group = groups[min(mat_data.active_index, len(groups) - 1)]
     
-    channels = None
-    active_channel = None
     if active_group:
         channels = active_group.channels
         if channels and active_group.active_index >= 0:
             active_channel = channels[min(active_group.active_index, len(channels) - 1)]
 
-    layers = None
-    unlinked_layer = None
     if active_channel:
         layers = active_channel.layers
         if layers and active_channel.active_index >= 0:
             unlinked_layer = layers[min(active_channel.active_index, len(layers) - 1)]
-            if unlinked_layer:
-                unlinked_layer = unlinked_layer
     
     return mat_data, active_group, active_channel, unlinked_layer
 
@@ -90,7 +82,7 @@ def parse_context(context: bpy.types.Context) -> PSContext:
     
     ps_settings = get_preferences(context)
     ps_scene_data = context.scene.ps_scene_data
-    obj = hasattr(context, 'active_object') and context.active_object
+    obj = context.active_object if hasattr(context, 'active_object') else None
     ps_object = get_ps_object(obj)
     
     ps_objects = []

@@ -1,8 +1,7 @@
 from typing import Literal
 import bpy
 from bpy.props import StringProperty, IntProperty, EnumProperty
-from bpy.types import (PropertyGroup, Operator)
-from bpy.utils import register_classes_factory
+from bpy.types import PropertyGroup
 
 class BaseNestedListItem(PropertyGroup):
     """Base class for nested list items. Extend this class to add custom properties."""
@@ -35,11 +34,7 @@ class BaseNestedListManager(PropertyGroup):
         return "items"
 
     def get_active_item(self):
-        """Get currently active item based on active_index"""
-        # active_id = self.get_id_from_flattened_index(self.active_index)
-        # if active_id != -1:
-        #     return self.get_item_by_id(active_id)
-        # return None
+        """Get currently active item based on active_index."""
         if getattr(self, self.collection_name) is None or self.active_index < 0 or self.active_index >= len(getattr(self, self.collection_name)):
             return None
         return getattr(self, self.collection_name)[self.active_index]
@@ -179,11 +174,7 @@ class BaseNestedListManager(PropertyGroup):
         return -1
 
     def flatten_hierarchy(self):
-        # children = getattr(self, self.collection_name)
-        # print("Children:", [(i.id, i.parent_id, i.order) for i in children])
-        # flattened = sorted(
-        #     children, key=lambda i: (i.order, i.parent_id))
-        # return [(item, self.get_item_level_from_id(item.id)) for item in flattened]
+        """Return a list of (item, level) tuples representing the hierarchy in display order."""
         def collect_items(parent_id, level):
             collected = []
             children = sorted(
@@ -195,10 +186,7 @@ class BaseNestedListManager(PropertyGroup):
                 if item.type == 'FOLDER':
                     collected.extend(collect_items(item.id, level + 1))
             return collected
-        test = collect_items(-1, 0)
-        # print("Flattened hierarchy:", [v[0].id for v in test])
-        # print("Expected flattened:", [v.id for v in flattened])
-        return test
+        return collect_items(-1, 0)
     
     def get_item_level_from_id(self, item_id):
         """Get the level of an item in the hierarchy"""
@@ -468,134 +456,8 @@ class BaseNestedListManager(PropertyGroup):
         return False
 
 
-class NLM_OT_MoveUp(Operator):
-    bl_idname = "nested_list.move_up"
-    bl_label = "Move Item Up"
+def register():
+    pass
 
-    action: EnumProperty(
-        items=[
-            ('MOVE_INTO', "Move Into", "Move into folder"),
-            ('MOVE_ADJACENT', "Move Adjacent", "Move as sibling"),
-            ('MOVE_OUT', "Move Out", "Move out of folder"),
-            ('SKIP', "Skip", "Skip over item"),
-        ]
-    )
-
-    def invoke(self, context, event):
-        manager = context.scene.nested_list_manager
-        item_id = manager.get_id_from_flattened_index(manager.active_index)
-
-        options = manager.get_movement_options(item_id, 'UP')
-        if not options:
-            return {'CANCELLED'}
-
-        if len(options) == 1 and options[0][0] == 'SKIP':
-            self.action = 'SKIP'
-            return self.execute(context)
-
-        context.window_manager.popup_menu(
-            self.draw_menu,
-            title="Move Options"
-        )
-        return {'FINISHED'}
-
-    def draw_menu(self, self_menu, context):
-        manager = context.scene.nested_list_manager
-        item_id = manager.get_id_from_flattened_index(manager.active_index)
-
-        for op_id, label, props in manager.get_movement_menu_items(item_id, 'UP'):
-            op = self_menu.layout.operator(op_id, text=label)
-            for key, value in props.items():
-                setattr(op, key, value)
-
-    def execute(self, context):
-        manager = context.scene.nested_list_manager
-        item_id = manager.get_id_from_flattened_index(manager.active_index)
-
-        if manager.execute_movement(item_id, 'UP', self.action):
-            # Update active_index to follow the moved item
-            flattened = manager.flatten_hierarchy()
-            for i, (item, _) in enumerate(flattened):
-                if item.id == item_id:
-                    manager.active_index = i
-                    break
-            manager.normalize_orders()
-            return {'FINISHED'}
-
-        return {'CANCELLED'}
-
-
-class NLM_OT_MoveDown(Operator):
-    bl_idname = "nested_list.move_down"
-    bl_label = "Move Item Down"
-
-    action: EnumProperty(
-        items=[
-            ('MOVE_OUT_BOTTOM', "Move Out Bottom", "Move out of folder"),
-            ('MOVE_INTO_TOP', "Move Into Top", "Move to top of folder"),
-            ('MOVE_ADJACENT', "Move Adjacent", "Move as sibling"),
-            ('SKIP', "Skip", "Skip over item"),
-        ]
-    )
-
-    def invoke(self, context, event):
-        manager = context.scene.nested_list_manager
-        item_id = manager.get_id_from_flattened_index(manager.active_index)
-
-        options = manager.get_movement_options(item_id, 'DOWN')
-        if not options:
-            return {'CANCELLED'}
-
-        if len(options) == 1 and options[0][0] == 'SKIP':
-            self.action = 'SKIP'
-            return self.execute(context)
-
-        context.window_manager.popup_menu(
-            self.draw_menu,
-            title="Move Options"
-        )
-        return {'FINISHED'}
-
-    def draw_menu(self, self_menu, context):
-        manager = context.scene.nested_list_manager
-        item_id = manager.get_id_from_flattened_index(manager.active_index)
-
-        for op_id, label, props in manager.get_movement_menu_items(item_id, 'DOWN'):
-            op = self_menu.layout.operator(op_id, text=label)
-            for key, value in props.items():
-                setattr(op, key, value)
-
-    def execute(self, context):
-        manager = context.scene.nested_list_manager
-        item_id = manager.get_id_from_flattened_index(manager.active_index)
-
-        if manager.execute_movement(item_id, 'DOWN', self.action):
-            # Update active_index to follow the moved item
-            flattened = manager.flatten_hierarchy()
-            for i, (item, _) in enumerate(flattened):
-                if item.id == item_id:
-                    manager.active_index = i
-                    break
-            manager.normalize_orders()
-            return {'FINISHED'}
-
-        return {'CANCELLED'}
-
-
-class NLM_OT_NormalizeOrders(Operator):
-    bl_idname = "nested_list.normalize_orders"
-    bl_label = "Normalize Orders"
-
-    def execute(self, context):
-        manager = context.scene.nested_list_manager
-        manager.normalize_orders()
-        return {'FINISHED'}
-
-
-classes = (
-    NLM_OT_MoveUp,
-    NLM_OT_MoveDown,
-    NLM_OT_NormalizeOrders,
-)
-
-register, unregister = register_classes_factory(classes)
+def unregister():
+    pass

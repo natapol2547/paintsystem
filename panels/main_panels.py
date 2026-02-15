@@ -16,7 +16,9 @@ from .common import (
     check_group_multiuser,
     toggle_paint_mode_ui,
     draw_uv_edit_alert,
-    is_uv_edit_active
+    is_uv_edit_active,
+    ensure_invoke_context,
+    draw_warning_box,
 )
 
 from ..paintsystem.data import LegacyPaintSystemContextParser
@@ -105,10 +107,12 @@ class MAT_MT_PaintSystemMaterialSelectMenu(PSContextMixin, Menu):
         for idx, material_slot in enumerate(ob.material_slots):
             is_selected = ob.active_material_index == idx
             mat = material_slot.material is not None
-            if mat and hasattr(mat, "paint_system") and mat.paint_system.groups:
-                op = layout.operator("paint_system.select_material_index", text=material_slot.material.name if mat else "Empty Material", icon="MATERIAL" if mat else "MESH_CIRCLE", depress=is_selected)
-            else:
-                op = layout.operator("paint_system.select_material_index", text=material_slot.material.name if mat else "Empty Material", icon="MATERIAL" if mat else "MESH_CIRCLE", depress=is_selected)
+            op = layout.operator(
+                "paint_system.select_material_index",
+                text=material_slot.material.name if mat else "Empty Material",
+                icon="MATERIAL" if mat else "MESH_CIRCLE",
+                depress=is_selected,
+            )
             op.index = idx
 
 
@@ -278,11 +282,10 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
         
 
         if ps_ctx.active_group and check_group_multiuser(ps_ctx.active_group.node_tree):
-            # Show a warning
-            box = layout.box()
-            box.alert = True
-            box.label(text="Duplicated Paint System Data", icon="ERROR")
-            row = box.row(align=True)
+            warning_col = draw_warning_box(layout, [
+                ("Duplicated Paint System Data", 'ERROR'),
+            ])
+            row = warning_col.row(align=True)
             scale_content(context, row, 1.5, 1.5)
             row.operator("paint_system.duplicate_paint_system_data", text="Fix Data Duplication")
             return
@@ -318,10 +321,7 @@ class MAT_MT_DeleteGroupMenu(PSContextMixin, Menu):
     def draw(self, context):
         layout = self.layout
         ps_ctx = self.parse_context(context)
-        
-        if layout.operator_context == 'EXEC_REGION_WIN':
-            layout.operator_context = 'INVOKE_REGION_WIN'
-        layout.operator_context = 'INVOKE_REGION_WIN'
+        ensure_invoke_context(layout)
         
         layout.alert = True
         layout.operator("paint_system.delete_group", text="Remove Paint System", icon="TRASH")

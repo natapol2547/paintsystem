@@ -5,14 +5,16 @@ from bpy.props import (
 )
 from bpy.types import Operator, Context, NodeTree
 from bpy.utils import register_classes_factory
-import math
 import mathutils
+
+from ..paintsystem.list_manager import ListManager
 
 from ..paintsystem.data import (
     ACTION_BIND_ENUM,
     ACTION_TYPE_ENUM,
     ADJUSTMENT_TYPE_ENUM,
     ATTRIBUTE_TYPE_ENUM,
+    MASK_TYPE_ENUM,
     TEXTURE_TYPE_ENUM,
     GRADIENT_TYPE_ENUM,
     GEOMETRY_TYPE_ENUM,
@@ -77,7 +79,7 @@ class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSImageCreateMixin, MultiMaterialO
         """Get the next image name from the active channel"""
         ps_ctx = self.parse_context(context)
         if ps_ctx.active_channel:
-            return get_next_unique_name("Image", [layer.name for layer in ps_ctx.active_channel.layers])
+            return get_next_unique_name("Image", [layer.layer_name for layer in ps_ctx.active_channel.layers])
 
     def process_material(self, context):
         self.store_coord_type(context)
@@ -379,6 +381,7 @@ class PAINTSYSTEM_OT_NewRandomColor(PSContextMixin, MultiMaterialOperator):
         ps_ctx.active_channel.create_layer(context, self.layer_name, "RANDOM")
         return {'FINISHED'}
 
+
 class PAINTSYSTEM_OT_NewCustomNodeGroup(PSContextMixin, MultiMaterialOperator):
     """Create a new custom node group layer"""
     bl_idname = "paint_system.new_custom_node_group_layer"
@@ -491,7 +494,7 @@ class PAINTSYSTEM_OT_NewCustomNodeGroup(PSContextMixin, MultiMaterialOperator):
         if not self.node_tree_name:
             return {'CANCELLED'}
         # Must have at least one output socket
-        if not self.color_output_name != '_NONE_' and not self.alpha_output_name != '_NONE_':
+        if self.color_output_name == '_NONE_' and self.alpha_output_name == '_NONE_':
             self.report({'ERROR'}, "Node tree must have at least one output socket")
             return {'CANCELLED'}
         ps_ctx = self.parse_context(context)
@@ -589,6 +592,7 @@ class PAINTSYSTEM_OT_NewTexture(PSContextMixin, PSUVOptionsMixin, MultiMaterialO
             uv_map_name=self.uv_map_name
         )
         return {'FINISHED'}
+
 
 class PAINTSYSTEM_OT_DeleteItem(PSContextMixin, MultiMaterialOperator):
     """Remove the active item"""
@@ -695,14 +699,8 @@ class PAINTSYSTEM_OT_MoveUp(PSContextMixin, MultiMaterialOperator):
             active_channel.active_index)
 
         if active_channel.execute_movement(item_id, 'UP', self.action):
-            # Update active_index to follow the moved item
-            # active_group.active_index = active_group.layers.values().index(self)
-
             active_channel.update_node_tree(context)
-
-            # Force the UI to update
             redraw_panel(context)
-
             return {'FINISHED'}
 
         return {'CANCELLED'}
@@ -781,14 +779,8 @@ class PAINTSYSTEM_OT_MoveDown(PSContextMixin, MultiMaterialOperator):
             active_channel.active_index)
 
         if active_channel.execute_movement(item_id, 'DOWN', self.action):
-            # Update active_index to follow the moved item
-            # active_group.active_index = active_group.items.values().index(self)
-
             active_channel.update_node_tree(context)
-
-            # Force the UI to update
             redraw_panel(context)
-
             return {'FINISHED'}
 
         return {'CANCELLED'}
@@ -908,6 +900,7 @@ class PAINTSYSTEM_OT_UnlinkLayer(PSContextMixin, Operator):
         ps_ctx.active_channel.update_node_tree(context)
         return {'FINISHED'}
 
+
 class PAINTSYSTEM_OT_AddAction(PSContextMixin, Operator):
     """Add an action to the active layer"""
     bl_idname = "paint_system.add_action"
@@ -959,7 +952,7 @@ class PAINTSYSTEM_OT_AddAction(PSContextMixin, Operator):
     def execute(self, context):
         ps_ctx = self.parse_context(context)
         active_layer = ps_ctx.active_layer
-        active_layer.add_action(self.name, self.action_bind, self.action_type, self.frame, self.marker_name)
+        active_layer.add_action(self.get_next_action_name(context), self.action_bind, self.action_type, self.frame, self.marker_name)
         redraw_panel(context)
         return {'FINISHED'}
     
@@ -1082,6 +1075,7 @@ class PAINTSYSTEM_OT_ProjectionViewReset(PSContextMixin, Operator):
                         view_matrix.invert()
                         region_3d.view_matrix = view_matrix
                     case "CAMERA":
+                        # Set active camera position and rotation 
                         active_camera = bpy.context.scene.camera
                         active_camera.location = location
                         active_camera.rotation_euler = rotation
@@ -1124,6 +1118,8 @@ class PAINTSYSTEM_OT_RenameLayerSuffix(PSContextMixin, Operator):
             active_layer.name = self.new_name
         redraw_panel(context)
         return {'FINISHED'}
+
+
 
 classes = (
     PAINTSYSTEM_OT_NewImage,

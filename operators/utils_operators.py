@@ -1,5 +1,3 @@
-import math
-import uuid
 import addon_utils
 import bpy
 import gpu
@@ -32,7 +30,7 @@ class PAINTSYSTEM_OT_TogglePaintMode(PSContextMixin, Operator):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        return ps_ctx.ps_object.type == 'MESH' or ps_ctx.ps_object.type == 'GREASEPENCIL'
+        return ps_ctx.ps_object.type in {'MESH', 'GREASEPENCIL'}
 
     def execute(self, context):
         ps_ctx = self.parse_context(context)
@@ -85,8 +83,6 @@ class PAINTSYSTEM_OT_SelectMaterialIndex(PSContextMixin, Operator):
             return {'CANCELLED'}
         ob.active_material_index = self.index
         return {'FINISHED'}
-
-
 
 
 
@@ -254,6 +250,7 @@ class PAINTSYSTEM_OT_FlipNormals(Operator):
             bpy.ops.mesh.flip_normals()
             bpy.ops.object.mode_set(mode=orig_mode)
         return {'FINISHED'}
+
 
 class PAINTSYSTEM_OT_RecalculateNormals(Operator):
     """Recalculate normals of the selected mesh"""
@@ -448,6 +445,7 @@ def split_area(context: bpy.types.Context, direction: str = 'VERTICAL', factor: 
     new_area = new_areas.pop()
     return new_area
 
+
 class PAINTSYSTEM_OT_ToggleImageEditor(PSContextMixin, Operator):
     bl_idname = "paint_system.toggle_image_editor"
     bl_label = "Toggle Image Editor"
@@ -490,6 +488,7 @@ class PAINTSYSTEM_OT_ToggleImageEditor(PSContextMixin, Operator):
                 execute_operator_in_area(image_area, 'image.view_all', fit_view=True)
 
         return {'FINISHED'}
+
 
 class PAINTSYSTEM_OT_FocusPSNode(PSContextMixin, Operator):
     bl_idname = "paint_system.focus_ps_node"

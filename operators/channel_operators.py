@@ -58,12 +58,6 @@ class PAINTSYSTEM_OT_AddChannel(PSContextMixin, MultiMaterialOperator):
         default=False,
         options={'SKIP_SAVE'}
     )
-    # world_to_object_normal: bpy.props.BoolProperty(
-    #     name="World to Object Normal",
-    #     description="World to object normal",
-    #     default=False,
-    #     options={'SKIP_SAVE'}
-    # )
     use_max_min: bpy.props.BoolProperty(
         name="Use Max Min",
         description="Use max min for the channel",
@@ -92,8 +86,7 @@ class PAINTSYSTEM_OT_AddChannel(PSContextMixin, MultiMaterialOperator):
                 channel_type=self.channel_type, 
                 color_space=self.color_space, 
                 use_alpha=self.use_alpha, 
-                normalize_input=self.normalize_input, 
-                # world_to_object_normal=self.world_to_object_normal, 
+                normalize_input=self.normalize_input,
                 use_max_min=self.use_max_min,
                 factor_min=self.factor_min,
                 factor_max=self.factor_max,
@@ -130,6 +123,7 @@ class PAINTSYSTEM_OT_AddChannel(PSContextMixin, MultiMaterialOperator):
             if self.use_max_min:
                 layout.prop(self, "factor_min", text="Factor Min")
                 layout.prop(self, "factor_max", text="Factor Max")
+
 
 class PAINTSYSTEM_OT_DeleteChannel(PSContextMixin, MultiMaterialOperator):
     """Delete the selected channel in the Paint System"""
@@ -179,6 +173,7 @@ class PAINTSYSTEM_OT_MoveChannelUp(PSContextMixin, MultiMaterialOperator):
         ps_ctx.active_group.update_node_tree(context)
         redraw_panel(context)
         return {'FINISHED'}
+
 
 class PAINTSYSTEM_OT_MoveChannelDown(PSContextMixin, MultiMaterialOperator):
     """Move the selected channel in the Paint System"""

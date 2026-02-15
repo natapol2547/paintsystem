@@ -12,9 +12,73 @@ from pathlib import Path
 import os
 import re
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 debug_mode = False
+
+# --- UDIM helpers ---
+
+_UDIM_SEPARATORS = ['.', '_', '-']
+
+
+def parse_udim_filename(filename: str) -> Tuple[str, str]:
+    """Extract the prefix and extension from a UDIM-style filename.
+
+    Handles both the ``.<UDIM>.`` marker convention and plain filenames.
+    
+    Returns:
+        (prefix, extension) -- e.g. ``("my_image", "png")`` or ``("my_image", ".png")``.
+        For ``.<UDIM>.`` filenames the extension does **not** include a leading dot.
+    """
+    if '.<UDIM>.' in filename:
+        prefix = filename.split('.<UDIM>.')[0]
+        extension = filename.split('.<UDIM>.')[-1]
+    else:
+        prefix = os.path.splitext(filename)[0]
+        extension = os.path.splitext(filename)[1]
+    return prefix, extension
+
+
+def find_udim_tile_files(directory: str, prefix: str) -> Dict[int, str]:
+    """Scan *directory* for files matching the UDIM tile naming convention.
+    
+    Returns:
+        A mapping of tile number to absolute file path.
+    """
+    tile_files: Dict[int, str] = {}
+    if not os.path.exists(directory):
+        return tile_files
+    for f in os.listdir(directory):
+        for sep in _UDIM_SEPARATORS:
+            pattern = rf'^{re.escape(prefix)}{re.escape(sep)}(\d{{4}})(\..+)?$'
+            match = re.match(pattern, f)
+            if match:
+                tile_num = int(match.group(1))
+                tile_files[tile_num] = os.path.join(directory, f)
+                break
+    return tile_files
+
+
+def _get_image_dir_and_filename(image: Image) -> Tuple[str, str]:
+    """Return (directory, filename) for an image, falling back to temp dir."""
+    if image.filepath:
+        directory = os.path.dirname(bpy.path.abspath(image.filepath))
+        filename = bpy.path.basename(image.filepath)
+    else:
+        directory = bpy.app.tempdir
+        image_name = image.name.replace(' ', '_')
+        filename = f"{image_name}.<UDIM>.png"
+    return directory, filename
+
+
+def _resolve_tile_path(directory: str, prefix: str, extension: str, tile_number: int) -> Optional[str]:
+    """Try to find the file path for a specific UDIM tile number."""
+    for sep in _UDIM_SEPARATORS:
+        tile_filename = f"{prefix}{sep}{tile_number}{extension}"
+        potential_path = os.path.join(directory, tile_filename)
+        if os.path.exists(potential_path):
+            return potential_path
+    return None
 
 @dataclass
 class ImageTiles:
@@ -137,59 +201,23 @@ def blender_image_to_numpy(image: Image) -> Optional[ImageTiles]:
     # Save image to ensure all tiles are on disk
     temp_save_image(image)
     
-    # Get the directory and filename pattern
-    # After temp_save_image, filepath should be set (either original or temp with UDIM marker)
-    if image.filepath:
-        directory = os.path.dirname(bpy.path.abspath(image.filepath))
-        filename = bpy.path.basename(image.filepath)
-    else:
-        # Fallback: construct from image name (shouldn't happen after temp_save_image)
-        directory = bpy.app.tempdir
-        image_name = image.name.replace(' ', '_')
-        filename = f"{image_name}.<UDIM>.png"
-    
-    # Extract prefix (filename before .<UDIM>.)
-    if '.<UDIM>.' in filename:
-        prefix = filename.split('.<UDIM>.')[0]
-        extension = filename.split('.<UDIM>.')[-1]
-    else:
-        # Try to find files with tile numbers
-        prefix = os.path.splitext(filename)[0]
-        extension = os.path.splitext(filename)[1]
+    directory, filename = _get_image_dir_and_filename(image)
+    prefix, extension = parse_udim_filename(filename)
     
     # Load all tiles
     tiles_dict = {}
     width, height = image.size
     
     # Build a map of tile numbers to file paths by searching the directory
-    tile_files = {}
-    if os.path.exists(directory):
-        for f in os.listdir(directory):
-            # Try to match UDIM tile pattern: prefix.number.extension
-            for sep in ['.', '_', '-']:
-                pattern = rf'^{re.escape(prefix)}{re.escape(sep)}(\d{{4}})(\..+)?$'
-                match = re.match(pattern, f)
-                if match:
-                    tile_num = int(match.group(1))
-                    tile_files[tile_num] = os.path.join(directory, f)
-                    break
+    tile_files = find_udim_tile_files(directory, prefix)
     
     for tile in image.tiles:
         tile_number = tile.number
         
         # Try to find the tile file
-        tile_path = None
-        if tile_number in tile_files:
-            tile_path = tile_files[tile_number]
-        else:
-            # Construct expected filename pattern
-            # UDIM tiles are typically named like: prefix.1001.png, prefix.1002.png, etc.
-            for sep in ['.', '_', '-']:
-                tile_filename = f"{prefix}{sep}{tile_number}{extension}"
-                potential_path = os.path.join(directory, tile_filename)
-                if os.path.exists(potential_path):
-                    tile_path = potential_path
-                    break
+        tile_path = tile_files.get(tile_number)
+        if tile_path is None:
+            tile_path = _resolve_tile_path(directory, prefix, extension, tile_number)
         
         if tile_path and os.path.exists(tile_path):
             # Load tile using PIL
@@ -203,7 +231,6 @@ def blender_image_to_numpy(image: Image) -> Optional[ImageTiles]:
             
             # Ensure correct dimensions
             if pixels.shape[:2] != (height, width):
-                # Resize if needed
                 pil_img = pil_img.resize((width, height), PILImage.Resampling.LANCZOS)
                 img_uint8 = np.array(pil_img, dtype=np.uint8)
                 pixels = img_uint8.astype(np.float32) / 255.0
@@ -215,7 +242,6 @@ def blender_image_to_numpy(image: Image) -> Optional[ImageTiles]:
         else:
             # Tile file not found, try to get from Blender's pixel data (first tile only)
             if tile_number == image.tiles[0].number:
-                # This is the active tile, we can access pixels
                 pixels = np.empty(len(image.pixels), dtype=np.float32)
                 image.pixels.foreach_get(pixels)
                 if image.channels == 4:
@@ -223,7 +249,6 @@ def blender_image_to_numpy(image: Image) -> Optional[ImageTiles]:
                     pixels = np.flipud(pixels)
                     tiles_dict[tile_number] = pixels
             else:
-                # Create empty tile
                 tiles_dict[tile_number] = np.zeros((height, width, 4), dtype=np.float32)
     
     end_time = time.time()
@@ -277,10 +302,11 @@ def numpy_to_pil(numpy_array):
     return img_pil
 
 def pil_to_numpy(pil_image):
+    """Convert a PIL image to a float32 numpy array in [0, 1] range."""
     if not PIL_AVAILABLE:
         raise ImportError("PIL (Pillow) is not available. Please install Pillow to use this feature.")
     img_uint8 = np.array(pil_image, dtype=np.uint8)
-    img_float = img_uint8.astype(np.float64) / 255.0
+    img_float = img_uint8.astype(np.float32) / 255.0
     return img_float
 
 def is_temp_filepath(filepath: str) -> bool:
@@ -305,40 +331,20 @@ def delete_temp_image_files(image: Image):
     if not is_temp_filepath(image.filepath):
         return
     
-    # Check if this is a UDIM tiled image
     is_udim = image.source == 'TILED' and len(image.tiles) > 1
     
     if is_udim:
-        # For UDIM images, delete all tile files
-        directory = os.path.dirname(bpy.path.abspath(image.filepath))
-        filename = bpy.path.basename(image.filepath)
-        
-        # Extract prefix and extension
-        if '.<UDIM>.' in filename:
-            prefix = filename.split('.<UDIM>.')[0]
-            extension = filename.split('.<UDIM>.')[-1]
-        else:
-            prefix = os.path.splitext(filename)[0]
-            extension = os.path.splitext(filename)[1]
-        
-        # Delete all tile files matching the pattern
-        if os.path.exists(directory):
-            for f in os.listdir(directory):
-                # Try to match UDIM tile pattern: prefix.number.extension
-                for sep in ['.', '_', '-']:
-                    pattern = rf'^{re.escape(prefix)}{re.escape(sep)}(\d{{4}})(\..+)?$'
-                    match = re.match(pattern, f)
-                    if match:
-                        tile_path = os.path.join(directory, f)
-                        try:
-                            if os.path.exists(tile_path):
-                                os.remove(tile_path)
-                        except OSError as e:
-                            if debug_mode:
-                                print(f"Failed to delete temp tile file {tile_path}: {e}")
-                        break
+        directory, filename = _get_image_dir_and_filename(image)
+        prefix, _extension = parse_udim_filename(filename)
+        tile_files = find_udim_tile_files(directory, prefix)
+        for tile_path in tile_files.values():
+            try:
+                if os.path.exists(tile_path):
+                    os.remove(tile_path)
+            except OSError as e:
+                if debug_mode:
+                    print(f"Failed to delete temp tile file {tile_path}: {e}")
     else:
-        # For non-UDIM images, delete the single file
         abs_filepath = bpy.path.abspath(image.filepath)
         try:
             if os.path.exists(abs_filepath):
@@ -379,48 +385,26 @@ def set_image_pixels(image: Image, image_tiles: ImageTiles):
         if not PIL_AVAILABLE:
             raise ImportError("PIL (Pillow) is required to process UDIM images. Please install Pillow.")
         
-        # Get directory and filename pattern
-        if image.filepath:
-            directory = os.path.dirname(bpy.path.abspath(image.filepath))
-            filename = bpy.path.basename(image.filepath)
-        else:
-            directory = bpy.app.tempdir
-            filename = image.name
-        
-        # Extract prefix
-        if '.<UDIM>.' in filename:
-            prefix = filename.split('.<UDIM>.')[0]
-            extension = filename.split('.<UDIM>.')[-1]
-        else:
-            prefix = os.path.splitext(filename)[0]
-            extension = os.path.splitext(filename)[1]
+        directory, filename = _get_image_dir_and_filename(image)
+        prefix, extension = parse_udim_filename(filename)
         
         # Save each tile
         for tile_number, array in image_tiles.tiles.items():
-            # Flip vertically back to Blender coordinate system
             array = np.flipud(array.copy())
-            
-            # Ensure array is in [0, 1] range
             array = np.clip(array, 0, 1)
             
-            # Convert to uint8 for PIL
             img_uint8 = (array * 255).astype(np.uint8)
             pil_img = PILImage.fromarray(img_uint8, mode='RGBA')
             
-            # Construct tile filename
+            # Construct tile filename, preferring existing file path
             tile_filename = f"{prefix}.{tile_number}.{extension}"
             tile_path = os.path.join(directory, tile_filename)
             
-            # Try alternative patterns if file doesn't exist
-            if not os.path.exists(tile_path):
-                for sep in ['.', '_', '-']:
-                    alt_filename = f"{prefix}{sep}{tile_number}{extension}"
-                    alt_path = os.path.join(directory, alt_filename)
-                    if os.path.exists(alt_path):
-                        tile_path = alt_path
-                        break
+            # Try alternative separator patterns if file doesn't exist yet
+            existing_path = _resolve_tile_path(directory, prefix, extension, tile_number)
+            if existing_path:
+                tile_path = existing_path
             
-            # Save tile
             pil_img.save(tile_path)
         
         # Reload image to update tiles

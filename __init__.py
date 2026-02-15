@@ -19,7 +19,6 @@ from .custom_icons import load_icons, unload_icons
 from . import paintsystem as paintsystem
 
 # from .paintsystem.data import parse_context
-
 bl_info = {
     "name": "Paint System",
     "author": "Tawan Sunflower, @blastframe",

@@ -1,5 +1,5 @@
 import bpy
-from bpy.types import Panel, Operator
+from bpy.types import Operator
 from bpy.utils import register_classes_factory
 
 from .common import PSContextMixin, execute_operator_in_area, wait_for_redraw

@@ -2,17 +2,32 @@ import bpy
 
 from .versioning import get_layer_parent_map, migrate_global_layer_data, migrate_blend_mode, migrate_source_node, migrate_socket_names, update_layer_name, update_layer_version, update_library_nodetree_version
 from .version_check import get_latest_version
-from .data import sort_actions, parse_context, get_all_layers, is_valid_uuidv4, update_material_name
+from .context import parse_context
+from .data import sort_actions, get_all_layers, is_valid_uuidv4, iter_all_layers, update_material_name
 from .image import save_image
 from .graph.basic_layers import get_layer_version_for_type
 import time
 from .graph.nodetree_builder import get_nodetree_version
 import uuid
 
+_COLOR_HISTORY_PALETTE_NAME = "Paint System History"
+
+
 def get_ps_scene_data(scene: bpy.types.Scene):
     if not hasattr(scene, 'ps_scene_data'):
         return None
     return scene.ps_scene_data
+
+
+def ensure_color_history_palette(ps_scene_data) -> bpy.types.Palette:
+    """Return the colour-history palette, creating it if necessary."""
+    palette = ps_scene_data.color_history_palette
+    if not palette:
+        palette = bpy.data.palettes.get(_COLOR_HISTORY_PALETTE_NAME)
+        if not palette:
+            palette = bpy.data.palettes.new(_COLOR_HISTORY_PALETTE_NAME)
+        ps_scene_data.color_history_palette = palette
+    return palette
 
 @bpy.app.handlers.persistent
 def frame_change_pre(scene: bpy.types.Scene):
@@ -90,39 +105,28 @@ def load_paint_system_data():
 
 @bpy.app.handlers.persistent
 def load_post(scene):
-    
-    # Ensure color history palette is created
     ps_scene_data = get_ps_scene_data(bpy.context.scene)
     if not ps_scene_data:
         return
-    if not ps_scene_data.color_history_palette:
-        palette_name = "Paint System History"
-        palette = bpy.data.palettes.get(palette_name)
-        if not palette:
-            palette = bpy.data.palettes.new(palette_name)
-    
+    ensure_color_history_palette(ps_scene_data)
     load_paint_system_data()
-    # Check for donation info
-    # get_donation_info()
-    # if donation_info:
-    #     print(f"Donation info: {donation_info}")
-    # Version check runs on addon enable.
+    get_latest_version()
 
 @bpy.app.handlers.persistent
 def save_handler(scene: bpy.types.Scene):
     images = set()
     
-    for mat in bpy.data.materials:
-        if hasattr(mat, 'ps_mat_data'):
-            for group in mat.ps_mat_data.groups:
-                for channel in group.channels:
-                    image = channel.bake_image
-                    if image and image.is_dirty:
-                        images.add(image)
-                    for layer in channel.layers:
-                        image = layer.image
-                        if image:
-                            images.add(image)
+    seen_channels = set()
+    for _mat, _grp, channel, layer in iter_all_layers():
+        # Collect bake images once per channel
+        ch_id = id(channel)
+        if ch_id not in seen_channels:
+            seen_channels.add(ch_id)
+            if channel.bake_image and channel.bake_image.is_dirty:
+                images.add(channel.bake_image)
+        # Collect layer images
+        if layer.image:
+            images.add(layer.image)
             
     for image in images:
         save_image(image)
@@ -151,14 +155,7 @@ def color_history_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph
             return
         image: bpy.types.Image = active_layer.image
         if active_layer and active_layer.type == "IMAGE" and image and image.is_dirty:
-            if not ps_scene_data.color_history_palette:
-                palette_name = "Paint System History"
-                palette = bpy.data.palettes.get(palette_name)
-                if not palette:
-                    palette = bpy.data.palettes.new(palette_name)
-                ps_scene_data.color_history_palette = palette
-            
-            palette = ps_scene_data.color_history_palette
+            palette = ensure_color_history_palette(ps_scene_data)
             current_color = ps_scene_data.get_brush_color(bpy.context)
             
             should_add = True
@@ -294,7 +291,7 @@ def paint_system_object_update(scene: bpy.types.Scene, depsgraph: bpy.types.Deps
     try: 
         obj = bpy.context.object
         mat = obj.active_material if obj else None
-    except: 
+    except Exception:
         return
     
     if not obj or not get_ps_scene_data(bpy.context.scene):
