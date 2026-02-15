@@ -111,10 +111,6 @@ LAYER_TYPE_ENUM = [
 
 MASK_TYPE_ENUM = [
     ('IMAGE', "Image", "Image layer"),
-    ('SOLID_COLOR', "Solid Color", "Solid Color layer"),
-    ('ATTRIBUTE', "Attribute", "Attribute layer"),
-    ('GRADIENT', "Gradient", "Gradient layer"),
-    ('RANDOM', "Random", "Random Color layer"),
     ('TEXTURE', "Texture", "Texture layer"),
 ]
 
@@ -281,18 +277,29 @@ def update_active_image(self=None, context: bpy.types.Context = None):
         image_paint.canvas = None
         # Unable to paint
         return
-    
+
     selected_image: Image = active_layer.image
+    active_coord_type = active_layer.coord_type
+    active_uv_map_name = active_layer.uv_map_name
+    if active_layer.edit_mask and active_layer.use_masks and active_layer.layer_masks:
+        active_mask_index = max(0, min(active_layer.active_layer_mask_index, len(active_layer.layer_masks) - 1))
+        active_mask = active_layer.layer_masks[active_mask_index]
+        if active_mask.type == 'IMAGE' and active_mask.mask_image:
+            selected_image = active_mask.mask_image
+            active_coord_type = active_mask.coord_type
+            active_uv_map_name = active_mask.mask_uv_map or active_layer.uv_map_name
+
     image_paint.canvas = selected_image
-    if active_layer.coord_type == 'UV':
-        if active_layer.uv_map_name and obj.data.uv_layers.get(active_layer.uv_map_name):
-            uv_layer = obj.data.uv_layers[active_layer.uv_map_name]
+    if obj and getattr(obj, "data", None) and getattr(obj.data, "uv_layers", None):
+        if active_coord_type == 'UV':
+            if active_uv_map_name and obj.data.uv_layers.get(active_uv_map_name):
+                uv_layer = obj.data.uv_layers[active_uv_map_name]
+                uv_layer.active = True
+                uv_layer.active_render = True
+        elif active_coord_type == 'AUTO' and obj.data.uv_layers.get(DEFAULT_PS_UV_MAP_NAME):
+            uv_layer = obj.data.uv_layers[DEFAULT_PS_UV_MAP_NAME]
             uv_layer.active = True
             uv_layer.active_render = True
-    elif active_layer.coord_type == 'AUTO' and obj.data.uv_layers.get(DEFAULT_PS_UV_MAP_NAME):
-        uv_layer = obj.data.uv_layers[DEFAULT_PS_UV_MAP_NAME]
-        uv_layer.active = True
-        uv_layer.active_render = True
 
 def update_active_layer(self, context):
     ps_ctx = parse_context(context)
@@ -803,28 +810,40 @@ class LayerMask(PropertyGroup):
         items=MASK_TYPE_ENUM,
         name="Mask Type",
         description="Mask type",
-        default='VALUE',
+        default='IMAGE',
+        update=update_active_layer,
     )
     coord_type: EnumProperty(
         items=MASK_COORDINATE_TYPE_ENUM,
         name="Coordinate Type",
         description="Coordinate type",
         default='UV',
+        update=update_active_layer,
     )
     blend_mode: EnumProperty(
         items=MASK_BLEND_MODE_ENUM,
         name="Blend Mode",
         description="Blend mode",
         default='MULTIPLY',
+        update=update_active_layer,
+    )
+    enabled: BoolProperty(
+        name="Enabled",
+        description="Toggle mask visibility",
+        default=True,
+        update=update_active_layer,
+        options=set(),
     )
     mask_image: PointerProperty(
         name="Mask Image",
         type=Image,
+        update=update_active_layer,
     )
     mask_uv_map: StringProperty(
         name="Mask UV Map",
         description="Mask UV map",
         default="",
+        update=update_active_layer,
     )
     empty_object: PointerProperty(
         name="Empty Object",
@@ -840,6 +859,7 @@ class LayerMask(PropertyGroup):
         items=TEXTURE_TYPE_ENUM,
         name="Texture Type",
         description="Texture type",
+        update=update_active_layer,
     )
     node_tree: PointerProperty(
         name="Node Tree",
@@ -1418,7 +1438,14 @@ class Layer(BaseNestedListItem):
     active_layer_mask_index: IntProperty(
         name="Active Layer Mask Index",
         description="Active layer mask index",
-        default=0
+        default=0,
+        update=update_active_image,
+    )
+    edit_mask: BoolProperty(
+        name="Edit Mask",
+        description="Edit active mask image instead of layer image",
+        default=False,
+        update=update_active_image,
     )
     
     # For parallax coordinate type
@@ -1721,9 +1748,21 @@ class Layer(BaseNestedListItem):
     def create_layer_mask(self, context: Context, layer_mask_name: str, layer_mask_type: str, **kwargs):
         layer_mask = self.layer_masks.add()
         layer_mask.name = layer_mask_name
-        layer_mask.type = layer_mask_type
+        layer_mask.layer_name = layer_mask_name
+        layer_mask.type = layer_mask_type if layer_mask_type in {'IMAGE', 'TEXTURE'} else 'IMAGE'
+        if not is_valid_uuidv4(layer_mask.uid):
+            layer_mask.uid = str(uuid.uuid4())
+        if not layer_mask.node_tree:
+            layer_mask.node_tree = bpy.data.node_groups.new(
+                name=f"PS_Mask ({layer_mask_name})",
+                type='ShaderNodeTree'
+            )
         for key, value in kwargs.items():
             setattr(layer_mask, key, value)
+        if layer_mask.type not in {'IMAGE', 'TEXTURE'}:
+            layer_mask.type = 'IMAGE'
+        if layer_mask.uid:
+            layer_mask.node_tree.name = f"PS Mask {layer_mask_name} ({layer_mask.uid[:8]})"
         self.update_node_tree(context)
         return layer_mask
     

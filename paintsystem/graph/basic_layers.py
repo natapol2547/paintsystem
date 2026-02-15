@@ -61,7 +61,7 @@ class PSNodeTreeBuilder:
             as_subgraph: Whether to create the graph as a subgraph
             **kwargs: Additional arguments passed to NodeTreeBuilder
         """
-        self._builder = NodeTreeBuilder(layer.node_tree, frame_name, version=version, verbose=True, **kwargs)
+        self._builder = NodeTreeBuilder(layer.node_tree, frame_name, version=version, verbose=False, **kwargs)
         self._layer = layer
         
         self.mask_builders = []
@@ -552,7 +552,69 @@ class PSNodeTreeBuilder:
             for mask in layer.layer_masks:
                 if not mask.uid:
                     mask.uid = str(uuid.uuid4())
+                if mask.type not in {'IMAGE', 'TEXTURE'}:
+                    mask.type = 'IMAGE'
+                if not mask.node_tree:
+                    mask.node_tree = bpy.data.node_groups.new(
+                        name=f"PS_Mask ({mask.name})",
+                        type='ShaderNodeTree'
+                    )
                 builder.mask_builders.append(cls._create_mask_graph(mask, context).builder)
+
+        # PS 1.0-style active image mask path
+        active_image_mask = None
+        if getattr(layer, "use_masks", False) and hasattr(layer, "layer_masks") and layer.layer_masks:
+            active_mask_index = max(0, min(layer.active_layer_mask_index, len(layer.layer_masks) - 1))
+            check_mask = layer.layer_masks[active_mask_index]
+            if check_mask.enabled and check_mask.type == 'IMAGE' and check_mask.mask_image:
+                active_image_mask = check_mask
+
+        if active_image_mask:
+            mask_uv_map_name = active_image_mask.mask_uv_map or getattr(layer, "uv_map_name", "")
+            builder.add_node(
+                "ps_active_mask_source",
+                "ShaderNodeTexImage",
+                {"image.force": active_image_mask.mask_image, "interpolation": "Closest", "name": "ps_active_mask_source"}
+            )
+            create_coord_graph(
+                builder,
+                layer,
+                active_image_mask.coord_type,
+                mask_uv_map_name,
+                "ps_active_mask_source",
+                "Vector",
+            )
+            builder.add_node("ps_active_mask_rgb_to_bw", "ShaderNodeRGBToBW")
+            builder.link("ps_active_mask_source", "ps_active_mask_rgb_to_bw", "Color", "Color")
+
+            if builder._color_source_node is not None and builder._color_source_socket is not None:
+                builder.add_node(
+                    "ps_active_mask_color_mix",
+                    "ShaderNodeMix",
+                    {"blend_type": "MIX", "data_type": "RGBA"},
+                    default_values={"A": (0.0, 0.0, 0.0, 1.0)},
+                    force_default_values=True,
+                )
+                builder.link("ps_active_mask_rgb_to_bw", "ps_active_mask_color_mix", "Val", "Factor")
+                builder.add_color_modifier("ps_active_mask_color_mix", "B", "Result")
+
+            if builder._alpha_source_node is not None and builder._alpha_source_socket is not None:
+                builder.add_node(
+                    "ps_active_mask_alpha_multiply",
+                    "ShaderNodeMath",
+                    {"operation": "MULTIPLY"},
+                    default_values={0: 1.0, 1: 1.0},
+                    force_default_values=True,
+                )
+                builder.link(builder._alpha_source_node, "ps_active_mask_alpha_multiply", builder._alpha_source_socket, 0)
+                builder.link("ps_active_mask_rgb_to_bw", "ps_active_mask_alpha_multiply", "Val", 1)
+                builder._alpha_source_node = "ps_active_mask_alpha_multiply"
+                builder._alpha_source_socket = "Value"
+                builder._update_mixing_graph_links()
+            else:
+                builder._alpha_source_node = "ps_active_mask_rgb_to_bw"
+                builder._alpha_source_socket = "Val"
+                builder._update_mixing_graph_links()
         
         return builder
 
@@ -640,7 +702,7 @@ class PSNodeTreeBuilder:
                 return builder
 
             case "TEXTURE":
-                color_socket = parse_socket_name(layer_mask, "source", "Color")
+                color_socket = "Color"
                 texture_type = get_texture_identifier(layer_mask.texture_type)
                 create_mask_mixing_graph(builder, layer_mask, "source", color_socket)
                 builder.add_node("source", texture_type, {"name": "source"})
@@ -711,8 +773,11 @@ def parse_socket_name(layer: "Layer", socket_name: str, default_socket_name: str
         if custom_node_tree:
             return socket_name if socket_name in custom_node_tree.interface.items_tree else None
         return default_socket_name
-    elif layer.source_node:
+    source_node = getattr(layer, "source_node", None)
+    if source_node is not None:
         return socket_name if socket_name != "_NONE_" else None
+    if socket_name != "_NONE_":
+        return socket_name
     return default_socket_name
 
 def get_paint_system_collection(context: bpy.types.Context) -> bpy.types.Collection:
