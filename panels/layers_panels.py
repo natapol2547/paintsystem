@@ -864,6 +864,7 @@ class MAT_UL_LayerMasks(PSContextMixin, UIList):
     bl_category = 'Paint System'
     
     def draw_item(self, context, layout, data, item, icon, active_data, active_property, index):
+        layout.prop(item, "enabled", text="")
         layout.prop(item, "name", text="")
         layout.prop(item, "type", text="")
 class MAT_PT_LayerMaskSettings(PSContextMixin, Panel):
@@ -878,7 +879,7 @@ class MAT_PT_LayerMaskSettings(PSContextMixin, Panel):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        return ps_ctx.active_layer and ps_ctx.active_layer.type == 'IMAGE'
+        return ps_ctx.active_layer is not None
     
     def draw_header(self, context):
         layout = self.layout
@@ -895,8 +896,25 @@ class MAT_PT_LayerMaskSettings(PSContextMixin, Panel):
         row = box.row()
         row.template_list("MAT_UL_LayerMasks", "", active_layer, "layer_masks", active_layer, "active_layer_mask_index", rows=5)
         col = row.column(align=True)
-        col.operator("wm.call_menu", text="", icon="ADD").name = "MAT_MT_LayerMaskMenu"
+        col.operator("paint_system.new_image_mask", text="", icon="ADD")
+        col.operator("paint_system.new_texture_mask", text="", icon="TEXTURE")
         col.operator("paint_system.delete_layer_mask", text="", icon="REMOVE")
+
+        if active_layer.layer_masks and 0 <= active_layer.active_layer_mask_index < len(active_layer.layer_masks):
+            active_mask = active_layer.layer_masks[active_layer.active_layer_mask_index]
+            row = box.row(align=True)
+            row.prop(active_mask, "enabled", text="Enable Mask", toggle=True)
+            if active_mask.type == 'TEXTURE':
+                box.prop(active_mask, "texture_type", text="Texture")
+                box.prop(active_mask, "coord_type", text="Coordinates")
+                if active_mask.coord_type == 'UV':
+                    box.prop_search(active_mask, "mask_uv_map", ps_ctx.ps_object.data, "uv_layers", text="UV Map")
+            row = box.row(align=True)
+            row.enabled = active_mask.type == 'IMAGE' and active_mask.mask_image is not None
+            if active_layer.edit_mask:
+                row.operator("paint_system.finish_edit_layer_mask", text="Finish Edit", icon='CHECKMARK')
+            else:
+                row.operator("paint_system.edit_layer_mask", text="Edit Mask", icon='GREASEPENCIL')
 
 class MAT_MT_LayerMenu(PSContextMixin, Menu):
     bl_label = "Layer Menu"
