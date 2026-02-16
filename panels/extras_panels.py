@@ -433,7 +433,8 @@ class NODE_PT_PaintSystemShaderEditor(PSContextMixin, Panel):
         ps_ctx = cls.parse_context(context)
         if is_uv_edit_active(context):
             return False
-        return ps_ctx.active_group is not None and context.space_data.tree_type == 'ShaderNodeTree'
+        space_data = getattr(context, "space_data", None)
+        return ps_ctx.active_group is not None and bool(space_data and space_data.tree_type == 'ShaderNodeTree')
     
     def draw_header(self, context):
         layout = self.layout
