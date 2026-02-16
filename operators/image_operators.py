@@ -297,6 +297,23 @@ if PIL_AVAILABLE:
         custom_image_gradient: BoolProperty(name="Use Custom Image Gradient", default=False)
         custom_image_name: StringProperty(name="Custom Image Name", default="")
         
+        preserve_alpha: BoolProperty(
+            name="Preserve Alpha",
+            description="Only paint RGB channels, keeping the original image alpha untouched",
+            default=False
+        )
+        
+        uv_seam_painting: BoolProperty(
+            name="UV Seam Painting",
+            description="Detect UV seam boundaries and replicate brush strokes across matching edges",
+            default=False
+        )
+        uv_map_name: StringProperty(
+            name="UV Map",
+            description="UV map to use for seam detection",
+            default=""
+        )
+        
         def execute(self, context):
             ps_ctx = self.parse_context(context)
             image = self.get_image(context)
@@ -320,6 +337,8 @@ if PIL_AVAILABLE:
             painter.value_shift = self.value_shift if self.use_hsv_shift else 0.0
             painter.use_random_seed = self.use_random_seed
             painter.random_seed = self.random_seed
+            painter.preserve_alpha = self.preserve_alpha
+            painter.uv_seam_painting = self.uv_seam_painting
             # Set brush paths based on mode
             brush_folder_path = None
             brush_texture_path = None
@@ -343,8 +362,25 @@ if PIL_AVAILABLE:
                     wm.progress_begin(0, total_brush)
                 wm.progress_update(brush_applied)
             
+            # Resolve UV seam painting parameters
+            seam_obj = None
+            seam_uv_name = None
+            if self.uv_seam_painting and context.active_object and context.active_object.type == 'MESH':
+                seam_obj = context.active_object
+                seam_uv_name = self.uv_map_name
+                if not seam_uv_name and seam_obj.data.uv_layers.active:
+                    seam_uv_name = seam_obj.data.uv_layers.active.name
+            
             image = image.copy()
-            new_image = painter.apply_brush_painting(image, brush_folder_path=brush_folder_path, brush_texture_path=brush_texture_path, custom_image_gradient=custom_image_gradient, brush_callback=callback)
+            new_image = painter.apply_brush_painting(
+                image,
+                brush_folder_path=brush_folder_path,
+                brush_texture_path=brush_texture_path,
+                custom_image_gradient=custom_image_gradient,
+                brush_callback=callback,
+                obj=seam_obj,
+                uv_layer_name=seam_uv_name
+            )
             
             wm.progress_end()
             if ps_ctx.active_channel.use_bake_image:
@@ -385,9 +421,16 @@ if PIL_AVAILABLE:
             col.prop(self, "use_random_seed")
             if self.use_random_seed:
                 col.prop(self, "random_seed")
+            col.prop(self, "preserve_alpha")
             col.prop(self, "custom_image_gradient")
             if self.custom_image_gradient:
                 col.prop_search(self, "custom_image_name", bpy.data, "images", text="Image")
+            col.prop(self, "uv_seam_painting")
+            if self.uv_seam_painting:
+                if context.active_object and context.active_object.type == 'MESH':
+                    col.prop_search(self, "uv_map_name", context.active_object.data, "uv_layers", text="UV Map")
+                else:
+                    col.label(text="No active mesh object", icon='ERROR')
             box = layout.box()
             col = box.column()
             row = col.row()
