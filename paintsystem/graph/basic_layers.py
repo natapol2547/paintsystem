@@ -552,7 +552,7 @@ class PSNodeTreeBuilder:
             for mask in layer.layer_masks:
                 if not mask.uid:
                     mask.uid = str(uuid.uuid4())
-                if mask.type not in {'IMAGE', 'TEXTURE'}:
+                if mask.type != 'IMAGE':
                     mask.type = 'IMAGE'
                 if not mask.node_tree:
                     mask.node_tree = bpy.data.node_groups.new(
@@ -626,8 +626,6 @@ class PSNodeTreeBuilder:
         
         match layer_mask.type:
             case "IMAGE":
-                if layer_mask.mask_image:
-                    layer_mask.mask_image.name = layer_mask.name
                 img = layer_mask.mask_image
                 create_mask_mixing_graph(builder, layer_mask, "source", "Color")
                 builder.add_node("source", "ShaderNodeTexImage", {"image.force": img, "interpolation": "Closest", "name": "source"})
@@ -699,14 +697,6 @@ class PSNodeTreeBuilder:
                 builder.link("hue_multiply_add", "hue_saturation_value", "Value", "Hue")
                 builder.link("saturation_multiply_add", "hue_saturation_value", "Value", "Saturation")
                 builder.link("value_multiply_add", "hue_saturation_value", "Value", "Value")
-                return builder
-
-            case "TEXTURE":
-                color_socket = "Color"
-                texture_type = get_texture_identifier(layer_mask.texture_type)
-                create_mask_mixing_graph(builder, layer_mask, "source", color_socket)
-                builder.add_node("source", texture_type, {"name": "source"})
-                builder.create_coord_graph('source', 'Vector')
                 return builder
 
             case _:

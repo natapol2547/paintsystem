@@ -111,7 +111,6 @@ LAYER_TYPE_ENUM = [
 
 MASK_TYPE_ENUM = [
     ('IMAGE', "Image", "Image layer"),
-    ('TEXTURE', "Texture", "Texture layer"),
 ]
 
 CHANNEL_TYPE_ENUM = [
@@ -1268,6 +1267,8 @@ class Layer(BaseNestedListItem):
     )
     def set_projection_view(self, context: Context):
         ps_ctx = parse_context(context)
+        if not context or not getattr(context, "area", None) or not context.area.spaces:
+            return
         active_space = context.area.spaces.active
         if active_space.type == 'VIEW_3D':
             region_3d = active_space.region_3d
@@ -1749,7 +1750,7 @@ class Layer(BaseNestedListItem):
         layer_mask = self.layer_masks.add()
         layer_mask.name = layer_mask_name
         layer_mask.layer_name = layer_mask_name
-        layer_mask.type = layer_mask_type if layer_mask_type in {'IMAGE', 'TEXTURE'} else 'IMAGE'
+        layer_mask.type = 'IMAGE'
         if not is_valid_uuidv4(layer_mask.uid):
             layer_mask.uid = str(uuid.uuid4())
         if not layer_mask.node_tree:
@@ -1759,7 +1760,7 @@ class Layer(BaseNestedListItem):
             )
         for key, value in kwargs.items():
             setattr(layer_mask, key, value)
-        if layer_mask.type not in {'IMAGE', 'TEXTURE'}:
+        if layer_mask.type != 'IMAGE':
             layer_mask.type = 'IMAGE'
         if layer_mask.uid:
             layer_mask.node_tree.name = f"PS Mask {layer_mask_name} ({layer_mask.uid[:8]})"

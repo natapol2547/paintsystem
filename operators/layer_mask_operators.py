@@ -1,4 +1,5 @@
 import bpy
+import os
 from array import array
 from bpy.props import (
     StringProperty, IntProperty, EnumProperty,
@@ -16,8 +17,6 @@ from ..paintsystem.data import (
     ACTION_TYPE_ENUM,
     ADJUSTMENT_TYPE_ENUM,
     ATTRIBUTE_TYPE_ENUM,
-    MASK_TYPE_ENUM,
-    TEXTURE_TYPE_ENUM,
     GRADIENT_TYPE_ENUM,
     GEOMETRY_TYPE_ENUM,
     add_empty_to_collection,
@@ -31,7 +30,6 @@ from .common import (
     PSContextMixin,
     scale_content,
     get_icon_from_socket_type,
-    MultiMaterialOperator,
     PSUVOptionsMixin,
     PSImageCreateMixin
     )
@@ -48,13 +46,65 @@ class PAINTSYSTEM_OT_NewImageMask(PAINTSYSTEM_OT_NewImage):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        return ps_ctx.active_layer is not None
+        active_layer = ps_ctx.active_layer
+        return active_layer is not None and len(active_layer.layer_masks) == 0
+
+    @staticmethod
+    def _sanitize_name_part(value: str) -> str:
+        return str(value).replace("/", "_").replace("\\", "_").strip() or "Unnamed"
+
+    @classmethod
+    def _normalized_layer_name_part(cls, active_layer, material_name: str) -> str:
+        raw_layer_name = (
+            getattr(active_layer, "display_name", "")
+            or getattr(active_layer, "layer_name", "")
+            or getattr(active_layer, "name", "Layer")
+        )
+        cleaned_layer_name = cls._sanitize_name_part(raw_layer_name)
+        cleaned_layer_name = os.path.splitext(cleaned_layer_name)[0] or "Layer"
+
+        material_stem = os.path.splitext(material_name)[0].strip().lower()
+        layer_stem = cleaned_layer_name.strip().lower()
+        if material_stem and layer_stem.startswith(material_stem + "_"):
+            cleaned_layer_name = cleaned_layer_name[len(material_name) + 1:]
+        elif material_stem and layer_stem.startswith(material_stem + " "):
+            cleaned_layer_name = cleaned_layer_name[len(material_name) + 1:]
+
+        cleaned_layer_name = cleaned_layer_name.strip(" _-") or "Layer"
+        return cleaned_layer_name
+
+    @classmethod
+    def build_mask_image_name(cls, context) -> str:
+        ps_ctx = cls.parse_context(context)
+        material_name = cls._sanitize_name_part(ps_ctx.active_material.name if ps_ctx.active_material else "Material")
+        active_layer = ps_ctx.active_layer
+        layer_name = cls._normalized_layer_name_part(active_layer, material_name)
+
+        if layer_name.lower() == material_name.lower():
+            base_name = f"{material_name}_mask.png"
+        else:
+            base_name = f"{material_name}_{layer_name}_mask.png"
+
+        if base_name not in bpy.data.images:
+            return base_name
+        stem, ext = os.path.splitext(base_name)
+        index = 1
+        while True:
+            candidate = f"{stem}_{index:03d}{ext}"
+            if candidate not in bpy.data.images:
+                return candidate
+            index += 1
     
     def get_next_image_name(self, context):
-        """Get the next image name from the active channel"""
-        ps_ctx = self.parse_context(context)
-        if ps_ctx.active_channel:
-            return get_next_unique_name("Image Mask", [layer_mask.layer_name for layer_mask in ps_ctx.active_layer.layer_masks])
+        return self.build_mask_image_name(context)
+
+    @classmethod
+    def build_mask_name(cls, context) -> str:
+        ps_ctx = cls.parse_context(context)
+        active_layer = ps_ctx.active_layer
+        if not active_layer:
+            return "Mask"
+        return get_next_unique_name("Mask", [layer_mask.layer_name for layer_mask in active_layer.layer_masks])
 
     def _configure_mask_image(self, img: bpy.types.Image, fill_white: bool = False):
         if not img:
@@ -101,6 +151,10 @@ class PAINTSYSTEM_OT_NewImageMask(PAINTSYSTEM_OT_NewImage):
     def process_material(self, context):
         self.store_coord_type(context)
         ps_ctx = self.parse_context(context)
+        active_layer = ps_ctx.active_layer
+        if active_layer and len(active_layer.layer_masks) > 0:
+            self.report({'WARNING'}, "Only one mask is supported per layer")
+            return {'CANCELLED'}
         if self.image_add_type == 'NEW':
             img = self.create_image(context)
             self._configure_mask_image(img, fill_white=True)
@@ -121,11 +175,11 @@ class PAINTSYSTEM_OT_NewImageMask(PAINTSYSTEM_OT_NewImage):
                 self.report({'ERROR'}, "Image not found")
                 return False
             self._configure_mask_image(img)
-        active_layer = ps_ctx.active_layer
         active_layer.use_masks = True
+        mask_name = self.build_mask_name(context)
         ps_ctx.active_layer.create_layer_mask(
             context,
-            self.image_name,
+            mask_name,
             'IMAGE',
             mask_image=img,
             coord_type=self.coord_type,
@@ -163,52 +217,32 @@ class PAINTSYSTEM_OT_DeleteLayerMask(PSContextMixin, Operator):
         return {'FINISHED'}
 
 
-class PAINTSYSTEM_OT_NewTextureMask(PSContextMixin, MultiMaterialOperator):
-    """Create a new procedural texture mask"""
-    bl_idname = "paint_system.new_texture_mask"
-    bl_label = "New Texture Mask"
+class PAINTSYSTEM_OT_NewImageMaskAuto(PAINTSYSTEM_OT_NewImageMask):
+    """Create a new image mask using current layer size without opening a dialog"""
+    bl_idname = "paint_system.new_image_mask_auto"
+    bl_label = "Add Mask"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Create a new procedural texture mask"
-
-    texture_type: EnumProperty(
-        items=TEXTURE_TYPE_ENUM,
-        name="Texture Type",
-        description="Texture type for the new mask",
-        default='TEX_NOISE',
-    )
-
-    @classmethod
-    def poll(cls, context):
-        ps_ctx = cls.parse_context(context)
-        return ps_ctx.active_layer is not None
+    bl_description = "Create a new image mask from current layer size"
 
     def invoke(self, context, event):
-        return context.window_manager.invoke_props_dialog(self)
-
-    def draw(self, context):
-        layout = self.layout
-        self.multiple_objects_ui(layout, context)
-        layout.prop(self, "texture_type")
-
-    def process_material(self, context):
         ps_ctx = self.parse_context(context)
         active_layer = ps_ctx.active_layer
-        mask_name = get_next_unique_name("Texture Mask", [layer_mask.layer_name for layer_mask in active_layer.layer_masks])
+        self.image_add_type = 'NEW'
+        self.image_name = self.build_mask_image_name(context)
+        self.get_coord_type(context)
 
-        active_layer.use_masks = True
-        active_layer.create_layer_mask(
-            context,
-            mask_name,
-            'TEXTURE',
-            texture_type=self.texture_type,
-            coord_type=active_layer.coord_type,
-            mask_uv_map=getattr(active_layer, "uv_map_name", ""),
-            enabled=True,
-        )
-        active_layer.active_layer_mask_index = max(0, len(active_layer.layer_masks) - 1)
-        active_layer.edit_mask = False
-        update_active_image(context=context)
-        return {'FINISHED'}
+        image_width = 2048
+        image_height = 2048
+        if active_layer and active_layer.image:
+            width, height = active_layer.image.size
+            if width > 0 and height > 0:
+                image_width = int(width)
+                image_height = int(height)
+
+        self.image_resolution = 'CUSTOM'
+        self.image_width = max(1, image_width)
+        self.image_height = max(1, image_height)
+        return self.execute(context)
 
 
 class PAINTSYSTEM_OT_EditLayerMask(PSContextMixin, Operator):
@@ -270,8 +304,8 @@ class PAINTSYSTEM_OT_FinishEditLayerMask(PSContextMixin, Operator):
 
 classes = (
     PAINTSYSTEM_OT_NewImageMask,
+    PAINTSYSTEM_OT_NewImageMaskAuto,
     PAINTSYSTEM_OT_DeleteLayerMask,
-    PAINTSYSTEM_OT_NewTextureMask,
     PAINTSYSTEM_OT_EditLayerMask,
     PAINTSYSTEM_OT_FinishEditLayerMask,
 )
