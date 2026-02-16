@@ -1,6 +1,6 @@
 import bpy
 
-from .versioning import get_layer_parent_map, migrate_global_layer_data, migrate_blend_mode, migrate_source_node, migrate_socket_names, update_layer_name, update_layer_version, update_library_nodetree_version
+from .versioning import get_layer_parent_map, migrate_global_layer_data, migrate_blend_mode, migrate_source_node, migrate_socket_names, migrate_texture_masks_to_image, update_layer_name, update_layer_version, update_library_nodetree_version
 from .version_check import get_latest_version
 from .context import parse_context
 from .data import sort_actions, get_all_layers, is_valid_uuidv4, iter_all_layers, update_material_name
@@ -62,10 +62,13 @@ def frame_change_pre(scene: bpy.types.Scene):
             layer.enabled = enabled
 
 
-def load_paint_system_data():
+def load_paint_system_data(scene: bpy.types.Scene = None):
     print(f"Loading Paint System data...")
     start_time = time.time()
-    ps_scene_data = get_ps_scene_data(bpy.context.scene)
+    scene = scene or bpy.context.scene
+    if not scene:
+        return
+    ps_scene_data = get_ps_scene_data(scene)
     if not ps_scene_data:
         return
     
@@ -89,6 +92,7 @@ def load_paint_system_data():
     migrate_blend_mode(layer_parent_map)
     migrate_source_node(layer_parent_map)
     migrate_socket_names(layer_parent_map)
+    migrate_texture_masks_to_image(layer_parent_map)
     update_layer_version(layer_parent_map)
     update_layer_name(layer_parent_map)
     update_library_nodetree_version()
@@ -105,11 +109,14 @@ def load_paint_system_data():
 
 @bpy.app.handlers.persistent
 def load_post(scene):
-    ps_scene_data = get_ps_scene_data(bpy.context.scene)
+    scene = scene or bpy.context.scene
+    if not scene:
+        return
+    ps_scene_data = get_ps_scene_data(scene)
     if not ps_scene_data:
         return
     ensure_color_history_palette(ps_scene_data)
-    load_paint_system_data()
+    load_paint_system_data(scene)
     get_latest_version()
 
 @bpy.app.handlers.persistent
@@ -366,7 +373,14 @@ def material_name_update_handler(scene: bpy.types.Scene, depsgraph: bpy.types.De
 
 # --- On Addon Enable ---
 def on_addon_enable():
-    load_post(bpy.context.scene)
+    context = bpy.context
+    window = getattr(context, "window", None)
+    screen = getattr(window, "screen", None) if window else None
+    scene = getattr(context, "scene", None)
+    if not scene or not window or not screen or not getattr(screen, "areas", None):
+        return 0.25
+
+    load_post(scene)
     get_latest_version()
     try:
         for material in bpy.data.materials:
@@ -375,6 +389,8 @@ def on_addon_enable():
                     material.ps_mat_data.last_material_name = material.name
     except Exception:
         pass
+
+    return None
 
 
 owner = object()
