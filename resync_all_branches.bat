@@ -1,52 +1,77 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal EnableExtensions EnableDelayedExpansion
 
 cd /d c:\Users\pinkn\Documents\PinkSystem1\paintsystem
+if errorlevel 1 (
+	echo Failed to enter repository directory.
+	exit /b 1
+)
 
 echo Fetching latest from remote...
 git fetch origin
+if errorlevel 1 (
+	echo Fetch failed.
+	exit /b 1
+)
 
-REM Sync Remove-Auto-Uv
-echo.
-echo Syncing Remove-Auto-Uv...
-git checkout Remove-Auto-Uv
-git rebase origin/pink-system
-git push origin Remove-Auto-Uv --force-with-lease
-echo Remove-Auto-Uv synced!
+git diff --quiet
+if errorlevel 1 (
+	echo Working tree has uncommitted changes. Commit or stash first.
+	exit /b 1
+)
 
-REM Sync quick-tools-
-echo.
-echo Syncing quick-tools-...
-git checkout quick-tools-
-git rebase origin/pink-system
-git push origin quick-tools- --force-with-lease
-echo quick-tools- synced!
+git diff --cached --quiet
+if errorlevel 1 (
+	echo Index has staged changes. Commit or stash first.
+	exit /b 1
+)
 
-REM Sync Convert-to-PS
-echo.
-echo Syncing Convert-to-PS...
-git checkout Convert-to-PS
-git rebase origin/pink-system
-git push origin Convert-to-PS --force-with-lease
-echo Convert-to-PS synced!
+call :sync_branch Remove-Auto-Uv
+if errorlevel 1 exit /b 1
 
-REM Sync Naming
-echo.
-echo Syncing Naming...
-git checkout Naming
-git rebase origin/pink-system -X theirs
-git push origin Naming --force-with-lease
-echo Naming synced!
+call :sync_branch quick-tools-
+if errorlevel 1 exit /b 1
 
-REM Sync feature/uv-edit
-echo.
-echo Syncing feature/uv-edit...
-git checkout feature/uv-edit
-git rebase origin/pink-system
-git push origin feature/uv-edit --force-with-lease
-echo feature/uv-edit synced!
+call :sync_branch Convert-to-PS
+if errorlevel 1 exit /b 1
+
+call :sync_branch Naming
+if errorlevel 1 exit /b 1
+
+call :sync_branch feature/uv-edit
+if errorlevel 1 exit /b 1
 
 echo.
 echo ============================================
 echo All branches re-synced with pink-system!
 echo ============================================
+exit /b 0
+
+:sync_branch
+set "TARGET_BRANCH=%~1"
+echo.
+echo Syncing !TARGET_BRANCH!...
+
+git rebase --abort 2>nul
+
+git checkout !TARGET_BRANCH!
+if errorlevel 1 (
+	echo Failed to checkout !TARGET_BRANCH!.
+	exit /b 1
+)
+
+git rebase origin/pink-system
+if errorlevel 1 (
+	echo Rebase failed on !TARGET_BRANCH!. Aborting.
+	git rebase --abort 2>nul
+	exit /b 1
+)
+
+git push origin !TARGET_BRANCH! --force-with-lease
+if errorlevel 1 (
+	echo Push failed on !TARGET_BRANCH!.
+	exit /b 1
+)
+
+echo !TARGET_BRANCH! synced!
+exit /b 0

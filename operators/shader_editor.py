@@ -18,7 +18,8 @@ class PAINTSYSTEM_OT_InspectLayerNodeTree(PSContextMixin, Operator):
     
     @classmethod
     def poll(cls, context):
-        return context.space_data.type == 'NODE_EDITOR'
+        space_data = getattr(context, "space_data", None)
+        return bool(space_data and space_data.type == 'NODE_EDITOR')
     
     def execute(self, context):
         ps_ctx = self.parse_context(context)
