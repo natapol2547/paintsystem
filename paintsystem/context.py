@@ -29,7 +29,9 @@ class PSContext:
 
 def get_legacy_global_layer(layer: "Layer") -> "GlobalLayer" | None:
     """Get the global layer data from the context."""
-    if not layer or not bpy.context.scene or not bpy.context.scene.ps_scene_data:
+    if not layer or not bpy.context.scene or not hasattr(bpy.context.scene, "ps_scene_data"):
+        return None
+    if not bpy.context.scene.ps_scene_data:
         return None
     return bpy.context.scene.ps_scene_data.layers.get(layer.ref_layer_id, None)
 
@@ -81,7 +83,8 @@ def parse_context(context: bpy.types.Context) -> PSContext:
         raise TypeError("context must be of type bpy.types.Context")
     
     ps_settings = get_preferences(context)
-    ps_scene_data = context.scene.ps_scene_data
+    scene = getattr(context, "scene", None)
+    ps_scene_data = getattr(scene, "ps_scene_data", None) if scene else None
     obj = context.active_object if hasattr(context, 'active_object') else None
     ps_object = get_ps_object(obj)
     

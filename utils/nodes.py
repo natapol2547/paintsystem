@@ -245,4 +245,7 @@ def find_socket_on_node(node: Node, name: str, in_out: str = 'INPUT', properties
     return None
 
 def is_in_nodetree(context: Context) -> bool:
-    return context.space_data.type == 'NODE_EDITOR' and len(context.space_data.path) > 1
+    space_data = getattr(context, "space_data", None)
+    if not space_data:
+        return False
+    return space_data.type == 'NODE_EDITOR' and len(space_data.path) > 1

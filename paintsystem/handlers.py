@@ -380,6 +380,26 @@ def on_addon_enable():
     window = getattr(context, "window", None)
     screen = getattr(window, "screen", None) if window else None
     scene = getattr(context, "scene", None)
+
+    if screen and getattr(screen, "areas", None):
+        try:
+            for area in screen.areas:
+                if area.type != 'IMAGE_EDITOR':
+                    continue
+                for space in area.spaces:
+                    if space.type != 'IMAGE_EDITOR' or not hasattr(space, "ui_mode"):
+                        continue
+                    ui_mode_prop = space.bl_rna.properties.get("ui_mode")
+                    ui_mode_items = [item.identifier for item in ui_mode_prop.enum_items] if ui_mode_prop else []
+                    if not ui_mode_items:
+                        continue
+                    if 'VIEW' in ui_mode_items:
+                        space.ui_mode = 'VIEW'
+                    else:
+                        space.ui_mode = ui_mode_items[0]
+        except Exception:
+            pass
+
     if not scene or not window or not screen or not getattr(screen, "areas", None):
         return 0.25
 

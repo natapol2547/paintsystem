@@ -102,6 +102,19 @@ def migrate_socket_names(layer_parent_map: dict[Layer, LayerParent]):
             layer.auto_update_node_tree = True
             layer.update_node_tree(bpy.context)
 
+def migrate_texture_masks_to_image(layer_parent_map: dict[Layer, LayerParent]):
+    for layer, layer_parent in layer_parent_map.items():
+        if not hasattr(layer, "layer_masks"):
+            continue
+        has_migrated_mask = False
+        for layer_mask in layer.layer_masks:
+            if layer_mask.type == 'TEXTURE':
+                print(f"Migrating texture mask {layer_mask.name} on layer {layer.name} to image mask")
+                layer_mask.type = 'IMAGE'
+                has_migrated_mask = True
+        if has_migrated_mask:
+            layer.update_node_tree(bpy.context)
+
 def update_layer_version(layer_parent_map: dict[Layer, LayerParent]):
     for layer, layer_parent in layer_parent_map.items():
         # Updating layer to the target version

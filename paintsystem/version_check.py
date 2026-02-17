@@ -176,7 +176,6 @@ def get_latest_version() -> Optional[str]:
     import addon_utils
     from ..preferences import addon_package
     module_name = addon_package()
-    ps_ctx = parse_context(bpy.context)
     if not is_newer_than(4, 2):
         return None
     
@@ -186,6 +185,8 @@ def get_latest_version() -> Optional[str]:
     is_extension = addon_utils.check_extension(module_name)
     if not is_extension:
         return None
+
+    ps_ctx = parse_context(bpy.context)
     
     if ps_ctx.ps_settings is None:
         return None
