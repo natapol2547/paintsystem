@@ -7,7 +7,7 @@ from ..utils.version import is_newer_than
 # --
 from ..paintsystem.data import Channel, Layer
 from ..paintsystem.context import PSContextMixin
-from ..custom_icons import get_icon, get_icon_from_socket_type
+from ..custom_icons import get_icon, get_icon_from_socket_type, icon_parser
 from ..preferences import get_preferences
 from ..utils.nodes import find_node, get_material_output, traverse_connected_nodes
 
@@ -18,13 +18,6 @@ def scale_content(context, layout, scale_x=1.2, scale_y=1.2):
         layout.scale_x = scale_x
         layout.scale_y = scale_y
     return layout
-
-icons = bpy.types.UILayout.bl_rna.functions["prop"].parameters["icon"].enum_items.keys()
-
-def icon_parser(icon: str, default="NONE") -> str:
-    if icon in icons:
-        return icon
-    return default
 
 
 def is_uv_edit_active(context) -> bool:
@@ -480,6 +473,129 @@ def is_image_painted(image: Image | ImagePreview | None) -> bool:
         pixels = np.zeros(len(image.image_pixels_float), dtype=np.float32)
         image.image_pixels_float.foreach_get(pixels)
         return len(pixels) > 0 and any(pixels)
+
+def draw_enum_operator_menu(layout: bpy.types.UILayout, enum_items, operator_id: str, type_attr: str, first_icon: str, skip_types=None):
+    """Draw a menu of operators from an enum, giving the first item a distinctive icon.
+
+    Args:
+        layout: The UILayout to draw into.
+        enum_items: Iterable of (identifier, name, description) tuples.
+        operator_id: The bl_idname of the operator to invoke.
+        type_attr: The operator property name to set (e.g. 'gradient_type').
+        first_icon: Icon string for the first item; others get 'NONE'.
+        skip_types: Optional set of identifiers to skip.
+    """
+    for idx, (identifier, name, description) in enumerate(enum_items):
+        if skip_types and identifier in skip_types:
+            continue
+        op = layout.operator(operator_id, text=name, icon=first_icon if idx == 0 else 'NONE')
+        setattr(op, type_attr, identifier)
+
+
+def draw_socket_grid(layout: bpy.types.UILayout, layer, include_inputs: bool = True):
+    """Draw the Color/Alpha output (and optionally input) socket name grid.
+
+    Args:
+        layout: The UILayout to draw into.
+        layer: The active layer whose socket properties are drawn.
+        include_inputs: Whether to also draw Color/Alpha Input rows.
+    """
+    output_box = layout.box()
+    grid = output_box.grid_flow(columns=2, align=True, even_columns=True, row_major=True)
+    grid_col = grid.column()
+    grid_col.label(text="Color Output")
+    grid_col.prop(layer, "color_output_name", text="")
+    grid_col = grid.column()
+    grid_col.label(text="Alpha Output")
+    grid_col.prop(layer, "alpha_output_name", text="")
+    if include_inputs:
+        input_box = layout.box()
+        grid = input_box.grid_flow(columns=2, align=True, even_columns=True, row_major=True)
+        grid_col = grid.column()
+        grid_col.label(text="Color Input")
+        grid_col.prop(layer, "color_input_name", text="")
+        grid_col = grid.column()
+        grid_col.label(text="Alpha Input")
+        grid_col.prop(layer, "alpha_input_name", text="")
+
+
+def ensure_invoke_context(layout: bpy.types.UILayout):
+    """Ensure the layout uses INVOKE_REGION_WIN operator context.
+
+    Menus opened via search may default to EXEC_REGION_WIN which skips
+    invoke(); this helper normalises that.
+    """
+    if layout.operator_context == 'EXEC_REGION_WIN':
+        layout.operator_context = 'INVOKE_REGION_WIN'
+    layout.operator_context = 'INVOKE_REGION_WIN'
+
+
+def get_settings_box(layout: bpy.types.UILayout, use_legacy_ui: bool, existing_box=None):
+    """Return a box container for layer-type settings.
+
+    In legacy UI the caller already has a ``box`` from the outer layout;
+    in the modern UI a new nested box is created.
+
+    Args:
+        layout: Parent layout (used when a new box is needed).
+        use_legacy_ui: Whether the legacy UI mode is active.
+        existing_box: A pre-existing box to reuse in legacy mode.
+
+    Returns:
+        A UILayout suitable for drawing layer-type settings.
+    """
+    if not use_legacy_ui:
+        return layout.box()
+    return existing_box if existing_box is not None else layout
+
+
+def draw_layer_sidebar(col: bpy.types.UILayout, use_legacy_ui: bool):
+    """Draw the Add / Delete / Move sidebar buttons next to the layer list.
+
+    Args:
+        col: A column layout to draw the buttons in.
+        use_legacy_ui: Switches between legacy and modern button sets.
+    """
+    col.scale_x = 1.2
+    col.operator("wm.call_menu", text="", icon_value=get_icon('layer_add')).name = "MAT_MT_AddLayerMenu"
+    if not use_legacy_ui:
+        col.operator("paint_system.new_folder_layer",
+                     icon_value=get_icon('folder'), text="")
+    col.menu("MAT_MT_LayerMenu",
+            text="", icon='DOWNARROW_HLT')
+    if use_legacy_ui:
+        col.separator()
+    else:
+        line_separator(col)
+    col.operator("paint_system.delete_item",
+                    text="", icon_value=get_icon('trash'))
+    if use_legacy_ui:
+        col.separator()
+    else:
+        line_separator(col)
+    col.operator("paint_system.move_up", icon="TRIA_UP", text="")
+    col.operator("paint_system.move_down", icon="TRIA_DOWN", text="")
+
+
+def draw_warning_box(layout: bpy.types.UILayout, lines):
+    """Draw an alert box with one or more warning lines.
+
+    Args:
+        layout: The parent UILayout.
+        lines: Iterable of ``(text, icon)`` tuples.  The first line
+            typically uses ``'ERROR'``; subsequent lines often use
+            ``'BLANK1'`` for indentation.
+
+    Returns:
+        The column layout inside the warning box (for appending extra widgets).
+    """
+    warning_box = layout.box()
+    warning_box.alert = True
+    warning_col = warning_box.column(align=True)
+    for text, icon in lines:
+        warning_col.label(text=text, icon=icon)
+    return warning_col
+
 
 def draw_layer_icon(layer: "Layer", layout: bpy.types.UILayout):
     match layer.type:

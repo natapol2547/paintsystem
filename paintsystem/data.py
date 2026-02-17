@@ -94,6 +94,26 @@ LAYER_TYPE_ENUM = [
     ('BLANK', "Blank", "Blank layer"),
 ]
 
+
+def _safe_set_id_name(id_block, new_name: str) -> bool:
+    if not id_block or not new_name:
+        return False
+    try:
+        current_name = getattr(id_block, "name", None)
+        if current_name == new_name:
+            return True
+    except Exception:
+        pass
+    if getattr(id_block, "library", None) is not None:
+        return False
+    if getattr(id_block, "is_embedded_data", False):
+        return False
+    try:
+        id_block.name = new_name
+        return True
+    except Exception:
+        return False
+
 MASK_TYPE_ENUM = [
     ('IMAGE', "Image", "Image layer"),
 ]
@@ -975,8 +995,8 @@ class Layer(BaseNestedListItem):
             ensure_sockets(node_tree, expected_input, "INPUT")
             ensure_sockets(node_tree, expected_output, "OUTPUT")
         
-        if self.layer_name:
-            self.node_tree.name = f"PS {self.layer_name} ({self.uid[:8]})"
+        if self.layer_name and self.node_tree:
+            _safe_set_id_name(self.node_tree, f"PS {self.layer_name} ({self.uid[:8]})")
 
         # Generate UUID if it doesn't exist or is invalid
         if not is_valid_uuidv4(self.uid):
@@ -1674,8 +1694,8 @@ class Layer(BaseNestedListItem):
             setattr(layer_mask, key, value)
         if layer_mask.type != 'IMAGE':
             layer_mask.type = 'IMAGE'
-        if layer_mask.uid:
-            layer_mask.node_tree.name = f"PS Mask {layer_mask_name} ({layer_mask.uid[:8]})"
+        if layer_mask.uid and layer_mask.node_tree:
+            _safe_set_id_name(layer_mask.node_tree, f"PS Mask {layer_mask_name} ({layer_mask.uid[:8]})")
         self.update_node_tree(context)
         return layer_mask
     
@@ -1909,7 +1929,7 @@ class Channel(BaseNestedListManager):
             return
         _invalidate_material_layer_cache(parse_context(context).active_material)
         
-        self.node_tree.name = f"PS {self.name}"
+        _safe_set_id_name(self.node_tree, f"PS {self.name}")
         if len(self.node_tree.interface.items_tree) == 0:
             self.node_tree.interface.new_socket("Color", in_out="OUTPUT", socket_type="NodeSocketColor")
             self.node_tree.interface.new_socket("Alpha", in_out="OUTPUT", socket_type="NodeSocketFloat")
@@ -2094,7 +2114,7 @@ class Channel(BaseNestedListManager):
             return
         if not self.node_tree:
             return
-        self.node_tree.name = f".PS_Channel ({self.name})"
+        _safe_set_id_name(self.node_tree, f".PS_Channel ({self.name})")
         self.updating_name_flag = True
         parsed_context = parse_context(context)
         active_group = parsed_context.active_group
@@ -2642,10 +2662,7 @@ class Group(PropertyGroup):
             new_name = self.name if self.name == mat.name else f"{self.name} ({mat.name})"
         else:
             new_name = self.name
-        try:
-            node_tree.name = new_name
-        except AttributeError:
-            pass
+        _safe_set_id_name(node_tree, new_name)
         # node_tree.name = f"Paint System ({self.name})"
         if not isinstance(node_tree, bpy.types.NodeTree):
             return

@@ -453,6 +453,24 @@ class PAINTSYSTEM_OT_ToggleImageEditor(PSContextMixin, Operator):
     bl_description = "Toggle the image editor on/off"
 
     def execute(self, context):
+        def _set_space_image_mode(space, preferred: str = 'PAINT'):
+            if not space:
+                return
+            try:
+                ui_mode_prop = space.bl_rna.properties.get("ui_mode")
+                ui_mode_items = {item.identifier for item in ui_mode_prop.enum_items} if ui_mode_prop else set()
+                if not ui_mode_items:
+                    return
+                if preferred in ui_mode_items:
+                    space.ui_mode = preferred
+                    return
+                if 'VIEW' in ui_mode_items:
+                    space.ui_mode = 'VIEW'
+                    return
+                space.ui_mode = next(iter(ui_mode_items))
+            except Exception:
+                pass
+
         ps_ctx = self.parse_context(context)
         active_layer = ps_ctx.active_layer
         image = active_layer.image if active_layer else None
@@ -481,9 +499,9 @@ class PAINTSYSTEM_OT_ToggleImageEditor(PSContextMixin, Operator):
         if image_area:
             space = image_area.spaces[0]
             space.show_region_ui = True
+            _set_space_image_mode(space, preferred='PAINT')
             if image:
                 space.image = image
-                space.ui_mode = 'PAINT'
                 space.overlay.show_overlays = active_layer.coord_type in {'AUTO', 'UV'}
                 execute_operator_in_area(image_area, 'image.view_all', fit_view=True)
 

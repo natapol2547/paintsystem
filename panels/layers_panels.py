@@ -359,10 +359,11 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
         if is_uv_edit_active(context):
             return False
         if ps_ctx.ps_object.type == 'MESH':
+            if ps_ctx.active_channel is None:
+                return False
             if ps_ctx.active_channel.use_bake_image:
                 return False
-            active_layer = ps_ctx.active_layer
-            return active_layer is not None
+            return True
         elif ps_ctx.ps_object.type == 'GREASEPENCIL':
             grease_pencil = context.grease_pencil
             active_layer = grease_pencil.layers.active
@@ -394,7 +395,7 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
             if ps_ctx.ps_object.type == 'MESH' and layer and layer.type == 'IMAGE':
                 layout.operator("wm.call_menu", text="Filters", icon="IMAGE_DATA").name = "MAT_MT_ImageFilterMenu"
 
-        if ps_ctx.ps_object.type == 'MESH' and layer and layer.type == 'IMAGE':
+        if ps_ctx.ps_object.type == 'MESH' and layer:
             if not layer.layer_masks:
                 layout.operator("paint_system.new_image_mask_auto", text="Mask", icon='ADD')
             elif not is_layer_settings_open:
@@ -444,8 +445,16 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                 # box.prop(active_layer, "use_onion_skinning", text="Use Onion Skinning")
             
         elif ps_ctx.ps_object.type == 'MESH':
-            layout.enabled = not ps_ctx.active_layer.lock_layer
             active_layer = ps_ctx.active_layer
+            if not active_layer:
+                box = layout.box()
+                box.label(text="No layers in active channel yet", icon='INFO')
+                row = box.row(align=True)
+                row.operator("wm.call_menu", text="Add Layer", icon_value=get_icon('layer_add')).name = "MAT_MT_AddLayerMenu"
+                row.operator("paint_system.new_solid_color_layer", text="Solid Color", icon_value=get_icon('color_socket'))
+                return
+
+            layout.enabled = not active_layer.lock_layer
             if not active_layer:
                 return
                 # Settings
@@ -465,62 +474,65 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                 layer_settings_ui(box, context)
             else:
                 box = None
+
+            if active_layer.layer_masks:
+                box = get_settings_box(layout, ps_ctx.ps_settings.use_legacy_ui, box)
+                col = box.column()
+                mask_header, mask_panel = col.panel("image_layer_mask_panel", default_closed=not active_layer.use_masks)
+                mask_header.prop(active_layer, "use_masks", text="")
+                mask_header.label(text="Mask", icon='MOD_MASK')
+                if active_layer.edit_mask:
+                    finish_row = mask_header.row(align=True)
+                    finish_row.alert = True
+                    finish_row.operator("paint_system.finish_edit_layer_mask", text="Finish Edit", icon='CHECKMARK')
+                else:
+                    mask_header.operator("paint_system.edit_layer_mask", text="Edit Mask", icon='GREASEPENCIL')
+
+                if mask_panel and active_layer.use_masks:
+                    mask_box = mask_panel.box()
+
+                    active_mask = None
+                    if 0 <= active_layer.active_layer_mask_index < len(active_layer.layer_masks):
+                        active_mask = active_layer.layer_masks[active_layer.active_layer_mask_index]
+                    elif len(active_layer.layer_masks) > 0:
+                        active_mask = active_layer.layer_masks[0]
+
+                    if active_mask:
+                        mask_image_header, mask_image_panel = mask_box.panel("mask_image_settings_panel", default_closed=True)
+                        image_row = mask_image_header.row(align=True)
+                        if active_mask.mask_image:
+                            image_row.prop(active_mask, "mask_image", text="")
+                            image_row.operator("paint_system.export_image", text="", icon="EXPORT").image_name = active_mask.mask_image.name
+                            image_row.menu("MAT_MT_ImageMenu", text="", icon='COLLAPSEMENU')
+                        else:
+                            image_row.template_ID(active_mask, "mask_image", text="", new="image.new", open="image.open")
+
+                        if mask_image_panel and active_mask.mask_image:
+                            mask_image_node = None
+                            if active_layer.node_tree:
+                                mask_image_node = find_node(active_layer.node_tree, {
+                                    'bl_idname': 'ShaderNodeTexImage',
+                                    'name': 'ps_active_mask_source',
+                                })
+                            if mask_image_node:
+                                img = active_mask.mask_image
+                                mask_settings_col = mask_image_panel.column()
+                                mask_settings_col.use_property_split = True
+                                mask_settings_col.use_property_decorate = False
+                                if img:
+                                    mask_settings_col.label(text="UDIM tiles: " + ", ".join(str(t.number) for t in img.tiles), icon='UV')
+                                mask_settings_col.prop(mask_image_node, "interpolation", text="")
+                                mask_settings_col.prop(mask_image_node, "projection", text="")
+                                mask_settings_col.prop(mask_image_node, "extension", text="")
+                                if img:
+                                    mask_settings_col.prop(img, "source", text="")
+                                    mask_settings_col.prop(img.colorspace_settings, "name", text="Color Space")
+                                    mask_settings_col.prop(img, "alpha_mode", text="Alpha")
+
             match active_layer.type:
                 case 'IMAGE':
                     box = get_settings_box(layout, ps_ctx.ps_settings.use_legacy_ui, box)
                     col = box.column()
-                    if active_layer.layer_masks:
-                        mask_header, mask_panel = col.panel("image_layer_mask_panel", default_closed=not active_layer.use_masks)
-                        mask_header.prop(active_layer, "use_masks", text="")
-                        mask_header.label(text="Mask", icon='MOD_MASK')
-                        if active_layer.edit_mask:
-                            finish_row = mask_header.row(align=True)
-                            finish_row.alert = True
-                            finish_row.operator("paint_system.finish_edit_layer_mask", text="Finish Edit", icon='CHECKMARK')
-                        else:
-                            mask_header.operator("paint_system.edit_layer_mask", text="Edit Mask", icon='GREASEPENCIL')
-
-                        if mask_panel and active_layer.use_masks:
-                            mask_box = mask_panel.box()
-
-                            active_mask = None
-                            if 0 <= active_layer.active_layer_mask_index < len(active_layer.layer_masks):
-                                active_mask = active_layer.layer_masks[active_layer.active_layer_mask_index]
-                            elif len(active_layer.layer_masks) > 0:
-                                active_mask = active_layer.layer_masks[0]
-
-                            if active_mask:
-                                mask_image_header, mask_image_panel = mask_box.panel("mask_image_settings_panel", default_closed=True)
-                                image_row = mask_image_header.row(align=True)
-                                if active_mask.mask_image:
-                                    image_row.prop(active_mask, "mask_image", text="")
-                                    image_row.operator("paint_system.export_image", text="", icon="EXPORT").image_name = active_mask.mask_image.name
-                                    image_row.menu("MAT_MT_ImageMenu", text="", icon='COLLAPSEMENU')
-                                else:
-                                    image_row.template_ID(active_mask, "mask_image", text="", new="image.new", open="image.open")
-
-                                if mask_image_panel and active_mask.mask_image:
-                                    mask_image_node = None
-                                    if active_layer.node_tree:
-                                        mask_image_node = find_node(active_layer.node_tree, {
-                                            'bl_idname': 'ShaderNodeTexImage',
-                                            'name': 'ps_active_mask_source',
-                                        })
-                                    if mask_image_node:
-                                        img = active_mask.mask_image
-                                        mask_settings_col = mask_image_panel.column()
-                                        mask_settings_col.use_property_split = True
-                                        mask_settings_col.use_property_decorate = False
-                                        if img:
-                                            mask_settings_col.label(text="UDIM tiles: " + ", ".join(str(t.number) for t in img.tiles), icon='UV')
-                                        mask_settings_col.prop(mask_image_node, "interpolation", text="")
-                                        mask_settings_col.prop(mask_image_node, "projection", text="")
-                                        mask_settings_col.prop(mask_image_node, "extension", text="")
-                                        if img:
-                                            mask_settings_col.prop(img, "source", text="")
-                                            mask_settings_col.prop(img.colorspace_settings, "name", text="Color Space")
-                                            mask_settings_col.prop(img, "alpha_mode", text="Alpha")
-
                     row = col.row(align=True)
                     scale_content(context, row, 1.2, 1.2)
                     if not active_layer.external_image:

@@ -1,5 +1,5 @@
 import bpy
-from bpy.props import EnumProperty, StringProperty
+from bpy.props import BoolProperty, EnumProperty, StringProperty
 from bpy.types import Context, Operator
 from bpy.utils import register_classes_factory
 import os
@@ -181,8 +181,56 @@ class PAINTSYSTEM_OT_ProjectApply(PSContextMixin, Operator):
             set_rgb_to_zero_if_alpha_zero(external_image)
             external_image.update_tag()
 
-        with bpy.context.temp_override(**{'mode': 'IMAGE_PAINT'}):
-            bpy.ops.paint.project_image(image=external_image_name)
+        target_obj = ps_ctx.ps_object or context.active_object
+        if not target_obj or target_obj.type != 'MESH':
+            self.report({'ERROR'}, "Project Apply requires an active mesh object")
+            return {'CANCELLED'}
+
+        view_layer = context.view_layer
+        prev_active = view_layer.objects.active
+        prev_mode = getattr(target_obj, "mode", None)
+
+        try:
+            view_layer.objects.active = target_obj
+            try:
+                target_obj.select_set(True)
+            except Exception:
+                pass
+
+            if getattr(target_obj, "mode", None) != 'TEXTURE_PAINT':
+                try:
+                    bpy.ops.object.mode_set(mode='TEXTURE_PAINT')
+                except Exception:
+                    pass
+
+            try:
+                view_layer.update()
+            except Exception:
+                pass
+
+            override = {
+                'active_object': target_obj,
+                'object': target_obj,
+                'selected_objects': [target_obj],
+                'selected_editable_objects': [target_obj],
+            }
+            with context.temp_override(**override):
+                bpy.ops.paint.project_image(image=external_image_name)
+
+        except RuntimeError as ex:
+            self.report({'ERROR'}, str(ex))
+            return {'CANCELLED'}
+        finally:
+            try:
+                if prev_mode and getattr(target_obj, "mode", None) != prev_mode:
+                    bpy.ops.object.mode_set(mode=prev_mode)
+            except Exception:
+                pass
+            try:
+                if prev_active:
+                    view_layer.objects.active = prev_active
+            except Exception:
+                pass
 
         active_layer.external_image = None
 
@@ -376,6 +424,20 @@ class PAINTSYSTEM_OT_QuickEdit(PSContextMixin, Operator):
         default=""
     )
 
+    use_camera_view_size: BoolProperty(
+        name="Use Camera View Size",
+        description="Set screen grab size from scene render (camera) resolution",
+        default=False,
+    )
+
+    @staticmethod
+    def _get_camera_view_grab_size(context: Context) -> tuple[int, int]:
+        render = context.scene.render
+        scale = max(1, int(render.resolution_percentage)) / 100.0
+        width = max(1, int(round(render.resolution_x * scale)))
+        height = max(1, int(round(render.resolution_y * scale)))
+        return width, height
+
     def execute(self, context):
         # Set image editor path if a specific application is selected
         if self.external_application != "CUSTOM":
@@ -400,6 +462,9 @@ class PAINTSYSTEM_OT_QuickEdit(PSContextMixin, Operator):
         active_layer = ps_ctx.active_layer
         
         if self.edit_external_mode == 'VIEW_CAPTURE':
+            if self.use_camera_view_size:
+                image_paint = context.scene.tool_settings.image_paint
+                image_paint.screen_grab_size = self._get_camera_view_grab_size(context)
             active_layer.edit_external_mode = 'VIEW_CAPTURE'
             bpy.ops.paint_system.project_edit('INVOKE_DEFAULT')
             return {'FINISHED'}
@@ -525,9 +590,21 @@ class PAINTSYSTEM_OT_QuickEdit(PSContextMixin, Operator):
             row = box.row()
             row.prop(image_paint, "seam_bleed", text="Bleed")
             row.prop(image_paint, "dither", text="Dither")
+            row = box.row()
+            row.prop(self, "use_camera_view_size", text="Use Camera View Size", toggle=True)
             split = box.split()
             split.label(text="Screen Grab Size:")
-            split.prop(image_paint, "screen_grab_size", text="")
+            if self.use_camera_view_size:
+                size_row = split.row(align=True)
+                size_row.enabled = False
+                size_row.label(text=f"{self._get_camera_view_grab_size(context)[0]} px")
+                size_row.label(text=f"{self._get_camera_view_grab_size(context)[1]} px")
+                if context.scene.camera is None:
+                    warn_row = box.row()
+                    warn_row.alert = True
+                    warn_row.label(text="No active camera assigned. Using render resolution.", icon='ERROR')
+            else:
+                split.prop(image_paint, "screen_grab_size", text="")
         
             # Warning about closing editor
             box = layout.box()
