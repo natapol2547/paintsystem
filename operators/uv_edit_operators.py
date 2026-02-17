@@ -27,16 +27,42 @@ def _get_uv_editor_spaces(context: Context):
     return spaces
 
 
+def _set_space_uv_mode(space) -> None:
+    mode_set = False
+
+    if hasattr(space, "mode"):
+        try:
+            mode_prop = space.bl_rna.properties.get("mode")
+            mode_items = {item.identifier for item in mode_prop.enum_items} if mode_prop else set()
+            if "UV" in mode_items:
+                space.mode = 'UV'
+                mode_set = True
+        except Exception:
+            pass
+
+    if hasattr(space, "ui_mode"):
+        try:
+            ui_mode_prop = space.bl_rna.properties.get("ui_mode")
+            ui_mode_items = {item.identifier for item in ui_mode_prop.enum_items} if ui_mode_prop else set()
+            if "UV" in ui_mode_items:
+                space.ui_mode = 'UV'
+                mode_set = True
+            elif not mode_set and "VIEW" in ui_mode_items:
+                space.ui_mode = 'VIEW'
+        except Exception:
+            pass
+
+
 def _set_uv_editor_image(context: Context, image: bpy.types.Image | None) -> None:
     for space in _get_uv_editor_spaces(context):
         space.image = image
-        space.ui_mode = 'UV'
+        _set_space_uv_mode(space)
 
 
 def _clear_uv_editor_image(context: Context) -> None:
     for space in _get_uv_editor_spaces(context):
         space.image = None
-        space.ui_mode = 'UV'
+        _set_space_uv_mode(space)
         if hasattr(space, "use_image_pin"):
             space.use_image_pin = False
 
