@@ -29,7 +29,6 @@ from bpy.types import (
     PropertyGroup,
     Material,
 )
-from bpy.utils import register_classes_factory
 from bpy_extras.node_utils import connect_sockets
 from typing import Optional
 from mathutils import Color, Euler, Vector
@@ -3978,26 +3977,59 @@ classes = (
     LegacyPaintSystemGroups,
     )
 
-_register, _unregister = register_classes_factory(classes)
+def _get_registered_class_by_name(class_name: str):
+    cls = getattr(bpy.types, class_name, None)
+    if cls is not None and hasattr(cls, "bl_rna"):
+        return cls
+    return None
+
+
+def _safe_unregister_class(cls) -> None:
+    try:
+        bpy.utils.unregister_class(cls)
+    except Exception:
+        pass
+
 
 def register():
     """Register the Paint System data module."""
-    _register()
+    for cls in classes:
+        registered_cls = _get_registered_class_by_name(cls.__name__)
+        if registered_cls is not None:
+            _safe_unregister_class(registered_cls)
+        bpy.utils.register_class(cls)
+
+    if hasattr(bpy.types.Scene, "ps_scene_data"):
+        del bpy.types.Scene.ps_scene_data
     bpy.types.Scene.ps_scene_data = PointerProperty(
         type=PaintSystemGlobalData,
         name="Paint System Data",
         description="Data for the Paint System"
     )
+
+    if hasattr(bpy.types.Material, "ps_mat_data"):
+        del bpy.types.Material.ps_mat_data
     bpy.types.Material.ps_mat_data = PointerProperty(
         type=MaterialData,
         name="Paint System Material Data",
         description="Material Data for the Paint System"
     )
+
+    if hasattr(bpy.types.Material, "paint_system"):
+        del bpy.types.Material.paint_system
     bpy.types.Material.paint_system = PointerProperty(type=LegacyPaintSystemGroups)
-    
+
+
 def unregister():
     """Unregister the Paint System data module."""
-    del bpy.types.Material.paint_system
-    del bpy.types.Material.ps_mat_data
-    del bpy.types.Scene.ps_scene_data
-    _unregister()
+    if hasattr(bpy.types.Material, "paint_system"):
+        del bpy.types.Material.paint_system
+    if hasattr(bpy.types.Material, "ps_mat_data"):
+        del bpy.types.Material.ps_mat_data
+    if hasattr(bpy.types.Scene, "ps_scene_data"):
+        del bpy.types.Scene.ps_scene_data
+
+    for cls in reversed(classes):
+        registered_cls = _get_registered_class_by_name(cls.__name__)
+        if registered_cls is not None:
+            _safe_unregister_class(registered_cls)

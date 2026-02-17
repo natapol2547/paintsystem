@@ -15,8 +15,11 @@ import bpy
 from bpy.utils import register_submodule_factory
 from .custom_icons import load_icons, unload_icons
 
-# Ensure subpackage is available for extension loader expectations
+# Ensure subpackages are available for extension loader expectations
 from . import paintsystem as paintsystem
+from . import panels as panels
+from . import operators as operators
+from . import keymaps as keymaps
 
 # from .paintsystem.data import parse_context
 
@@ -58,7 +61,12 @@ def register():
     except ValueError as e:
         # Handle case where classes are already registered (e.g., module reload in CI)
         if "already registered" in str(e):
-            print(f"Paint System: Classes already registered (module reload): {e}")
+            print(f"Paint System: Classes already registered (module reload), retrying clean register: {e}")
+            try:
+                _unregister()
+            except Exception as cleanup_error:
+                print(f"Paint System: Cleanup before re-register failed: {cleanup_error}")
+            _register()
         else:
             raise
     except Exception as e:

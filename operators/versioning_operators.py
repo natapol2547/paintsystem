@@ -64,6 +64,7 @@ def find_node_by_name(node_tree: NodeTree, name: str) -> Node:
             return node
     return None
 
+
 class PAINTSYSTEM_OT_UpdatePaintSystemData(PSContextMixin, Operator):
     bl_idname = "paint_system.update_paint_system_data"
     bl_description = "Update Paint System Data"
@@ -238,6 +239,7 @@ class PAINTSYSTEM_OT_DismissUpdate(PSContextMixin, Operator):
         ps_ctx.ps_settings.update_state = 'UNAVAILABLE'
         return {'FINISHED'}
 
+
 classes = (
     PAINTSYSTEM_OT_UpdatePaintSystemData,
     PAINTSYSTEM_OT_CheckForUpdates,
@@ -245,4 +247,22 @@ classes = (
     PAINTSYSTEM_OT_DismissUpdate,
 )
 
-register, unregister = register_classes_factory(classes)
+def register():
+    for cls in classes:
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception:
+            pass
+    for cls in classes:
+        try:
+            bpy.utils.register_class(cls)
+        except ValueError as e:
+            if "already registered" not in str(e):
+                raise
+
+def unregister():
+    for cls in reversed(classes):
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception:
+            pass

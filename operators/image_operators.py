@@ -40,7 +40,7 @@ class PAINTSYSTEM_OT_InvertColors(PSImageFilterMixin, Operator):
         image = self.get_image(context)
         if not image:
             return {'CANCELLED'}
-        with bpy.context.temp_override(**{'edit_image': image}):
+        with bpy.context.temp_override(edit_image=image):
             bpy.ops.image.invert('INVOKE_DEFAULT', invert_r=self.invert_r,
                                  invert_g=self.invert_g, invert_b=self.invert_b, invert_a=self.invert_a)
         return {'FINISHED'}
@@ -420,4 +420,23 @@ if PIL_AVAILABLE:
     ])
 
 classes = tuple(classes)
-register, unregister = register_classes_factory(classes)
+
+def register():
+    for cls in classes:
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception:
+            pass
+    for cls in classes:
+        try:
+            bpy.utils.register_class(cls)
+        except ValueError as e:
+            if "already registered" not in str(e):
+                raise
+
+def unregister():
+    for cls in reversed(classes):
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception:
+            pass

@@ -869,4 +869,22 @@ classes = (
     PAINTSYSTEM_OT_ExitUVEdit,
 )
 
-register, unregister = register_classes_factory(classes)
+def register():
+    for cls in classes:
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception:
+            pass
+    for cls in classes:
+        try:
+            bpy.utils.register_class(cls)
+        except ValueError as e:
+            if "already registered" not in str(e):
+                raise
+
+def unregister():
+    for cls in reversed(classes):
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception:
+            pass

@@ -367,7 +367,7 @@ class PAINTSYSTEM_OT_ExportImage(PSContextMixin, Operator):
             self.report({'ERROR'}, "Baked Image not found.")
             return {'CANCELLED'}
 
-        with bpy.context.temp_override(**{'edit_image': image}):
+        with bpy.context.temp_override(edit_image=image):
             bpy.ops.image.save_as('INVOKE_DEFAULT')
         return {'FINISHED'}
 
@@ -930,17 +930,36 @@ class PAINTSYSTEM_OT_MergeUp(BakeOperator):
         self.report({'INFO'}, f"Merged up in {round(end_time - start_time, 2)} seconds")
         return {'FINISHED'}
 
+
 classes = (
     PAINTSYSTEM_OT_SelectAllBakedObjects,
     PAINTSYSTEM_OT_BakeChannel,
     PAINTSYSTEM_OT_BakeAllChannels,
-    PAINTSYSTEM_OT_TransferImageLayerUV,
     PAINTSYSTEM_OT_ExportImage,
     PAINTSYSTEM_OT_ExportAllImages,
     PAINTSYSTEM_OT_DeleteBakedImage,
+    PAINTSYSTEM_OT_TransferImageLayerUV,
     PAINTSYSTEM_OT_ConvertToImageLayer,
     PAINTSYSTEM_OT_MergeDown,
     PAINTSYSTEM_OT_MergeUp,
 )
 
-register, unregister = register_classes_factory(classes)
+def register():
+    for cls in classes:
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception:
+            pass
+    for cls in classes:
+        try:
+            bpy.utils.register_class(cls)
+        except ValueError as e:
+            if "already registered" not in str(e):
+                raise
+
+def unregister():
+    for cls in reversed(classes):
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception:
+            pass

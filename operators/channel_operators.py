@@ -204,4 +204,31 @@ classes = (
     PAINTSYSTEM_OT_MoveChannelDown,
 )
 
-register, unregister = bpy.utils.register_classes_factory(classes)
+def register():
+    """Register operators with reload-safe error handling."""
+    for cls in classes:
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception:
+            pass
+    for cls in classes:
+        try:
+            bpy.utils.register_class(cls)
+        except ValueError as e:
+            if "already registered" not in str(e):
+                raise
+
+def unregister():
+    """Unregister operators with reload-safe error handling."""
+    for cls in reversed(classes):
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception:
+            pass
+def unregister():
+    """Unregister operators with reload-safe error handling."""
+    for cls in reversed(classes):
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception:
+            pass

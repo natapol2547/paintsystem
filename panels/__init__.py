@@ -10,7 +10,6 @@ submodules = [
     "layers_panels",
     "quick_tools_panels",
     "uv_editor_panels",
-    "shader_editor_panels",
 ]
 
 register, unregister = register_submodule_factory(__name__, submodules)

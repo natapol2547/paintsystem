@@ -941,6 +941,7 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
         row.label(text="Setup Settings:", icon="NODETREE")
         box.prop(self, "group_name", text="Setup Name", icon='NODETREE')
 
+
 classes = (
     PAINTSYSTEM_OT_NewGroup,
     PAINTSYSTEM_OT_DeleteGroup,
@@ -948,4 +949,22 @@ classes = (
     PAINTSYSTEM_OT_ConvertMaterialToPS,
 )
 
-register, unregister = register_classes_factory(classes)    
+def register():
+    for cls in classes:
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception:
+            pass
+    for cls in classes:
+        try:
+            bpy.utils.register_class(cls)
+        except ValueError as e:
+            if "already registered" not in str(e):
+                raise
+
+def unregister():
+    for cls in reversed(classes):
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception:
+            pass    
