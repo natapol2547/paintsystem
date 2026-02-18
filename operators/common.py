@@ -317,7 +317,15 @@ class PSImageFilterMixin:
         return image
 
 def wait_for_redraw() -> None:
-    bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
+    """Force UI redraw by tagging all visible areas.
+    
+    This replaces the deprecated bpy.ops.wm.redraw_timer() operator.
+    Compatible with Blender 4.0+.
+    """
+    # Tag all areas for redraw instead of using deprecated redraw_timer
+    for window in bpy.context.window_manager.windows:
+        for area in window.screen.areas:
+            area.tag_redraw()
 
 def run_operator_by_id(operator_id, **kwargs):
     """
