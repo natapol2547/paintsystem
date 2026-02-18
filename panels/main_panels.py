@@ -1,4 +1,4 @@
-﻿import bpy
+import bpy
 from datetime import datetime
 from bpy.utils import register_classes_factory
 from bpy.types import Panel, Menu, UIList

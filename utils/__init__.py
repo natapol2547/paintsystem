@@ -25,7 +25,7 @@ def get_next_unique_name(name, list_of_names):
     # We add 0 to handle the case where the base name itself exists (e.g., 'Image').
     # This implies that 'Image 1' would be the next in sequence.
     numbers_found = {0}
-    pattern = re.compile(f"^{re.escape(base_name)}(?: (\d+))?$")
+    pattern = re.compile(rf"^{re.escape(base_name)}(?: (\d+))?$")
 
     for item in list_of_names:
         match = pattern.match(item)

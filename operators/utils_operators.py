@@ -358,36 +358,66 @@ class PAINTSYSTEM_OT_AddCameraPlane(Operator):
         )
 
     def _capture_viewport_image(self, context, area, region):
+        """Capture viewport as an image using GPU offscreen rendering.
+        
+        This replaces the deprecated bpy.ops.render.opengl() operator.
+        Compatible with Blender 4.0+.
+        """
         scene = context.scene
         space = context.space_data
-
-        original_res_x = scene.render.resolution_x
-        original_res_y = scene.render.resolution_y
-        original_res_pct = scene.render.resolution_percentage
-
+        
+        # Get viewport dimensions
+        width = max(1, region.width)
+        height = max(1, region.height)
+        
         try:
-            scene.render.resolution_x = max(1, region.width)
-            scene.render.resolution_y = max(1, region.height)
-            scene.render.resolution_percentage = 100
-
-            with context.temp_override(area=area, region=region, space_data=space):
-                bpy.ops.render.opengl(write_still=False, view_context=True)
-
-            render_result = bpy.data.images.get("Render Result")
-            if not render_result or render_result.size[0] <= 0 or render_result.size[1] <= 0:
-                return None
-
-            width, height = render_result.size
+            # Create an offscreen buffer for rendering
+            offscreen = gpu.types.GPUOffScreen(width, height)
+            
+            with offscreen.bind():
+                # Set up viewport matrices
+                with context.temp_override(area=area, region=region, space_data=space):
+                    # Draw the 3D view into the offscreen buffer
+                    offscreen.draw_view3d(
+                        scene,
+                        context.view_layer,
+                        space,
+                        region,
+                        space.region_3d.view_matrix,
+                        space.region_3d.window_matrix,
+                    )
+                    
+                    # Read pixels from the offscreen buffer
+                    buffer = offscreen.read_color(0, 0, width, height, 4, 0, 'UBYTE')
+            
+            # Free the offscreen buffer
+            offscreen.free()
+            
+            # Convert buffer to Blender image
+            buffer_list = buffer.to_list()
+            
+            # Create a new image and set pixels
             image_name = f"PS_ViewCapture_{context.scene.frame_current:04d}"
             image = bpy.data.images.new(name=image_name, width=width, height=height, alpha=True)
-            image.pixels.foreach_set(render_result.pixels[:])
+            
+            # Blender images are stored bottom-to-top, GPU buffer is top-to-bottom
+            # We need to flip the image vertically
+            flipped_pixels = []
+            for y in range(height - 1, -1, -1):
+                row_start = y * width * 4
+                row_end = row_start + width * 4
+                flipped_pixels.extend(buffer_list[row_start:row_end])
+            
+            # Normalize to 0-1 range and set pixels
+            image.pixels.foreach_set([p / 255.0 for p in flipped_pixels])
             image.update()
             image.pack()
+            
             return image
-        finally:
-            scene.render.resolution_x = original_res_x
-            scene.render.resolution_y = original_res_y
-            scene.render.resolution_percentage = original_res_pct
+            
+        except Exception as e:
+            print(f"Paint System: Error capturing viewport: {e}")
+            return None
 
     def _create_material(self, image):
         material = bpy.data.materials.new(name=f"PS_ViewCapture_{image.name}")
