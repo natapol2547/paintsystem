@@ -439,11 +439,12 @@ def layer_settings_ui(layout: bpy.types.UILayout, context: bpy.types.Context):
         blend_type_row.enabled = not active_layer.lock_layer
         blend_type_row.prop(active_layer, "blend_mode", text="")
         opacity_row = split.row(align=True)
-        opacity_row.enabled = not active_layer.lock_layer
+        opacity_row.enabled = not active_layer.lock_layer and active_layer.pre_mix_node is not None
         if not use_wide_ui:
             opacity_row.scale_y = 0.8
-        opacity_row.prop(active_layer.pre_mix_node.inputs['Opacity'], "default_value",
-                text="" if use_wide_ui else "Opacity", slider=True)
+        if active_layer.pre_mix_node is not None:
+            opacity_row.prop(active_layer.pre_mix_node.inputs['Opacity'], "default_value",
+                    text="" if use_wide_ui else "Opacity", slider=True)
 
 def line_separator(layout: bpy.types.UILayout):
     if is_newer_than(4, 2):

@@ -53,6 +53,7 @@ from .graph import (
     set_layer_blend_type,
     get_paint_system_collection,
     add_empty_to_collection,
+    PSNodeTreeBuilder,
 )
 from .graph.common import get_library_nodetree, get_library_object, DEFAULT_PS_UV_MAP_NAME
 from .nested_list_manager import BaseNestedListManager, BaseNestedListItem
@@ -1068,7 +1069,7 @@ class Layer(BaseNestedListItem):
             if self.empty_object.name in collection.objects:
                 collection.objects.unlink(self.empty_object)
         
-        layer_graph = create_layer_graph(self)
+        layer_graph = PSNodeTreeBuilder.create_layer_graph(self, context)
         layer_graph.compile()
         
         # For fake light, we need to update the empty object rotation via drivers
