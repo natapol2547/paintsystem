@@ -609,7 +609,16 @@ class PAINTSYSTEM_OT_ToggleImageEditor(PSContextMixin, Operator):
             space = new_area.spaces[0]
             space.show_region_ui = False
             space.image = image
-            space.ui_mode = 'PAINT'
+            if hasattr(space, "ui_mode"):
+                try:
+                    ui_mode_prop = space.bl_rna.properties.get("ui_mode")
+                    ui_mode_items = {item.identifier for item in ui_mode_prop.enum_items} if ui_mode_prop else set()
+                    if 'PAINT' in ui_mode_items:
+                        space.ui_mode = 'PAINT'
+                    elif 'VIEW' in ui_mode_items:
+                        space.ui_mode = 'VIEW'
+                except Exception:
+                    pass
             space.overlay.show_overlays = active_layer.coord_type in {'AUTO', 'UV'}
             
             execute_operator_in_area(new_area, 'image.view_all', fit_view=True)

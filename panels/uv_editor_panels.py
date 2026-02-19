@@ -17,10 +17,7 @@ class IMAGE_PT_PaintSystemUVEdit(PSContextMixin, Panel):
     def poll(cls, context):
         if not context.space_data or context.space_data.type != 'IMAGE_EDITOR':
             return False
-        ui_mode = getattr(context.space_data, "ui_mode", None)
-        if ui_mode is None:
-            return True
-        return ui_mode in {'UV', 'UV_EDIT'}
+        return True
 
     def draw(self, context):
         layout = self.layout

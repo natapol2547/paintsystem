@@ -57,21 +57,39 @@ def main():
 
     ps_ctx = parse_context(bpy.context)
     assert_true(ps_ctx.active_channel is not None, "Active channel is missing")
-    test_image = create_ps_image("Sword_Base", width=1024, height=1024)
+    prefs = get_preferences(bpy.context)
+    prefs.automatic_name_syncing = True
+
+    test_image = create_ps_image("Imported_Source", width=1024, height=1024)
     new_layer = ps_ctx.active_channel.create_layer(
         bpy.context,
-        layer_name="Sword_Base",
+        layer_name="Image",
         layer_type="IMAGE",
         image=test_image,
         coord_type='UV',
         uv_map_name=ps_ctx.ps_object.data.uv_layers.active.name if ps_ctx.ps_object and ps_ctx.ps_object.data.uv_layers.active else "",
     )
     assert_true(new_layer is not None, "Image layer creation failed")
+    assert_true(new_layer.name == "Sword_Image", f"Create-time layer naming mismatch: {new_layer.name}")
+    assert_true(new_layer.image and new_layer.image.name == "Sword_Image", "Create-time image naming mismatch")
 
-    image_layer = _first_layer_data(ps_ctx.active_channel)
+    prefs.automatic_name_syncing = False
+    manual_image = create_ps_image("Manual_Source", width=512, height=512)
+    manual_layer = ps_ctx.active_channel.create_layer(
+        bpy.context,
+        layer_name="Manual_Layer",
+        layer_type="IMAGE",
+        image=manual_image,
+        coord_type='UV',
+        uv_map_name=ps_ctx.ps_object.data.uv_layers.active.name if ps_ctx.ps_object and ps_ctx.ps_object.data.uv_layers.active else "",
+    )
+    assert_true(manual_layer is not None, "Manual layer creation failed")
+    assert_true(manual_layer.name == "Manual_Layer", "Layer was unexpectedly renamed while auto-sync disabled")
+    assert_true(manual_layer.image and manual_layer.image.name == "Manual_Source", "Image was unexpectedly renamed while auto-sync disabled")
+
+    image_layer = new_layer.get_layer_data() if hasattr(new_layer, "get_layer_data") else new_layer
     assert_true(image_layer is not None and image_layer.type == 'IMAGE', "Image layer missing after setup")
 
-    prefs = get_preferences(bpy.context)
     prefs.automatic_name_syncing = True
     mat.ps_mat_data.last_material_name = "Sword"
     mat.name = "Blade"

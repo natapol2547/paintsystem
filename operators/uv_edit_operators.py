@@ -808,17 +808,28 @@ class PAINTSYSTEM_OT_ApplyUVEdit(PSContextMixin, MultiMaterialOperator, Operator
             return True
 
         objects_with_mat = []
+        seen = set()
+
+        for obj in _get_objects_with_material(context, bake_material):
+            if obj and obj.type == 'MESH' and obj.name not in seen:
+                objects_with_mat.append(obj)
+                seen.add(obj.name)
+
         if ps_scene_data.uv_edit_material_overrides:
-            seen = set()
             for entry in ps_scene_data.uv_edit_material_overrides:
                 override_obj = bpy.data.objects.get(entry.object_name)
-                if override_obj and override_obj.name not in seen:
+                if override_obj and override_obj.type == 'MESH' and override_obj.name not in seen:
                     objects_with_mat.append(override_obj)
                     seen.add(override_obj.name)
-        if not objects_with_mat:
-            objects_with_mat = _get_objects_with_material(context, bake_material)
-        if base_obj and base_obj not in objects_with_mat:
+
+        for selected_obj in context.selected_objects:
+            if selected_obj and selected_obj.type == 'MESH' and selected_obj.name not in seen:
+                objects_with_mat.append(selected_obj)
+                seen.add(selected_obj.name)
+
+        if base_obj and base_obj.type == 'MESH' and base_obj.name not in seen:
             objects_with_mat.append(base_obj)
+            seen.add(base_obj.name)
 
         for sync_obj in objects_with_mat:
             uv_layer = _ensure_uv_map(sync_obj, target_uv)

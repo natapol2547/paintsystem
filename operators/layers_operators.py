@@ -19,6 +19,8 @@ from ..paintsystem.data import (
     GRADIENT_TYPE_ENUM,
     GEOMETRY_TYPE_ENUM,
     add_empty_to_collection,
+    ensure_layer_name_prefix,
+    find_material_for_layer,
     get_layer_by_uid,
 )
 from ..paintsystem.image import save_image
@@ -1237,8 +1239,12 @@ class PAINTSYSTEM_OT_RenameLayerSuffix(PSContextMixin, Operator):
     def invoke(self, context, event):
         ps_ctx = self.parse_context(context)
         current_name = ps_ctx.active_layer.name
-        # Pre-fill with suffix (strip prefix before first underscore)
-        self.new_name = current_name.split('_', 1)[1] if '_' in current_name else current_name
+        material = find_material_for_layer(ps_ctx.active_layer)
+        material_name = material.name if material else None
+        if material_name and current_name.startswith(f"{material_name}_"):
+            self.new_name = current_name[len(material_name) + 1:]
+        else:
+            self.new_name = current_name.split('_', 1)[1] if '_' in current_name else current_name
         return context.window_manager.invoke_props_dialog(self)
 
     def execute(self, context):
@@ -1246,12 +1252,17 @@ class PAINTSYSTEM_OT_RenameLayerSuffix(PSContextMixin, Operator):
         active_layer = ps_ctx.active_layer
         if not active_layer:
             return {'CANCELLED'}
-        current_name = active_layer.name
-        if '_' in current_name:
-            prefix = current_name.split('_', 1)[0]
-            active_layer.name = f"{prefix}_{self.new_name}"
+        material = find_material_for_layer(active_layer)
+        material_name = material.name if material else None
+        if material_name:
+            active_layer.name = ensure_layer_name_prefix(self.new_name, material_name)
         else:
-            active_layer.name = self.new_name
+            current_name = active_layer.name
+            if '_' in current_name:
+                prefix = current_name.split('_', 1)[0]
+                active_layer.name = f"{prefix}_{self.new_name}"
+            else:
+                active_layer.name = self.new_name
         redraw_panel(context)
         return {'FINISHED'}
 
