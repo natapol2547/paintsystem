@@ -40,6 +40,31 @@ def get_object_uv_maps(self, context: Context):
     ]
     return intern_enum_items(items)
 
+
+def _ensure_active_channel(ps_ctx, context, report_fn=None):
+    if ps_ctx.active_channel:
+        return ps_ctx.active_channel
+    if not ps_ctx.active_group:
+        if ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.groups:
+            ps_ctx.ps_mat_data.active_index = 0
+            ps_ctx.active_group = ps_ctx.ps_mat_data.groups[0]
+        elif ps_ctx.ps_mat_data:
+            base_name = "Paint System"
+            if ps_ctx.active_material:
+                base_name = ps_ctx.active_material.name
+            group_name = get_next_unique_name(base_name, [group.name for group in ps_ctx.ps_mat_data.groups])
+            ps_ctx.active_group = ps_ctx.ps_mat_data.create_new_group(context, group_name)
+        else:
+            if report_fn:
+                report_fn({'ERROR'}, "No active Paint System group")
+            return None
+    return ps_ctx.active_group.create_channel(
+        context,
+        channel_name="Color",
+        channel_type="COLOR",
+        use_alpha=True
+    )
+
 class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSImageCreateMixin, MultiMaterialOperator):
     """Create a new image layer"""
     bl_idname = "paint_system.new_image_layer"
@@ -49,7 +74,7 @@ class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSImageCreateMixin, MultiMaterialO
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        return ps_ctx.active_channel is not None
+        return ps_ctx.ps_mat_data is not None
     
     image_name: StringProperty(
         name="Layer Name",
@@ -70,6 +95,9 @@ class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSImageCreateMixin, MultiMaterialO
     filepath: StringProperty(
         subtype='FILE_PATH',
     )
+    directory: StringProperty(
+        subtype='DIR_PATH',
+    )
     filter_glob: StringProperty(
         default='*.jpg;*.jpeg;*.png;*.tif;*.tiff;*.bmp',
         options={'HIDDEN'}
@@ -80,10 +108,14 @@ class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSImageCreateMixin, MultiMaterialO
         ps_ctx = self.parse_context(context)
         if ps_ctx.active_channel:
             return get_next_unique_name("Image", [layer.layer_name for layer in ps_ctx.active_channel.layers])
+        return "Image"
 
     def process_material(self, context):
         self.store_coord_type(context)
         ps_ctx = self.parse_context(context)
+        active_channel = _ensure_active_channel(ps_ctx, context, self.report)
+        if not active_channel:
+            return {'CANCELLED'}
         if self.image_add_type == 'NEW':
             img = self.create_image(context)
         elif self.image_add_type == 'IMPORT':
@@ -101,7 +133,7 @@ class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSImageCreateMixin, MultiMaterialO
             if not img:
                 self.report({'ERROR'}, "Image not found")
                 return False
-        ps_ctx.active_channel.create_layer(
+        active_channel.create_layer(
             context, 
             layer_name=self.image_name, 
             layer_type="IMAGE", 
@@ -146,7 +178,7 @@ class PAINTSYSTEM_OT_NewFolder(PSContextMixin, MultiMaterialOperator):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        return ps_ctx.active_channel is not None
+        return ps_ctx.ps_mat_data is not None
 
     layer_name: StringProperty(
         name="Layer Name",
@@ -156,7 +188,10 @@ class PAINTSYSTEM_OT_NewFolder(PSContextMixin, MultiMaterialOperator):
 
     def process_material(self, context):
         ps_ctx = self.parse_context(context)
-        ps_ctx.active_channel.create_layer(context, self.layer_name, "FOLDER")
+        active_channel = _ensure_active_channel(ps_ctx, context, self.report)
+        if not active_channel:
+            return {'CANCELLED'}
+        active_channel.create_layer(context, self.layer_name, "FOLDER")
         return {'FINISHED'}
 
 
@@ -169,7 +204,7 @@ class PAINTSYSTEM_OT_NewSolidColor(PSContextMixin, MultiMaterialOperator):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        return ps_ctx.active_channel is not None
+        return ps_ctx.ps_mat_data is not None
 
     layer_name: StringProperty(
         name="Layer Name",
@@ -179,7 +214,10 @@ class PAINTSYSTEM_OT_NewSolidColor(PSContextMixin, MultiMaterialOperator):
 
     def process_material(self, context):
         ps_ctx = self.parse_context(context)
-        ps_ctx.active_channel.create_layer(context, self.layer_name, "SOLID_COLOR")
+        active_channel = _ensure_active_channel(ps_ctx, context, self.report)
+        if not active_channel:
+            return {'CANCELLED'}
+        active_channel.create_layer(context, self.layer_name, "SOLID_COLOR")
         return {'FINISHED'}
 
 
@@ -192,7 +230,7 @@ class PAINTSYSTEM_OT_NewAttribute(PSContextMixin, MultiMaterialOperator):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        return ps_ctx.active_channel is not None
+        return ps_ctx.ps_mat_data is not None
     
     attribute_name: StringProperty(
         name="Attribute Name",
@@ -212,7 +250,10 @@ class PAINTSYSTEM_OT_NewAttribute(PSContextMixin, MultiMaterialOperator):
 
     def process_material(self, context):
         ps_ctx = self.parse_context(context)
-        ps_ctx.active_channel.create_layer(context, self.layer_name, "ATTRIBUTE")
+        active_channel = _ensure_active_channel(ps_ctx, context, self.report)
+        if not active_channel:
+            return {'CANCELLED'}
+        active_channel.create_layer(context, self.layer_name, "ATTRIBUTE")
         return {'FINISHED'}
 
 
@@ -225,7 +266,7 @@ class PAINTSYSTEM_OT_NewAdjustment(PSContextMixin, MultiMaterialOperator):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        return ps_ctx.active_channel is not None
+        return ps_ctx.ps_mat_data is not None
     
     adjustment_type: EnumProperty(
         name="Adjustment Type",
@@ -235,7 +276,10 @@ class PAINTSYSTEM_OT_NewAdjustment(PSContextMixin, MultiMaterialOperator):
     def process_material(self, context):
         ps_ctx = self.parse_context(context)
         layer_name = next(name for adjustment_type, name, description in ADJUSTMENT_TYPE_ENUM if adjustment_type == self.adjustment_type)
-        ps_ctx.active_channel.create_layer(context, layer_name, "ADJUSTMENT", adjustment_type=self.adjustment_type)
+        active_channel = _ensure_active_channel(ps_ctx, context, self.report)
+        if not active_channel:
+            return {'CANCELLED'}
+        active_channel.create_layer(context, layer_name, "ADJUSTMENT", adjustment_type=self.adjustment_type)
         return {'FINISHED'}
 
 
@@ -248,7 +292,7 @@ class PAINTSYSTEM_OT_NewShader(PSContextMixin, MultiMaterialOperator):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        return ps_ctx.active_channel is not None
+        return ps_ctx.ps_mat_data is not None
 
     layer_name: StringProperty(
         name="Layer Name",
@@ -258,7 +302,10 @@ class PAINTSYSTEM_OT_NewShader(PSContextMixin, MultiMaterialOperator):
 
     def process_material(self, context):
         ps_ctx = self.parse_context(context)
-        ps_ctx.active_channel.create_layer(context, self.layer_name, "SHADER")
+        active_channel = _ensure_active_channel(ps_ctx, context, self.report)
+        if not active_channel:
+            return {'CANCELLED'}
+        active_channel.create_layer(context, self.layer_name, "SHADER")
         return {'FINISHED'}
 
 
@@ -271,7 +318,7 @@ class PAINTSYSTEM_OT_NewGradient(PSContextMixin, MultiMaterialOperator):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        return ps_ctx.active_channel is not None
+        return ps_ctx.ps_mat_data is not None
 
     layer_name: StringProperty(
         name="Layer Name",
@@ -287,7 +334,10 @@ class PAINTSYSTEM_OT_NewGradient(PSContextMixin, MultiMaterialOperator):
 
     def process_material(self, context):
         ps_ctx = self.parse_context(context)
-        layer = ps_ctx.active_channel.create_layer(context, self.gradient_type.title() if self.gradient_type != 'FAKE_LIGHT' else "Fake Light", "GRADIENT", gradient_type=self.gradient_type)
+        active_channel = _ensure_active_channel(ps_ctx, context, self.report)
+        if not active_channel:
+            return {'CANCELLED'}
+        layer = active_channel.create_layer(context, self.gradient_type.title() if self.gradient_type != 'FAKE_LIGHT' else "Fake Light", "GRADIENT", gradient_type=self.gradient_type)
         if self.gradient_type == 'FAKE_LIGHT':
             layer.blend_mode = "MULTIPLY"
         return {'FINISHED'}
@@ -308,14 +358,16 @@ class PAINTSYSTEM_OT_NewGeometry(PSContextMixin, MultiMaterialOperator):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        return ps_ctx.active_channel is not None
+        return ps_ctx.ps_mat_data is not None
     
     def process_material(self, context):
         ps_ctx = self.parse_context(context)
-        active_channel = ps_ctx.active_channel
+        active_channel = _ensure_active_channel(ps_ctx, context, self.report)
+        if not active_channel:
+            return {'CANCELLED'}
         layer_name = next(name for geometry_type, name, description in GEOMETRY_TYPE_ENUM if geometry_type == self.geometry_type)
         use_normalize_normal = active_channel.normalize_input if active_channel.type == 'VECTOR' else False
-        ps_ctx.active_channel.create_layer(
+        active_channel.create_layer(
             context,
             layer_name,
             layer_type="GEOMETRY",
@@ -374,11 +426,14 @@ class PAINTSYSTEM_OT_NewRandomColor(PSContextMixin, MultiMaterialOperator):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        return ps_ctx.active_channel is not None
+        return ps_ctx.ps_mat_data is not None
     
     def process_material(self, context):
         ps_ctx = self.parse_context(context)
-        ps_ctx.active_channel.create_layer(context, self.layer_name, "RANDOM")
+        active_channel = _ensure_active_channel(ps_ctx, context, self.report)
+        if not active_channel:
+            return {'CANCELLED'}
+        active_channel.create_layer(context, self.layer_name, "RANDOM")
         return {'FINISHED'}
 
 
@@ -488,7 +543,7 @@ class PAINTSYSTEM_OT_NewCustomNodeGroup(PSContextMixin, MultiMaterialOperator):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        return ps_ctx.active_channel is not None
+        return ps_ctx.active_group is not None
     
     def process_material(self, context):
         if not self.node_tree_name:
@@ -499,7 +554,10 @@ class PAINTSYSTEM_OT_NewCustomNodeGroup(PSContextMixin, MultiMaterialOperator):
             return {'CANCELLED'}
         ps_ctx = self.parse_context(context)
         custom_node_tree = bpy.data.node_groups.get(self.node_tree_name)
-        ps_ctx.active_channel.create_layer(
+        active_channel = _ensure_active_channel(ps_ctx, context, self.report)
+        if not active_channel:
+            return {'CANCELLED'}
+        active_channel.create_layer(
             context,
             layer_name=self.node_tree_name,
             layer_type="NODE_GROUP",
@@ -567,7 +625,7 @@ class PAINTSYSTEM_OT_NewTexture(PSContextMixin, PSUVOptionsMixin, MultiMaterialO
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        return ps_ctx.active_channel is not None
+        return ps_ctx.active_group is not None
     
     def invoke(self, context, event):
         self.get_coord_type(context)
@@ -583,7 +641,10 @@ class PAINTSYSTEM_OT_NewTexture(PSContextMixin, PSUVOptionsMixin, MultiMaterialO
         ps_ctx = self.parse_context(context)
         self.store_coord_type(context)
         layer_name = next(name for texture_type, name, description in TEXTURE_TYPE_ENUM if texture_type == self.texture_type)
-        ps_ctx.active_channel.create_layer(
+        active_channel = _ensure_active_channel(ps_ctx, context, self.report)
+        if not active_channel:
+            return {'CANCELLED'}
+        active_channel.create_layer(
             context,
             layer_name=layer_name,
             layer_type="TEXTURE",
@@ -1258,20 +1319,41 @@ classes = (
     PAINTSYSTEM_OT_SetProjectionView,
     PAINTSYSTEM_OT_ProjectionViewReset,
     PAINTSYSTEM_OT_NewValueMask,
-    PAINTSYSTEM_OT_NewImageMask,
     PAINTSYSTEM_OT_NewAttributeMask,
     PAINTSYSTEM_OT_NewTextureMask,
     PAINTSYSTEM_OT_RenameLayerSuffix,
-    PAINTSYSTEM_OT_NewLayerMask,
-    PAINTSYSTEM_OT_DeleteLayerMask
+    PAINTSYSTEM_OT_NewLayerMask
 )
+
+
+def _get_registered_class(cls):
+    class_name = getattr(cls, "__name__", None)
+    if class_name:
+        registered = getattr(bpy.types, class_name, None)
+        if registered is not None:
+            return registered
+    bl_idname = getattr(cls, "bl_idname", None)
+    if bl_idname:
+        parts = bl_idname.split(".", 1)
+        if len(parts) == 2:
+            rna_name = f"{parts[0].upper()}_OT_{parts[1]}"
+            return getattr(bpy.types, rna_name, None)
+    return None
+
+
+def _safe_unregister_class(cls):
+    if cls is None:
+        return
+    try:
+        bpy.utils.unregister_class(cls)
+    except Exception:
+        pass
+
 
 def register():
     for cls in classes:
-        try:
-            bpy.utils.unregister_class(cls)
-        except Exception:
-            pass
+        _safe_unregister_class(_get_registered_class(cls))
+        _safe_unregister_class(cls)
     for cls in classes:
         try:
             bpy.utils.register_class(cls)
@@ -1279,9 +1361,8 @@ def register():
             if "already registered" not in str(e):
                 raise
 
+
 def unregister():
     for cls in reversed(classes):
-        try:
-            bpy.utils.unregister_class(cls)
-        except Exception:
-            pass
+        _safe_unregister_class(_get_registered_class(cls))
+        _safe_unregister_class(cls)

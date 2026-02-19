@@ -151,6 +151,7 @@ def unregister():
 3. **Error handling on register:** Catches and logs but doesn't crash on conflicts
 4. **Reversed iteration on unregister:** Respects dependency order (subclasses before parents)
 5. **Try-except wrapping:** Isolates failures to individual classes, prevents cascade failures
+6. **Operator RNA lookup:** For operators, unregister by both class name and RNA name derived from `bl_idname` (e.g., `PAINT_SYSTEM_OT_new_image_layer`).
 
 ### Performance Impact
 - Minimal: Pre-unregister adds negligible overhead (~microseconds per class)

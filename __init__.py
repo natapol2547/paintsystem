@@ -42,8 +42,8 @@ print("Paint System: Registering...")
 
 submodules = [
     "paintsystem",
-    "panels",
     "operators",
+    "panels",
     "keymaps",
 ]
 
@@ -72,6 +72,32 @@ def register():
     except Exception as e:
         print(f"Paint System: Registration error: {e}")
         raise
+
+    try:
+        op = getattr(bpy.types, "PAINT_SYSTEM_OT_new_image_layer", None)
+        needs_fix = op is None or not hasattr(op, "poll")
+        if needs_fix:
+            from .operators import layers_operators
+            try:
+                if op is not None:
+                    bpy.utils.unregister_class(op)
+            except Exception:
+                pass
+            try:
+                bpy.utils.unregister_class(layers_operators.PAINTSYSTEM_OT_NewImage)
+            except Exception:
+                pass
+            try:
+                bpy.utils.register_class(layers_operators.PAINTSYSTEM_OT_NewImage)
+            except ValueError as e:
+                if "already registered" not in str(e):
+                    raise
+            if hasattr(bpy.types, "PAINT_SYSTEM_OT_new_image_layer"):
+                print("Paint System: Registered new image layer operator (fallback)")
+            else:
+                print("Paint System: Failed to register new image layer operator")
+    except Exception as e:
+        print(f"Paint System: Fallback operator registration failed: {e}")
     
 def unregister():
     """Unregister the addon with idempotent error handling."""
