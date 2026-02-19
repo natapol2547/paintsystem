@@ -945,24 +945,13 @@ class Layer(BaseNestedListItem):
     
     def get_display_name(self):
         """Return only the suffix part of the name (after underscore) for UI display"""
-        material = find_material_for_layer(self)
-        material_name = material.name if material else None
-        if material_name and self.name.startswith(f"{material_name}_"):
-            return self.name[len(material_name) + 1:]
         if '_' in self.name:
             return self.name.split('_', 1)[1]
         return self.name
     
     def set_display_name(self, value):
         """Set the layer name preserving the material prefix"""
-        material = find_material_for_layer(self)
-        material_name = material.name if material else None
-        if material_name:
-            if value:
-                self.name = f"{material_name}_{value}"
-            else:
-                self.name = material_name
-        elif '_' in self.name:
+        if '_' in self.name:
             prefix = self.name.split('_', 1)[0]
             self.name = f"{prefix}_{value}"
         else:
@@ -2278,12 +2267,6 @@ class Channel(BaseNestedListManager):
         handle_folder: bool = True,
         **kwargs
     ) -> 'Layer':
-        parsed_context = parse_context(context)
-        active_material = parsed_context.active_material
-        auto_sync_enabled = is_auto_name_sync_enabled(context)
-        if auto_sync_enabled and active_material:
-            layer_name = ensure_layer_name_prefix(layer_name, active_material.name)
-
         parent_id, insert_order = self.get_insertion_data(handle_folder=handle_folder, insert_at=insert_at)
         # Adjust existing items' order
         self.adjust_sibling_orders(parent_id, insert_order)
@@ -2309,8 +2292,6 @@ class Channel(BaseNestedListManager):
                         layer.image = create_ps_image(layer.name, use_udim_tiles=use_udim_tiles, objects=[ps_ctx.ps_object], uv_layer_name=layer.uv_map_name)
                     else:
                         layer.image = create_ps_image(layer.name)
-                elif auto_sync_enabled and layer.image.name != layer.name:
-                    _safe_set_id_name(layer.image, layer.name)
         
         # Update active index
         if update_active_index:
@@ -3541,12 +3522,6 @@ class MaterialData(PropertyGroup):
     )
     
     def create_new_group(self, context, group_name: str, node_tree: bpy.types.NodeTree = None):
-        parsed_context = parse_context(context)
-        active_material = parsed_context.active_material
-        auto_sync_enabled = is_auto_name_sync_enabled(context)
-        if auto_sync_enabled and active_material:
-            group_name = ensure_group_name_prefix(group_name, active_material.name)
-
         if not node_tree:
             node_tree = bpy.data.node_groups.new(name=f"Temp Group Name", type='ShaderNodeTree')
         else:
@@ -3558,8 +3533,6 @@ class MaterialData(PropertyGroup):
         new_group.name = group_name
         new_group.node_tree = node_tree
         new_group.update_node_tree(context)
-        if active_material and not self.last_material_name:
-            self.last_material_name = active_material.name
         return new_group
 
 
@@ -3627,7 +3600,7 @@ def get_layer_suffix(layer_name: str, old_material_name: str | None = None) -> s
     if old_material_name and layer_name == old_material_name:
         return ""
     if old_material_name and layer_name.startswith(f"{old_material_name}_"):
-        return layer_name[len(old_material_name) + 1:]
+        return layer_name.split("_", 1)[1]
     if "_" in layer_name:
         return layer_name.split("_", 1)[1]
     return layer_name

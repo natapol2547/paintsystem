@@ -434,10 +434,8 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
             if ps_ctx.ps_object.type == 'MESH' and layer and layer.type == 'IMAGE':
                 layout.operator("wm.call_menu", text="Filters", icon="IMAGE_DATA").name = "MAT_MT_ImageFilterMenu"
 
-        if ps_ctx.ps_object.type == 'MESH' and layer and layer.type == 'IMAGE':
-            if not layer.layer_masks:
-                layout.operator("paint_system.new_image_mask_auto", text="Mask", icon='ADD')
-            elif not is_layer_settings_open:
+        if ps_ctx.ps_object.type == 'MESH' and layer and layer.layer_masks:
+            if not is_layer_settings_open:
                 if layer.edit_mask:
                     finish_row = layout.row(align=True)
                     finish_row.alert = True
@@ -503,87 +501,27 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
             if ps_ctx.ps_settings.use_legacy_ui:
                 box = layout.box()
                 layer_settings_ui(box, context)
+            
+            # Create settings container for all layer types
+            if not ps_ctx.ps_settings.use_legacy_ui:
+                box = layout.box()
+            col = box.column()
+            
+            # Mask button at the top for all layer types
+            if not active_layer.layer_masks:
+                col.operator("paint_system.new_image_mask_auto", text="Mask", icon='ADD')
+            
             match active_layer.type:
                 case 'IMAGE':
-                    if not ps_ctx.ps_settings.use_legacy_ui:
-                        box = layout.box()
-                    col = box.column()
-                    if active_layer.layer_masks:
-                        mask_header, mask_panel = col.panel("image_layer_mask_panel", default_closed=not active_layer.use_masks)
-                        mask_header.prop(active_layer, "use_masks", text="")
-                        mask_header.label(text="Mask", icon='MOD_MASK')
-                        if active_layer.edit_mask:
-                            finish_row = mask_header.row(align=True)
-                            finish_row.alert = True
-                            finish_row.operator("paint_system.finish_edit_layer_mask", text="Finish Edit", icon='CHECKMARK')
-                        else:
-                            mask_header.operator("paint_system.edit_layer_mask", text="Edit Mask", icon='GREASEPENCIL')
+                    pass
 
-                        if mask_panel and active_layer.use_masks:
-                            mask_box = mask_panel.box()
 
-                            active_mask = None
-                            if 0 <= active_layer.active_layer_mask_index < len(active_layer.layer_masks):
-                                active_mask = active_layer.layer_masks[active_layer.active_layer_mask_index]
-                            elif len(active_layer.layer_masks) > 0:
-                                active_mask = active_layer.layer_masks[0]
-
-                            if active_mask:
-                                mask_image_header, mask_image_panel = mask_box.panel("mask_image_settings_panel", default_closed=True)
-                                image_row = mask_image_header.row(align=True)
-                                if active_mask.mask_image:
-                                    image_row.prop(active_mask, "mask_image", text="")
-                                    image_row.operator("paint_system.export_image", text="", icon="EXPORT").image_name = active_mask.mask_image.name
-                                    image_row.menu("MAT_MT_ImageMenu", text="", icon='COLLAPSEMENU')
-                                else:
-                                    image_row.template_ID(active_mask, "mask_image", text="", new="image.new", open="image.open")
-
-                                if mask_image_panel and active_mask.mask_image:
-                                    mask_image_node = None
-                                    if active_layer.node_tree:
-                                        mask_image_node = find_node(active_layer.node_tree, {
-                                            'bl_idname': 'ShaderNodeTexImage',
-                                            'name': 'ps_active_mask_source',
-                                        })
-                                    if mask_image_node:
-                                        img = active_mask.mask_image
-                                        mask_settings_col = mask_image_panel.column()
-                                        mask_settings_col.use_property_split = True
-                                        mask_settings_col.use_property_decorate = False
-                                        if img:
-                                            mask_settings_col.label(text="UDIM tiles: " + ", ".join(str(t.number) for t in img.tiles), icon='UV')
-                                        mask_settings_col.prop(mask_image_node, "interpolation", text="")
-                                        mask_settings_col.prop(mask_image_node, "projection", text="")
-                                        mask_settings_col.prop(mask_image_node, "extension", text="")
-                                        if img:
-                                            mask_settings_col.prop(img, "source", text="")
-                                            mask_settings_col.prop(img.colorspace_settings, "name", text="Color Space")
-                                            mask_settings_col.prop(img, "alpha_mode", text="Alpha")
-
-                    row = col.row(align=True)
-                    scale_content(context, row, 1.2, 1.2)
-                    if not active_layer.external_image:
-                        icon_value = get_image_editor_icon(context.preferences.filepaths.image_editor) or get_icon('image')
-                        row.operator("paint_system.quick_edit", text="Edit in Image Editor", icon_value=icon_value)
-                    else:
-                        if active_layer.edit_external_mode == 'IMAGE_EDIT':
-                            row.operator("paint_system.quick_edit", text="Open Image", icon_value=get_image_editor_icon(context.preferences.filepaths.image_editor))
-                            row.operator("paint_system.reload_image", text="Reload Image", icon="FILE_REFRESH")
-                        elif active_layer.edit_external_mode == 'VIEW_CAPTURE':
-                            row.operator("paint_system.project_apply", text="Apply Edit")
-                    row.operator("paint_system.toggle_image_editor", text="", depress=is_editor_open(context, 'IMAGE_EDITOR'), icon="BLENDER")
                 case 'ADJUSTMENT':
-                    if not ps_ctx.ps_settings.use_legacy_ui:
-                        box = layout.box()
-                    col = box.column()
                     adjustment_node = active_layer.source_node
                     if adjustment_node:
                         col.label(text="Adjustment Settings:", icon='SHADERFX')
                         col.template_node_inputs(adjustment_node)
                 case 'NODE_GROUP':
-                    if not ps_ctx.ps_settings.use_legacy_ui:
-                        box = layout.box()
-                    col = box.column()
                     node_group = active_layer.source_node
                     inputs = [i for i in node_group.inputs if not i.is_linked and i.name not in (
                         'Color', 'Alpha')]
@@ -594,9 +532,6 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                                     text=socket.name)
                 case 'GRADIENT':
                     if active_layer.gradient_type in ('LINEAR', 'RADIAL', 'FAKE_LIGHT'):
-                        if not ps_ctx.ps_settings.use_legacy_ui:
-                            box = layout.box()
-                        col = box.column()
                         col.use_property_split = True
                         col.use_property_decorate = False
                         if active_layer.empty_object and active_layer.empty_object.name in context.view_layer.objects:
@@ -610,18 +545,12 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                             err_col.label(text="Gradient Empty not found", icon='ERROR')
                             err_col.operator("paint_system.fix_missing_gradient_empty", text="Fix Missing Gradient Empty")
                 case 'SOLID_COLOR':
-                    if not ps_ctx.ps_settings.use_legacy_ui:
-                        box = layout.box()
-                    col = box.column()
                     rgb_node = active_layer.source_node
                     if rgb_node:
                         col.prop(rgb_node.outputs[0], "default_value", text="Color",
                                 icon='IMAGE_RGB_ALPHA')
 
                 case 'RANDOM':
-                    if not ps_ctx.ps_settings.use_legacy_ui:
-                        box = layout.box()
-                    col = box.column()
                     random_node = active_layer.find_node("add_2")
                     hue_math = active_layer.find_node("hue_multiply_add")
                     saturation_math = active_layer.find_node("saturation_multiply_add")
@@ -643,9 +572,6 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                         col.prop(
                             value_math.inputs[1], "default_value", text="Value")
                 case 'GEOMETRY':
-                    if not ps_ctx.ps_settings.use_legacy_ui:
-                        box = layout.box()
-                    col = box.column()
                     geometry_type = active_layer.geometry_type
                     if geometry_type == 'VECTOR_TRANSFORM':
                         geometry_node = active_layer.source_node
@@ -662,6 +588,59 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                         col.prop(active_layer, "normalize_normal", text="Normalize Normal", icon='MESH_DATA')
                 case _:
                     pass
+            
+            # Mask panel for all layer types
+            if active_layer.layer_masks:
+                mask_header, mask_panel = layout.panel("layer_mask_panel", default_closed=not active_layer.use_masks)
+                mask_header.prop(active_layer, "use_masks", text="")
+                mask_header.label(text="Mask", icon='MOD_MASK')
+                if active_layer.edit_mask:
+                    finish_row = mask_header.row(align=True)
+                    finish_row.alert = True
+                    finish_row.operator("paint_system.finish_edit_layer_mask", text="Finish Edit", icon='CHECKMARK')
+                else:
+                    mask_header.operator("paint_system.edit_layer_mask", text="Edit Mask", icon='GREASEPENCIL')
+
+                if mask_panel and active_layer.use_masks:
+                    mask_box = mask_panel.box()
+
+                    active_mask = None
+                    if 0 <= active_layer.active_layer_mask_index < len(active_layer.layer_masks):
+                        active_mask = active_layer.layer_masks[active_layer.active_layer_mask_index]
+                    elif len(active_layer.layer_masks) > 0:
+                        active_mask = active_layer.layer_masks[0]
+
+                    if active_mask:
+                        mask_image_header, mask_image_panel = mask_box.panel("mask_image_settings_panel", default_closed=True)
+                        image_row = mask_image_header.row(align=True)
+                        if active_mask.mask_image:
+                            image_row.prop(active_mask, "mask_image", text="")
+                            image_row.operator("paint_system.export_image", text="", icon="EXPORT").image_name = active_mask.mask_image.name
+                            image_row.menu("MAT_MT_ImageMenu", text="", icon='COLLAPSEMENU')
+                        else:
+                            image_row.template_ID(active_mask, "mask_image", text="", new="image.new", open="image.open")
+
+                        if mask_image_panel and active_mask.mask_image:
+                            mask_image_node = None
+                            if active_layer.node_tree:
+                                mask_image_node = find_node(active_layer.node_tree, {
+                                    'bl_idname': 'ShaderNodeTexImage',
+                                    'name': 'ps_active_mask_source',
+                                })
+                            if mask_image_node:
+                                img = active_mask.mask_image
+                                mask_settings_col = mask_image_panel.column()
+                                mask_settings_col.use_property_split = True
+                                mask_settings_col.use_property_decorate = False
+                                if img:
+                                    mask_settings_col.label(text="UDIM tiles: " + ", ".join(str(t.number) for t in img.tiles), icon='UV')
+                                mask_settings_col.prop(mask_image_node, "interpolation", text="")
+                                mask_settings_col.prop(mask_image_node, "projection", text="")
+                                mask_settings_col.prop(mask_image_node, "extension", text="")
+                                if img:
+                                    mask_settings_col.prop(img, "source", text="")
+                                    mask_settings_col.prop(img.colorspace_settings, "name", text="Color Space")
+                                    mask_settings_col.prop(img, "alpha_mode", text="Alpha")
             
             # Draw ui for adjustable sockets
             if active_layer.type == 'NODE_GROUP':
@@ -705,6 +684,20 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                 if panel:
                     box = panel.box()
                     col = box.column()
+                    # Edit in Image Editor button
+                    edit_row = col.row(align=True)
+                    scale_content(context, edit_row, 1.2, 1.2)
+                    if not active_layer.external_image:
+                        icon_value = get_image_editor_icon(context.preferences.filepaths.image_editor) or get_icon('image')
+                        edit_row.operator("paint_system.quick_edit", text="Edit in Image Editor", icon_value=icon_value)
+                    else:
+                        if active_layer.edit_external_mode == 'IMAGE_EDIT':
+                            edit_row.operator("paint_system.quick_edit", text="Open Image", icon_value=get_image_editor_icon(context.preferences.filepaths.image_editor))
+                            edit_row.operator("paint_system.reload_image", text="Reload Image", icon="FILE_REFRESH")
+                        elif active_layer.edit_external_mode == 'VIEW_CAPTURE':
+                            edit_row.operator("paint_system.project_apply", text="Apply Edit")
+                    edit_row.operator("paint_system.toggle_image_editor", text="", depress=is_editor_open(context, 'IMAGE_EDITOR'), icon="BLENDER")
+                    line_separator(col)
                     image_node = active_layer.source_node
                     panel = image_node_settings(col, image_node, active_layer, "image", simple_ui=True, default_closed=False)
                     if panel:
