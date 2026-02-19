@@ -11,6 +11,47 @@ from .graph.nodetree_builder import get_nodetree_version
 import uuid
 
 _COLOR_HISTORY_PALETTE_NAME = "Paint System History"
+_LAST_HANDLED_MATERIAL_NAMES: dict[int, str] = {}
+
+
+def _strip_numeric_suffix(name: str) -> str:
+    if "." in name:
+        base, suffix = name.rsplit(".", 1)
+        if suffix.isdigit():
+            return base
+    return name
+
+
+def _sync_material_name_if_needed(material: bpy.types.Material):
+    if not isinstance(material, bpy.types.Material):
+        return
+    if not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
+        return
+
+    material_id = material.as_pointer()
+    current_name = material.name
+    if _LAST_HANDLED_MATERIAL_NAMES.get(material_id) == current_name:
+        return
+
+    last_name = material.ps_mat_data.last_material_name
+    if last_name and last_name != current_name:
+        update_material_name(material, bpy.context)
+    elif not last_name:
+        inferred_old = ""
+        if material.ps_mat_data.groups:
+            for group in material.ps_mat_data.groups:
+                if group.name.startswith("PS_"):
+                    inferred_old = _strip_numeric_suffix(group.name[3:])
+                    break
+                if not inferred_old:
+                    inferred_old = _strip_numeric_suffix(group.name)
+        if inferred_old and inferred_old != current_name:
+            material.ps_mat_data.last_material_name = inferred_old
+            update_material_name(material, bpy.context)
+        else:
+            material.ps_mat_data.last_material_name = current_name
+
+    _LAST_HANDLED_MATERIAL_NAMES[material_id] = material.name
 
 
 def get_ps_scene_data(scene: bpy.types.Scene):
@@ -340,36 +381,9 @@ def material_name_update_handler(scene: bpy.types.Scene, depsgraph: bpy.types.De
         return
     if not depsgraph.id_type_updated('MATERIAL'):
         return
-    def _strip_numeric_suffix(name: str) -> str:
-        if "." in name:
-            base, suffix = name.rsplit(".", 1)
-            if suffix.isdigit():
-                return base
-        return name
     try:
         for update in depsgraph.updates:
-            material = update.id
-            if not isinstance(material, bpy.types.Material):
-                continue
-            if not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
-                continue
-            last_name = material.ps_mat_data.last_material_name
-            if last_name and last_name != material.name:
-                update_material_name(material, bpy.context)
-            elif not last_name:
-                inferred_old = ""
-                if material.ps_mat_data.groups:
-                    for group in material.ps_mat_data.groups:
-                        if group.name.startswith("PS_"):
-                            inferred_old = _strip_numeric_suffix(group.name[3:])
-                            break
-                        if not inferred_old:
-                            inferred_old = _strip_numeric_suffix(group.name)
-                if inferred_old and inferred_old != material.name:
-                    material.ps_mat_data.last_material_name = inferred_old
-                    update_material_name(material, bpy.context)
-                else:
-                    material.ps_mat_data.last_material_name = material.name
+            _sync_material_name_if_needed(update.id)
     except Exception:
         pass
 
@@ -410,6 +424,7 @@ def on_addon_enable():
             if hasattr(material, 'ps_mat_data') and material.ps_mat_data:
                 if not material.ps_mat_data.last_material_name:
                     material.ps_mat_data.last_material_name = material.name
+                _LAST_HANDLED_MATERIAL_NAMES[material.as_pointer()] = material.name
     except Exception:
         pass
 
@@ -439,18 +454,13 @@ def uv_edit_mode_guard(*args):
 def material_name_msgbus_callback(*args):
     try:
         for material in bpy.data.materials:
-            if not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
-                continue
-            last_name = material.ps_mat_data.last_material_name
-            if last_name and last_name != material.name:
-                update_material_name(material, bpy.context)
-            elif not last_name:
-                material.ps_mat_data.last_material_name = material.name
+            _sync_material_name_if_needed(material)
     except Exception:
         pass
 
 
 def register():
+    _LAST_HANDLED_MATERIAL_NAMES.clear()
     bpy.app.handlers.frame_change_pre.append(frame_change_pre)
     bpy.app.handlers.load_post.append(load_post)
     bpy.app.handlers.save_pre.append(save_handler)
@@ -492,6 +502,7 @@ def register():
     )
 
 def unregister():
+    _LAST_HANDLED_MATERIAL_NAMES.clear()
     bpy.msgbus.clear_by_owner(owner)
     bpy.app.handlers.frame_change_pre.remove(frame_change_pre)
     bpy.app.handlers.load_post.remove(load_post)

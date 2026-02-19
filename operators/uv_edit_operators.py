@@ -400,7 +400,7 @@ def _restore_checker_materials_temp(ps_scene_data) -> None:
         obj.material_slots[entry.slot_index].material = material
 
 
-def _bake_layer_to_uv(context: Context, channel, layer, target_uv: str, ps_scene_data, obj, mat) -> None:
+def _bake_layer_to_uv(context: Context, channel, layer, target_uv: str, ps_scene_data, obj, mat, objects_for_uv=None) -> None:
     if layer.type != 'IMAGE' or not layer.image:
         return
     if layer.coord_type not in {'UV', 'AUTO'}:
@@ -432,7 +432,7 @@ def _bake_layer_to_uv(context: Context, channel, layer, target_uv: str, ps_scene
             width=image_width,
             height=image_height,
             use_udim_tiles=use_udim_tiles,
-            objects=[obj] if obj else None,
+            objects=objects_for_uv or ([obj] if obj else None),
             uv_layer_name=target_uv,
             use_float=ps_scene_data.uv_edit_use_float,
         )
@@ -633,6 +633,11 @@ class PAINTSYSTEM_OT_StartUVEdit(PSContextMixin, Operator):
             self.report({'ERROR'}, "Object has no UV maps")
             return {'CANCELLED'}
 
+        objects_with_mat = _get_objects_with_material(context, ps_ctx.active_material)
+        if obj and obj not in objects_with_mat:
+            objects_with_mat.append(obj)
+        objects_with_mat = [o for o in objects_with_mat if o and o.type == 'MESH']
+
         if not ps_scene_data.uv_edit_source_uv:
             if obj.data.uv_layers.active:
                 ps_scene_data.uv_edit_source_uv = obj.data.uv_layers.active.name
@@ -648,6 +653,15 @@ class PAINTSYSTEM_OT_StartUVEdit(PSContextMixin, Operator):
             target_uv = _create_new_uv_map(context, obj, ps_scene_data)
             ps_scene_data.uv_edit_target_uv = target_uv
             _track_created_uv(ps_scene_data, obj, target_uv)
+
+        for sync_obj in objects_with_mat:
+            uv_layer = sync_obj.data.uv_layers.get(ps_scene_data.uv_edit_target_uv)
+            if not uv_layer:
+                uv_layer = sync_obj.data.uv_layers.new(name=ps_scene_data.uv_edit_target_uv)
+                _track_created_uv(ps_scene_data, sync_obj, uv_layer.name)
+            sync_obj.data.uv_layers.active = uv_layer
+            uv_layer.active_render = True
+            uv_layer.active_clone = True
 
         obj.data.uv_layers.active = obj.data.uv_layers.get(ps_scene_data.uv_edit_target_uv)
         if obj.data.uv_layers.active:
@@ -757,14 +771,19 @@ class PAINTSYSTEM_OT_ApplyUVEdit(PSContextMixin, MultiMaterialOperator, Operator
         _restore_uv_editor_image(ps_scene_data, context)
         _restore_previous_uvs(ps_scene_data, restore_render=False)
         _restore_checker_materials(ps_scene_data)
+        list_material = bpy.data.materials.get(ps_scene_data.uv_edit_source_material_name) if ps_scene_data.uv_edit_source_material_name else ps_ctx.active_material
+        objects_with_mat = _get_objects_with_material(context, list_material)
+        if ps_ctx.ps_object and ps_ctx.ps_object not in objects_with_mat:
+            objects_with_mat.append(ps_ctx.ps_object)
+        objects_with_mat = [obj for obj in objects_with_mat if obj and obj.type == 'MESH']
         if not ps_scene_data.uv_edit_keep_old_uv:
             source_uv = (ps_scene_data.uv_edit_source_uv or "").strip()
             target_uv = (ps_scene_data.uv_edit_target_uv or "").strip()
-            if ps_ctx.ps_object and source_uv and source_uv != target_uv:
-                if ps_ctx.ps_object.data.uv_layers.get(source_uv):
-                    ps_ctx.ps_object.data.uv_layers.remove(ps_ctx.ps_object.data.uv_layers.get(source_uv))
-        objects = ps_ctx.ps_objects or ([ps_ctx.ps_object] if ps_ctx.ps_object else [])
-        _set_active_uv(objects, ps_scene_data.uv_edit_target_uv)
+            if source_uv and source_uv != target_uv:
+                for obj in objects_with_mat:
+                    if obj.data.uv_layers.get(source_uv) and len(obj.data.uv_layers) > 1:
+                        obj.data.uv_layers.remove(obj.data.uv_layers.get(source_uv))
+        _set_active_uv(objects_with_mat, ps_scene_data.uv_edit_target_uv)
         ps_scene_data.uv_edit_created_uvs.clear()
         return result
 
@@ -783,24 +802,29 @@ class PAINTSYSTEM_OT_ApplyUVEdit(PSContextMixin, MultiMaterialOperator, Operator
         if not ps_mat_data or not ps_mat_data.groups:
             return True
         ps_scene_data = context.scene.ps_scene_data
-        obj = ps_ctx.ps_object
+        base_obj = ps_ctx.ps_object
         target_uv = ps_scene_data.uv_edit_target_uv
         if not target_uv:
             return True
-        _ensure_uv_map(obj, target_uv)
 
         objects_with_mat = []
         if ps_scene_data.uv_edit_material_overrides:
             seen = set()
             for entry in ps_scene_data.uv_edit_material_overrides:
-                obj = bpy.data.objects.get(entry.object_name)
-                if obj and obj.name not in seen:
-                    objects_with_mat.append(obj)
-                    seen.add(obj.name)
+                override_obj = bpy.data.objects.get(entry.object_name)
+                if override_obj and override_obj.name not in seen:
+                    objects_with_mat.append(override_obj)
+                    seen.add(override_obj.name)
         if not objects_with_mat:
             objects_with_mat = _get_objects_with_material(context, bake_material)
-        if obj and obj not in objects_with_mat:
-            objects_with_mat.append(obj)
+        if base_obj and base_obj not in objects_with_mat:
+            objects_with_mat.append(base_obj)
+
+        for sync_obj in objects_with_mat:
+            uv_layer = _ensure_uv_map(sync_obj, target_uv)
+            sync_obj.data.uv_layers.active = uv_layer
+            uv_layer.active_render = True
+            uv_layer.active_clone = True
 
         excluded = {
             name.strip()
@@ -821,13 +845,14 @@ class PAINTSYSTEM_OT_ApplyUVEdit(PSContextMixin, MultiMaterialOperator, Operator
                     if not should_bake_channel(channel):
                         continue
                     for layer in channel.flattened_layers:
-                        _bake_layer_to_uv(bake_context, channel, layer, target_uv, ps_scene_data, obj, bake_material)
+                        _bake_layer_to_uv(bake_context, channel, layer, target_uv, ps_scene_data, base_obj, bake_material, objects_for_uv=objects_with_mat)
 
         if ps_scene_data.uv_edit_material_overrides:
             _restore_checker_materials_temp(ps_scene_data)
 
+        active_obj = base_obj if base_obj in objects_with_mat else (objects_with_mat[0] if objects_with_mat else None)
         if objects_with_mat:
-            with context.temp_override(selected_objects=objects_with_mat, active_object=obj, object=obj):
+            with context.temp_override(selected_objects=objects_with_mat, active_object=active_obj, object=active_obj):
                 bake_all_layers(bpy.context)
         else:
             bake_all_layers(context)

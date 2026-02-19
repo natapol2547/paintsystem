@@ -93,10 +93,18 @@ class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSImageCreateMixin, MultiMaterialO
         default='NEW'
     )
     filepath: StringProperty(
+        name="File Path",
+        description="Path to the imported image",
+        default="",
         subtype='FILE_PATH',
+        options={'SKIP_SAVE'}
     )
     directory: StringProperty(
+        name="Directory",
+        description="Directory used by the file browser",
+        default="",
         subtype='DIR_PATH',
+        options={'SKIP_SAVE'}
     )
     filter_glob: StringProperty(
         default='*.jpg;*.jpeg;*.png;*.tif;*.tiff;*.bmp',
@@ -146,10 +154,10 @@ class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSImageCreateMixin, MultiMaterialO
     def invoke(self, context, event):
         self.get_coord_type(context)
         self.image_name = self.get_next_image_name(context)
-        if self.image_resolution != 'CUSTOM':
-            self.image_width = int(self.image_resolution)
-            self.image_height = int(self.image_resolution)
+        self.apply_preferred_source_image_resolution(context)
         if self.image_add_type == 'IMPORT':
+            if not self.directory:
+                self.directory = bpy.path.abspath("//")
             context.window_manager.fileselect_add(self)
             return {'RUNNING_MODAL'}
         if self.image_add_type == 'EXISTING':

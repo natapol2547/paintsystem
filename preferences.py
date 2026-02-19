@@ -26,7 +26,11 @@ class PaintSystemPreferences:
     preferred_coord_type: str = 'UNDETECTED'
     show_opacity_in_layer_list: bool = True
     use_panel_quick_access: bool = False
-    automatic_name_sync: bool = True
+    automatic_name_syncing: bool = True
+
+    @property
+    def automatic_name_sync(self) -> bool:
+        return self.automatic_name_syncing
 
 def get_preferences(context) -> PaintSystemPreferences:
     """Get the Paint System preferences"""

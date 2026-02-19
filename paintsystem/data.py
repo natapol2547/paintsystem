@@ -130,6 +130,13 @@ def _safe_set_id_name(id_block, new_name: str) -> bool:
     except Exception:
         return False
 
+
+def is_auto_name_sync_enabled(context: Context | None = None) -> bool:
+    prefs = get_preferences(context or bpy.context)
+    if hasattr(prefs, "automatic_name_syncing"):
+        return bool(getattr(prefs, "automatic_name_syncing"))
+    return bool(getattr(prefs, "automatic_name_sync", True))
+
 MASK_TYPE_ENUM = [
     ('IMAGE', "Image", "Image layer"),
 ]
@@ -919,14 +926,9 @@ class Layer(BaseNestedListItem):
         self.updating_name_flag = True
         if self.layer_name != self.name:
             self.layer_name = self.name
-        # Sync image name if automatic name syncing is enabled
+        # Keep image datablock name aligned with layer name
         if context and self.type == 'IMAGE' and self.image:
-            try:
-                prefs = get_preferences(context)
-                if prefs.automatic_name_sync:
-                    self.image.name = self.name
-            except:
-                pass
+            _safe_set_id_name(self.image, self.name)
         self.updating_name_flag = False
         self.update_node_tree(context)
     
@@ -1043,8 +1045,8 @@ class Layer(BaseNestedListItem):
         
         match self.type:
             case "IMAGE":
-                if self.image and getattr(get_preferences(context), "automatic_name_sync", True):
-                    self.image.name = self.name
+                if self.image:
+                    _safe_set_id_name(self.image, self.name)
             case "GRADIENT":
                 if self.gradient_type in ('LINEAR', 'RADIAL', 'FAKE_LIGHT'):
                     if not self.empty_object:
@@ -1428,11 +1430,25 @@ class Layer(BaseNestedListItem):
         default=False,
         update=update_active_channel
     )
+
+    def update_enabled(self, context):
+        layer_data = self.get_layer_data()
+        channels_to_update = set(find_channels_containing_layer(self))
+
+        if layer_data:
+            layer_data.update_node_tree(context)
+            channels_to_update.update(find_channels_containing_layer(layer_data))
+
+        for channel in channels_to_update:
+            if channel.use_bake_image:
+                channel.use_bake_image = False
+            channel.update_node_tree(context)
+
     enabled: BoolProperty(
         name="Enabled",
         description="Toggle layer visibility",
         default=True,
-        update=update_node_tree,
+        update=update_enabled,
         options=set()
     )
     lock_alpha: BoolProperty(
@@ -1851,7 +1867,7 @@ def restore_cycles_settings(settings):
     scene.cycles.use_denoising = settings['use_denoising']
     scene.cycles.use_adaptive_sampling = settings['use_adaptive_sampling']
 
-def ps_bake(context, objects: list[Object], mat: Material, uv_layer, bake_image, use_gpu=True, use_clear=True, margin=8, margin_type='ADJACENT_FACES'):
+def ps_bake(context, objects: list[Object], mat: Material, uv_layer, bake_image, use_gpu=True, use_clear=True, margin=8, margin_type='ADJACENT_FACES', disable_deform_modifiers=False):
     bake_objects = []
     
     ensure_udim_tiles(bake_image, objects, uv_layer)
@@ -1873,6 +1889,17 @@ def ps_bake(context, objects: list[Object], mat: Material, uv_layer, bake_image,
     orig_view_transform = str(context.scene.view_settings.view_transform)
     
     node_tree = mat.node_tree
+    
+    # Store and optionally disable deform modifiers
+    modifier_states = {}
+    if disable_deform_modifiers:
+        for obj in bake_objects:
+            if obj.type == 'MESH':
+                modifier_states[obj] = {}
+                for mod in obj.modifiers:
+                    if mod.type in {'ARMATURE', 'LATTICE', 'CURVE', 'MESH_DEFORM', 'SHRINKWRAP', 'SIMPLE_DEFORM', 'SMOOTH', 'CAST', 'WAVE', 'HOOK'}:
+                        modifier_states[obj][mod] = mod.show_render
+                        mod.show_render = False
     
     image_node = node_tree.nodes.new(type='ShaderNodeTexImage')
     image_node.image = bake_image
@@ -1905,6 +1932,11 @@ def ps_bake(context, objects: list[Object], mat: Material, uv_layer, bake_image,
 
     # Delete bake nodes
     node_tree.nodes.remove(image_node)
+    
+    # Restore modifier states
+    for obj, mod_dict in modifier_states.items():
+        for mod, state in mod_dict.items():
+            mod.show_render = state
     
     context.scene.view_settings.view_transform = orig_view_transform
     
@@ -2084,9 +2116,24 @@ class Channel(BaseNestedListManager):
                 node_builder.link("bake_image", "group_output", "Alpha", "Alpha")
                 node_builder.compile()
                 return
+
+        def is_layer_enabled_in_stack(unlinked_layer: "Layer") -> bool:
+            if not unlinked_layer.enabled:
+                return False
+            parent_id = unlinked_layer.parent_id
+            while parent_id != -1:
+                parent_layer = self.get_item_by_id(parent_id)
+                if not parent_layer:
+                    break
+                if not parent_layer.enabled:
+                    return False
+                parent_id = parent_layer.parent_id
+            return True
             
         if len(flattened_unlinked_layers) > 0:
             for unlinked_layer in flattened_unlinked_layers:
+                if not is_layer_enabled_in_stack(unlinked_layer):
+                    continue
                 layer = unlinked_layer.get_layer_data()
                 if layer is None or not layer.node_tree:
                     continue
@@ -2306,7 +2353,8 @@ class Channel(BaseNestedListManager):
             force_alpha: bool = True, # Force to use alpha
             as_tangent_normal: bool = False, # Bake as tangent normal
             margin: int = 8, # Margin
-            margin_type: Literal['ADJACENT_FACES', 'EXTEND'] = "ADJACENT_FACES" # Margin type
+            margin_type: Literal['ADJACENT_FACES', 'EXTEND'] = "ADJACENT_FACES", # Margin type
+            disable_deform_modifiers: bool = False # Disable deform modifiers for tangent normal baking
             ):
         """Bake the channel
 
@@ -2391,11 +2439,11 @@ class Channel(BaseNestedListManager):
             # Bake image
             connect_sockets(surface_socket, color_output)
             temp_alpha_image = bake_image.copy()
-            bake_image = ps_bake(context, ps_objects, mat, uv_layer, bake_image, use_gpu, margin=margin, margin_type=margin_type)
+            bake_image = ps_bake(context, ps_objects, mat, uv_layer, bake_image, use_gpu, margin=margin, margin_type=margin_type, disable_deform_modifiers=disable_deform_modifiers)
             
             temp_alpha_image.colorspace_settings.name = 'Non-Color'
             connect_sockets(surface_socket, alpha_output)
-            temp_alpha_image = ps_bake(context, ps_objects, mat, uv_layer, temp_alpha_image, use_gpu, margin=margin, margin_type=margin_type)
+            temp_alpha_image = ps_bake(context, ps_objects, mat, uv_layer, temp_alpha_image, use_gpu, margin=margin, margin_type=margin_type, disable_deform_modifiers=disable_deform_modifiers)
 
             if bake_image and temp_alpha_image:
                 # pixels_bake = np.empty(len(bake_image.pixels), dtype=np.float32)
@@ -3580,24 +3628,9 @@ def _replace_prefix(name: str, old_prefix: str, new_prefix: str) -> str | None:
 
 
 def ensure_group_name_prefix(group_name: str, material_name: str, old_material_name: str | None = None) -> str:
-    new_prefix = material_name
-    if group_name == new_prefix or group_name.startswith(f"{new_prefix}_"):
+    if group_name == material_name:
         return group_name
-    if old_material_name:
-        renamed = _replace_prefix(group_name, old_material_name, new_prefix)
-        if renamed:
-            return renamed
-        renamed = _replace_prefix(group_name, f"PS_{old_material_name}", new_prefix)
-        if renamed:
-            return renamed
-    if group_name.startswith("PS_"):
-        stripped = group_name[3:]
-        if stripped == new_prefix or stripped.startswith(f"{new_prefix}_"):
-            return stripped
-        if "_" in stripped:
-            suffix = stripped.split("_", 1)[1]
-            return f"{new_prefix}_{suffix}"
-    return new_prefix
+    return material_name
 
 
 def _set_layer_name(layer: "Layer", new_name: str, context: Context):
@@ -3618,7 +3651,7 @@ def update_material_name(material: Material, context: Context = None, force: boo
     if not material or not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
         return
     prefs = get_preferences(context)
-    if not force and not getattr(prefs, "automatic_name_sync", True):
+    if not force and not is_auto_name_sync_enabled(context):
         material.ps_mat_data.last_material_name = material.name
         return
 
@@ -3626,7 +3659,7 @@ def update_material_name(material: Material, context: Context = None, force: boo
     old_name = ps_mat_data.last_material_name or material.name
     new_name = material.name
 
-    # Update group names with PS_ prefix
+    # Update group names to follow material naming
     group_old_names: dict[int, str] = {}
     group_new_names: dict[int, str] = {}
     for group_idx, group in enumerate(ps_mat_data.groups):
@@ -3652,7 +3685,7 @@ def update_material_name(material: Material, context: Context = None, force: boo
                 if not new_bake_name:
                     new_bake_name = _replace_prefix(bake_image.name, f"PS_{old_name}", f"PS_{new_name}")
                 if new_bake_name and bake_image.name != new_bake_name:
-                    bake_image.name = new_bake_name
+                    _safe_set_id_name(bake_image, new_bake_name)
             for layer in channel.layers:
                 if layer.is_linked:
                     continue
@@ -3662,7 +3695,7 @@ def update_material_name(material: Material, context: Context = None, force: boo
                 new_layer_name = ensure_layer_name_prefix(layer_data.name, new_name, old_name)
                 _set_layer_name(layer_data, new_layer_name, context)
                 if layer_data.image and layer_data.image.name != layer_data.name:
-                    layer_data.image.name = layer_data.name
+                    _safe_set_id_name(layer_data.image, layer_data.name)
 
     ps_mat_data.last_material_name = new_name
 

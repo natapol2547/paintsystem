@@ -136,8 +136,8 @@ class MAT_PT_UL_LayerList(PSContextMixin, UIList):
                 op.layer_id = item.id
             if ps_ctx.ps_settings.show_opacity_in_layer_list:
                 row.label(text=f"{linked_item.opacity:.1f}")
-            row.prop(linked_item, "enabled", text="",
-                     icon="HIDE_OFF" if linked_item.enabled else "HIDE_ON", emboss=False)
+            row.prop(item, "enabled", text="",
+                     icon="HIDE_OFF" if item.enabled else "HIDE_ON", emboss=False)
             self.draw_custom_properties(row, linked_item)
 
     def filter_items(self, context, data, propname):

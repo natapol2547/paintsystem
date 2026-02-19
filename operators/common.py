@@ -10,6 +10,11 @@ from bpy.props import BoolProperty, EnumProperty, StringProperty
 
 from ..paintsystem.graph.common import DEFAULT_PS_UV_MAP_NAME
 from ..paintsystem.image import *
+from ..paintsystem.resolution import (
+    get_layer_image_resolution,
+    get_preferred_channel_image_resolution,
+    get_preferred_group_image_resolution,
+)
 
 icons = bpy.types.UILayout.bl_rna.functions["prop"].parameters["icon"].enum_items.keys()
 
@@ -240,6 +245,51 @@ class PSImageCreateMixin(PSUVOptionsMixin):
         default=False,
         options={'SKIP_SAVE'}
     )
+
+    def _get_layer_image_resolution(self, unlinked_layer, require_non_correct_aspect=False, include_corrected_non_square=False):
+        return get_layer_image_resolution(
+            unlinked_layer,
+            require_non_correct_aspect=require_non_correct_aspect,
+            include_corrected_non_square=include_corrected_non_square,
+        )
+
+    def get_preferred_channel_image_resolution(self, channel, require_non_correct_aspect=False, include_corrected_non_square=False):
+        return get_preferred_channel_image_resolution(
+            channel,
+            require_non_correct_aspect=require_non_correct_aspect,
+            include_corrected_non_square=include_corrected_non_square,
+        )
+
+    def get_preferred_group_image_resolution(self, group, require_non_correct_aspect=False, include_corrected_non_square=False):
+        return get_preferred_group_image_resolution(
+            group,
+            require_non_correct_aspect=require_non_correct_aspect,
+            include_corrected_non_square=include_corrected_non_square,
+        )
+
+    def get_preferred_source_image_resolution(self, context):
+        ps_ctx = PSContextMixin.parse_context(context)
+        active_channel = ps_ctx.active_channel
+        if not active_channel:
+            return None
+
+        if ps_ctx.unlinked_layer:
+            resolution = self._get_layer_image_resolution(ps_ctx.unlinked_layer, require_non_correct_aspect=True)
+            if resolution:
+                return resolution
+
+        return self.get_preferred_channel_image_resolution(active_channel, require_non_correct_aspect=True)
+
+    def apply_preferred_source_image_resolution(self, context):
+        if self.image_resolution == 'CUSTOM':
+            return
+        resolution = self.get_preferred_source_image_resolution(context)
+        if resolution:
+            self.image_resolution = 'CUSTOM'
+            self.image_width, self.image_height = resolution
+        else:
+            self.image_width = int(self.image_resolution)
+            self.image_height = int(self.image_resolution)
     
     def image_create_ui(self, layout, context, show_name=True, show_float=True):
         if show_name:

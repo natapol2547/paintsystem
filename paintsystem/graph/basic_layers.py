@@ -363,12 +363,14 @@ class PSNodeTreeBuilder:
 
     @classmethod
     def create_layer_graph(cls, layer: "Layer", context: Context) -> "PSNodeTreeBuilder":
+        from ..data import _safe_set_id_name
+        
         layer_pre_processing(layer, context)
         
         match layer.type:
             case "IMAGE":
                 if layer.image:
-                    layer.image.name = layer.layer_name
+                    _safe_set_id_name(layer.image, layer.layer_name)
                 img = layer.image
                 color_socket = parse_socket_name(layer, layer.color_output_name, "Color")
                 alpha_socket = parse_socket_name(layer, layer.alpha_output_name, "Alpha")

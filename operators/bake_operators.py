@@ -77,12 +77,40 @@ class BakeOperator(PSContextMixin, PSImageCreateMixin, Operator):
                 if obj.type == 'MESH' and mat.name in obj.data.materials:
                     objects.append(obj)
         return objects
+
+    def get_preferred_bake_resolution(self, channel) -> tuple[int, int] | None:
+        return self.get_preferred_channel_image_resolution(
+            channel,
+            include_corrected_non_square=True,
+        )
+
+    def get_group_preferred_bake_resolution(self, group) -> tuple[int, int] | None:
+        return self.get_preferred_group_image_resolution(
+            group,
+            include_corrected_non_square=True,
+        )
+
+    def get_preview_bake_resolution(self, context: Context) -> tuple[int, int] | None:
+        ps_ctx = self.parse_context(context)
+        if ps_ctx.active_channel:
+            resolution = self.get_preferred_bake_resolution(ps_ctx.active_channel)
+            if resolution:
+                return resolution
+        if ps_ctx.active_group:
+            resolution = self.get_group_preferred_bake_resolution(ps_ctx.active_group)
+            if resolution:
+                return resolution
+        return None
     
     def invoke(self, context, event):
         """Invoke the operator to create a new channel."""
         ps_ctx = self.parse_context(context)
         self.update_bake_multiple_objects(context)
         self.get_coord_type(context)
+        preview_resolution = self.get_preview_bake_resolution(context)
+        if preview_resolution and self.image_resolution != 'CUSTOM':
+            self.image_resolution = 'CUSTOM'
+            self.image_width, self.image_height = preview_resolution
         if self.use_paint_system_uv:
             self.uv_map_name = DEFAULT_PS_UV_MAP_NAME
         self.image_name = f"{ps_ctx.active_group.name}_{ps_ctx.active_channel.name}"
@@ -146,7 +174,11 @@ class BakeOperator(PSContextMixin, PSImageCreateMixin, Operator):
     
     def bake_image_ui(self, layout: UILayout, context: Context):
         ps_ctx = self.parse_context(context)
+        preview_resolution = self.get_preview_bake_resolution(context)
         self.image_create_ui(layout, context, show_name=False, show_float=True)
+        if preview_resolution:
+            box = layout.box()
+            box.label(text=f"Auto Resolution: {preview_resolution[0]} x {preview_resolution[1]}", icon='INFO')
         box = layout.box()
         box.label(text="UV Map", icon='UV')
         box.prop_search(self, "uv_map_name", ps_ctx.ps_object.data, "uv_layers", text="")
@@ -213,72 +245,115 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
         start_time = time.time()
         bake_materials = self.get_enabled_materials(context)
         ps_ctx = self.parse_context(context)
+        target_group_name = ps_ctx.active_group.name if ps_ctx.active_group else None
+        target_channel_name = ps_ctx.active_channel.name if ps_ctx.active_channel else None
         if not bake_materials:
             self.report({'ERROR'}, "No materials to bake.")
             return {'CANCELLED'}
         # Set cursor to wait
         context.window.cursor_set('WAIT')
+        baked_count = 0
+        skipped_materials = []
         
         for mat in bake_materials:
             # Get the active channel for the material
-            _, _, active_channel, _ = parse_material(mat)
+            mat_data, active_group, active_channel, _ = parse_material(mat)
+            group_to_use = active_group
+
+            if not active_channel and mat_data and mat_data.groups:
+                if target_group_name:
+                    group_to_use = mat_data.groups.get(target_group_name)
+                if not group_to_use:
+                    group_to_use = active_group
+                if not group_to_use and len(mat_data.groups) > 0:
+                    group_to_use = mat_data.groups[0]
+
+                if group_to_use and len(group_to_use.channels) > 0:
+                    if target_channel_name:
+                        active_channel = group_to_use.channels.get(target_channel_name)
+                    if not active_channel:
+                        channel_index = min(group_to_use.active_index, len(group_to_use.channels) - 1)
+                        active_channel = group_to_use.channels[channel_index]
+
+            if not active_channel:
+                skipped_materials.append(mat.name)
+                continue
+
             self.image_name = f"{mat.name}_Baked"
-            if self.image_resolution != 'CUSTOM':
+            auto_resolution = self.get_preferred_bake_resolution(active_channel)
+            if not auto_resolution:
+                auto_resolution = self.get_group_preferred_bake_resolution(group_to_use)
+
+            original_image_resolution = self.image_resolution
+            original_image_width = self.image_width
+            original_image_height = self.image_height
+            if auto_resolution:
+                self.image_resolution = 'CUSTOM'
+                self.image_width, self.image_height = auto_resolution
+            elif self.image_resolution != 'CUSTOM':
                 self.image_width = int(self.image_resolution)
                 self.image_height = int(self.image_resolution)
+
             bake_image = None
-            if self.as_layer:
-                bake_image = self.create_image(context)
-                bake_image.colorspace_settings.name = 'sRGB'
-                active_channel.bake(
-                    context,
-                    mat,
-                    bake_image,
-                    self.uv_map_name,
-                    force_alpha=True,
-                    as_tangent_normal=self.as_tangent_normal,
-                    use_gpu=self.use_gpu,
-                    margin=self.margin,
-                    margin_type=self.margin_type,
-                    disable_deform_modifiers=self.as_tangent_normal and active_channel.type == 'VECTOR'
-                )
-                active_channel.create_layer(
-                    context, 
-                    layer_name=self.image_name, 
-                    layer_type="IMAGE", 
-                    insert_at="START",
-                    image=bake_image,
-                    coord_type='UV',
-                    uv_map_name=self.uv_map_name
-                )
-            else:
-                bake_image = active_channel.bake_image
-                if not bake_image:
-                    # No bake image exists yet, create one
+            try:
+                if self.as_layer:
                     bake_image = self.create_image(context)
-                    active_channel.bake_image = bake_image
-                elif bake_image.size[0] != self.image_width or bake_image.size[1] != self.image_height:
-                    bake_image.scale(self.image_width, self.image_height)
-                bake_image.colorspace_settings.name = 'Non-Color' if active_channel.color_space == 'NONCOLOR' else 'sRGB'
-                active_channel.bake_uv_map = self.uv_map_name
-                    
-                active_channel.use_bake_image = False
-                active_channel.bake(
-                    context,
-                    mat,
-                    bake_image,
-                    self.uv_map_name,
-                    as_tangent_normal=self.as_tangent_normal,
-                    use_gpu=self.use_gpu,
-                    margin=self.margin,
-                    margin_type=self.margin_type,
-                    disable_deform_modifiers=self.as_tangent_normal and active_channel.type == 'VECTOR'
-                )
-                if self.as_tangent_normal:
-                    active_channel.bake_vector_space = 'TANGENT'
+                    bake_image.colorspace_settings.name = 'sRGB'
+                    active_channel.bake(
+                        context,
+                        mat,
+                        bake_image,
+                        self.uv_map_name,
+                        force_alpha=True,
+                        as_tangent_normal=self.as_tangent_normal,
+                        use_gpu=self.use_gpu,
+                        margin=self.margin,
+                        margin_type=self.margin_type,
+                        disable_deform_modifiers=self.as_tangent_normal and active_channel.type == 'VECTOR'
+                    )
+                    active_channel.create_layer(
+                        context, 
+                        layer_name=self.image_name, 
+                        layer_type="IMAGE", 
+                        insert_at="START",
+                        image=bake_image,
+                        coord_type='UV',
+                        uv_map_name=self.uv_map_name,
+                        correct_image_aspect=False
+                    )
                 else:
-                    active_channel.bake_vector_space = active_channel.vector_space
-                active_channel.use_bake_image = True
+                    bake_image = active_channel.bake_image
+                    if not bake_image:
+                        # No bake image exists yet, create one
+                        bake_image = self.create_image(context)
+                        active_channel.bake_image = bake_image
+                    elif bake_image.size[0] != self.image_width or bake_image.size[1] != self.image_height:
+                        bake_image.scale(self.image_width, self.image_height)
+                    bake_image.colorspace_settings.name = 'Non-Color' if active_channel.color_space == 'NONCOLOR' else 'sRGB'
+                    active_channel.bake_uv_map = self.uv_map_name
+                        
+                    active_channel.use_bake_image = False
+                    active_channel.bake(
+                        context,
+                        mat,
+                        bake_image,
+                        self.uv_map_name,
+                        as_tangent_normal=self.as_tangent_normal,
+                        use_gpu=self.use_gpu,
+                        margin=self.margin,
+                        margin_type=self.margin_type,
+                        disable_deform_modifiers=self.as_tangent_normal and active_channel.type == 'VECTOR'
+                    )
+                    if self.as_tangent_normal:
+                        active_channel.bake_vector_space = 'TANGENT'
+                    else:
+                        active_channel.bake_vector_space = active_channel.vector_space
+                    active_channel.use_bake_image = True
+            finally:
+                self.image_resolution = original_image_resolution
+                self.image_width = original_image_width
+                self.image_height = original_image_height
+            baked_count += 1
         # Return to object mode
         bpy.ops.object.mode_set(mode="OBJECT")
         # Set cursor to default
@@ -286,7 +361,12 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
         
         end_time = time.time()
         # report the time taken
-        self.report({'INFO'}, f"Baked {len(bake_materials)} materials in {round(end_time - start_time, 2)} seconds")
+        if skipped_materials:
+            skipped_preview = ", ".join(skipped_materials[:3])
+            if len(skipped_materials) > 3:
+                skipped_preview += ", ..."
+            self.report({'WARNING'}, f"Skipped {len(skipped_materials)} material(s) with no compatible channel: {skipped_preview}")
+        self.report({'INFO'}, f"Baked {baked_count} material{'s' if baked_count != 1 else ''} in {round(end_time - start_time, 2)} seconds")
         return {'FINISHED'}
 
 
@@ -317,25 +397,48 @@ class PAINTSYSTEM_OT_BakeAllChannels(BakeOperator):
         # Set cursor to wait
         context.window.cursor_set('WAIT')
         
-        if self.image_resolution != 'CUSTOM':
-            self.image_width = int(self.image_resolution)
-            self.image_height = int(self.image_resolution)
         ps_ctx = self.parse_context(context)
         for mat in bake_materials:
             _, active_group, _, _ = parse_material(mat)
+            if not active_group:
+                continue
+            group_auto_resolution = self.get_group_preferred_bake_resolution(active_group)
             for channel in active_group.channels:
+                auto_resolution = self.get_preferred_bake_resolution(channel) or group_auto_resolution
+                original_image_resolution = self.image_resolution
+                original_image_width = self.image_width
+                original_image_height = self.image_height
+                if auto_resolution:
+                    self.image_resolution = 'CUSTOM'
+                    self.image_width, self.image_height = auto_resolution
+                elif self.image_resolution != 'CUSTOM':
+                    self.image_width = int(self.image_resolution)
+                    self.image_height = int(self.image_resolution)
                 bake_image = channel.bake_image
-                if not bake_image:
-                    self.image_name = f"{active_group.name}_{channel.name}_Baked"
-                    bake_image = self.create_image(context)
-                    channel.bake_image = bake_image
-                elif bake_image.size[0] != self.image_width or bake_image.size[1] != self.image_height:
-                    bake_image.scale(self.image_width, self.image_height)
-                bake_image.colorspace_settings.name = 'Non-Color' if channel.color_space == 'NONCOLOR' else 'sRGB'
-                channel.use_bake_image = False
-                channel.bake_uv_map = self.uv_map_name
-                channel.bake(context, mat, bake_image, self.uv_map_name)
-                channel.use_bake_image = True
+                try:
+                    if not bake_image:
+                        self.image_name = f"{active_group.name}_{channel.name}_Baked"
+                        bake_image = self.create_image(context)
+                        channel.bake_image = bake_image
+                    elif bake_image.size[0] != self.image_width or bake_image.size[1] != self.image_height:
+                        bake_image.scale(self.image_width, self.image_height)
+                    bake_image.colorspace_settings.name = 'Non-Color' if channel.color_space == 'NONCOLOR' else 'sRGB'
+                    channel.use_bake_image = False
+                    channel.bake_uv_map = self.uv_map_name
+                    channel.bake(
+                        context,
+                        mat,
+                        bake_image,
+                        self.uv_map_name,
+                        use_gpu=self.use_gpu,
+                        margin=self.margin,
+                        margin_type=self.margin_type
+                    )
+                    channel.use_bake_image = True
+                finally:
+                    self.image_resolution = original_image_resolution
+                    self.image_width = original_image_width
+                    self.image_height = original_image_height
         # Return to object mode
         bpy.ops.object.mode_set(mode="OBJECT")
         # Set cursor to default
@@ -588,7 +691,46 @@ class PAINTSYSTEM_OT_TransferImageLayerUV(BakeOperator):
         orig_is_clip = bool(active_layer.is_clip)
         if active_layer.is_clip:
             active_layer.is_clip = False
-        active_channel.bake(context, ps_ctx.active_material, transferred_image, self.uv_map_name, use_group_tree=False, force_alpha=True)
+
+        objects_with_mat = self.find_objects_with_materials(context, [ps_ctx.active_material])
+        if ps_ctx.ps_object and ps_ctx.ps_object not in objects_with_mat:
+            objects_with_mat.append(ps_ctx.ps_object)
+        objects_with_mat = [obj for obj in objects_with_mat if obj and obj.type == 'MESH']
+
+        for obj in objects_with_mat:
+            uv_layers = obj.data.uv_layers
+            uv_layer = uv_layers.get(self.uv_map_name)
+            if not uv_layer:
+                uv_layer = uv_layers.new(name=self.uv_map_name)
+            uv_layers.active = uv_layer
+            uv_layer.active_render = True
+
+        active_obj = ps_ctx.ps_object if ps_ctx.ps_object in objects_with_mat else (objects_with_mat[0] if objects_with_mat else ps_ctx.ps_object)
+        if objects_with_mat and active_obj:
+            with context.temp_override(selected_objects=objects_with_mat, active_object=active_obj, object=active_obj):
+                active_channel.bake(
+                    bpy.context,
+                    ps_ctx.active_material,
+                    transferred_image,
+                    self.uv_map_name,
+                    use_gpu=self.use_gpu,
+                    use_group_tree=False,
+                    force_alpha=True,
+                    margin=self.margin,
+                    margin_type=self.margin_type
+                )
+        else:
+            active_channel.bake(
+                context,
+                ps_ctx.active_material,
+                transferred_image,
+                self.uv_map_name,
+                use_gpu=self.use_gpu,
+                use_group_tree=False,
+                force_alpha=True,
+                margin=self.margin,
+                margin_type=self.margin_type
+            )
         if active_layer.is_clip != orig_is_clip:
             active_layer.is_clip = orig_is_clip
         set_layer_blend_type(active_layer, original_blend_mode)
@@ -659,7 +801,17 @@ class PAINTSYSTEM_OT_ConvertToImageLayer(BakeOperator):
         orig_is_clip = bool(active_layer.is_clip)
         if active_layer.is_clip:
             active_layer.is_clip = False
-        active_channel.bake(context, ps_ctx.active_material, image, self.uv_map_name, use_group_tree=False, force_alpha=True)
+        active_channel.bake(
+            context,
+            ps_ctx.active_material,
+            image,
+            self.uv_map_name,
+            use_gpu=self.use_gpu,
+            use_group_tree=False,
+            force_alpha=True,
+            margin=self.margin,
+            margin_type=self.margin_type
+        )
         if active_layer.is_clip != orig_is_clip:
             active_layer.is_clip = orig_is_clip
         set_layer_blend_type(active_layer, original_blend_mode)
@@ -667,6 +819,7 @@ class PAINTSYSTEM_OT_ConvertToImageLayer(BakeOperator):
         active_layer.uv_map_name = self.uv_map_name
         active_layer.image = image
         active_layer.type = 'IMAGE'
+        active_layer.correct_image_aspect = False
         for layer in to_be_enabled_layers:
             layer.enabled = True
         active_channel.remove_children(active_layer.id)
