@@ -91,8 +91,9 @@ TEMPLATE_ENUM = [
     ('BASIC', "Blank Canvas", "Blank canvas painting setup", "IMAGE", 0),
     ('PAINT_OVER', "Paint Over", "Paint over the existing material", get_icon('paintbrush'), 1),
     ('PBR', "PBR", "PBR painting setup", "MATERIAL", 2),
-    ('NORMAL', "Normals Painting", "Start off with a normal painting setup", "NORMALS_VERTEX_FACE", 3),
-    ('NONE', "None", "Just add node group to material", "NONE", 4),
+    ('BASIC_EMISSION', "Basic (Emission)", "Basic painting with emission channel", "LIGHT", 3),
+    ('NORMAL', "Normals Painting", "Start off with a normal painting setup", "NORMALS_VERTEX_FACE", 4),
+    ('NONE', "None", "Just add node group to material", "NONE", 5),
 ]
 
 LAYER_TYPE_ENUM = [
@@ -1042,7 +1043,7 @@ class Layer(BaseNestedListItem):
         
         match self.type:
             case "IMAGE":
-                if self.image and getattr(get_preferences(context), "automatic_name_syncing", True):
+                if self.image and getattr(get_preferences(context), "automatic_name_sync", True):
                     self.image.name = self.name
             case "GRADIENT":
                 if self.gradient_type in ('LINEAR', 'RADIAL', 'FAKE_LIGHT'):
@@ -3617,7 +3618,7 @@ def update_material_name(material: Material, context: Context = None, force: boo
     if not material or not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
         return
     prefs = get_preferences(context)
-    if not force and not getattr(prefs, "automatic_name_syncing", True):
+    if not force and not getattr(prefs, "automatic_name_sync", True):
         material.ps_mat_data.last_material_name = material.name
         return
 

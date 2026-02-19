@@ -165,7 +165,7 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
         if self.disable_show_backface:
             mat.show_transparent_back = False
             mat.use_backface_culling = True
-        if self.template == 'BASIC' and self.set_view_transform:
+        if self.template in ['BASIC', 'BASIC_EMISSION'] and self.set_view_transform:
             context.scene.view_settings.view_transform = 'Standard'
         
         node_tree = bpy.data.node_groups.new(name=f"Temp Group Name", type='ShaderNodeTree')
@@ -185,6 +185,24 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
                 if self.add_layers:
                     channel.create_layer(context, layer_name='Solid Color', layer_type='SOLID_COLOR')
                     channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+                
+                right_most_node = get_right_most_node(mat_node_tree)
+                node_group, mix_shader = create_basic_setup(mat_node_tree, node_tree, right_most_node.location + Vector((right_most_node.width + 50, 0)) if right_most_node else Vector((0, 0)))
+                mat_output = mat_node_tree.nodes.new(type='ShaderNodeOutputMaterial')
+                mat_output.location = mix_shader.location + Vector((200, 0))
+                mat_output.is_active_output = True
+                connect_sockets(mix_shader.outputs[0], mat_output.inputs[0])
+            case 'BASIC_EMISSION':
+                # Similar to BASIC but with emission support
+                channel = new_group.create_channel(context, channel_name='Color', channel_type='COLOR', use_alpha=True)
+                if self.add_layers:
+                    channel.create_layer(context, layer_name='Solid Color', layer_type='SOLID_COLOR')
+                    channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+                
+                # Create emission channel
+                emission_channel = new_group.create_channel(context, channel_name='Emission', channel_type='COLOR', use_alpha=False)
+                if self.add_layers:
+                    emission_channel.create_layer(context, layer_name='Emission', layer_type='SOLID_COLOR')
                 
                 right_most_node = get_right_most_node(mat_node_tree)
                 node_group, mix_shader = create_basic_setup(mat_node_tree, node_tree, right_most_node.location + Vector((right_most_node.width + 50, 0)) if right_most_node else Vector((0, 0)))
@@ -331,7 +349,7 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
         header.label(text="Advanced Settings:", icon="TOOL_SETTINGS")
         if panel:
             # Group name moved above; keep advanced options here
-            if self.template in ['BASIC']:
+            if self.template in ['BASIC', 'BASIC_EMISSION']:
                 panel.prop(self, "use_alpha_blend", text="Use Smooth Alpha")
                 if self.use_alpha_blend:
                     warning_box = panel.box()
@@ -343,7 +361,7 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
                     col.label(text="may cause transparency artifacts.")
                 panel.prop(self, "disable_show_backface",
                         text="Use Backface Culling")
-            if self.template == 'BASIC' and context.scene.view_settings.view_transform != 'Standard':
+            if self.template in ['BASIC', 'BASIC_EMISSION'] and context.scene.view_settings.view_transform != 'Standard':
                 panel.prop(self, "set_view_transform",
                         text="Use Standard View Transform")
 
@@ -391,6 +409,9 @@ class PAINTSYSTEM_OT_DeleteGroup(PSContextMixin, Operator):
         for group_node in find_nodes(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree}):
             match active_group.template:
                 case 'BASIC':
+                    nodes = find_basic_setup_nodes(group_node)
+                    dissolve_nodes(node_tree, nodes)
+                case 'BASIC_EMISSION':
                     nodes = find_basic_setup_nodes(group_node)
                     dissolve_nodes(node_tree, nodes)
                 case 'PBR':
@@ -454,6 +475,16 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
     bl_label = "Convert Material to Paint System"
     bl_options = {'REGISTER', 'UNDO'}
     
+    def get_templates(self, context):
+        # Only offer PBR and Basic (Emission) templates for conversion
+        return [template for template in TEMPLATE_ENUM if template[0] in ('PBR', 'BASIC_EMISSION')]
+    
+    template: EnumProperty(
+        name="Template",
+        items=get_templates,
+        default=2  # PBR is index 2
+    )
+    
     group_name: bpy.props.StringProperty(
         name="Setup Name",
         description="Name of the new paint system setup",
@@ -490,18 +521,12 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
         default=False
     )
     
-    add_layers: BoolProperty(
-        name="Add Layers From Inputs",
-        description="Create layers from existing input connections",
-        default=True
-    )
-    
     image_mode: EnumProperty(
         name="Image Mode",
         description="How to handle images when creating layers",
         items=[
-            ('CONVERT', "Convert to Layers", "Use existing images directly in layers"),
-            ('DUPLICATE', "Duplicate to Layer", "Create copies of images to preserve originals"),
+            ('CONVERT', "Convert to Layers", "Move images into layers (removes from material node tree)"),
+            ('DUPLICATE', "Duplicate to Layer", "Copy images to layers (keeps originals as group inputs)"),
         ],
         default='CONVERT'
     )
@@ -552,12 +577,209 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
         # Create a new paint system group
         node_tree = bpy.data.node_groups.new(name=f"Temp Group Name", type='ShaderNodeTree')
         new_group = ps_ctx.ps_mat_data.create_new_group(context, self.group_name, node_tree)
-        new_group.template = 'PBR'
+        new_group.template = self.template
         
         # Store coordinate type
         self.store_coord_type(context)
         
-        # Get material output for positioning
+        # Branch based on template type
+        if self.template == 'BASIC_EMISSION':
+            return self._convert_to_basic_emission(context, ps_ctx, mat, mat_node_tree, principled_node, new_group, node_tree)
+        else:  # PBR template
+            return self._convert_to_pbr(context, ps_ctx, mat, mat_node_tree, principled_node, new_group, node_tree)
+    
+    def _convert_to_basic_emission(self, context, ps_ctx, mat, mat_node_tree, principled_node, new_group, node_tree):
+        """Convert to Basic (Emission) template with Transparent BSDF + Mix Shader setup"""
+        # Extract images from Principled BSDF before replacing it
+        extracted_images = {}
+        
+        if self.setup_color and 'Base Color' in principled_node.inputs:
+            input_socket = principled_node.inputs['Base Color']
+            if input_socket.is_linked:
+                from_node = input_socket.links[0].from_node
+                if from_node.bl_idname == 'ShaderNodeTexImage' and from_node.image:
+                    # Store image, node, and extension property
+                    use_correct_aspect = not (hasattr(from_node, 'extension') and from_node.extension == 'CLIP')
+                    extracted_images['Color'] = (from_node.image, from_node, use_correct_aspect)
+        
+        if self.setup_roughness and 'Roughness' in principled_node.inputs:
+            input_socket = principled_node.inputs['Roughness']
+            if input_socket.is_linked:
+                from_node = input_socket.links[0].from_node
+                if from_node.bl_idname == 'ShaderNodeTexImage' and from_node.image:
+                    use_correct_aspect = not (hasattr(from_node, 'extension') and from_node.extension == 'CLIP')
+                    extracted_images['Roughness'] = (from_node.image, from_node, use_correct_aspect)
+        
+        if self.setup_normal and 'Normal' in principled_node.inputs:
+            input_socket = principled_node.inputs['Normal']
+            if input_socket.is_linked:
+                from_node = input_socket.links[0].from_node
+                # Normal might be connected through a Normal Map node
+                if from_node.bl_idname == 'ShaderNodeNormalMap':
+                    if from_node.inputs[1].is_linked:
+                        actual_source = from_node.inputs[1].links[0].from_node
+                        if actual_source.bl_idname == 'ShaderNodeTexImage' and actual_source.image:
+                            use_correct_aspect = not (hasattr(actual_source, 'extension') and actual_source.extension == 'CLIP')
+                            extracted_images['Normal'] = (actual_source.image, actual_source, use_correct_aspect)
+                elif from_node.bl_idname == 'ShaderNodeTexImage' and from_node.image:
+                    use_correct_aspect = not (hasattr(from_node, 'extension') and from_node.extension == 'CLIP')
+                    extracted_images['Normal'] = (from_node.image, from_node, use_correct_aspect)
+        
+        if self.setup_emission and 'Emission Color' in principled_node.inputs:
+            input_socket = principled_node.inputs['Emission Color']
+            if input_socket.is_linked:
+                from_node = input_socket.links[0].from_node
+                if from_node.bl_idname == 'ShaderNodeTexImage' and from_node.image:
+                    use_correct_aspect = not (hasattr(from_node, 'extension') and from_node.extension == 'CLIP')
+                    extracted_images['Emission'] = (from_node.image, from_node, use_correct_aspect)
+        
+        # Store principled node location for positioning
+        ps_group_location = principled_node.location.copy()
+        
+        # Create channels FIRST (this creates the outputs on the node group)
+        channels = {}
+        
+        # Create Color channel
+        if self.setup_color:
+            channels['Color'] = new_group.create_channel(context, channel_name='Color', channel_type='COLOR', use_alpha=True)
+        
+        # Create Roughness channel
+        if self.setup_roughness:
+            channels['Roughness'] = new_group.create_channel(context, channel_name='Roughness', channel_type='FLOAT',
+                                              use_alpha=False, use_max_min=True, color_space='NONCOLOR')
+        
+        # Create Normal channel
+        if self.setup_normal:
+            channels['Normal'] = new_group.create_channel(context, channel_name='Normal', channel_type='VECTOR',
+                                              use_alpha=False, normalize_input=True, color_space='NONCOLOR')
+        
+        # Create Emission channel
+        if self.setup_emission:
+            channels['Emission'] = new_group.create_channel(context, channel_name='Emission', channel_type='COLOR', use_alpha=False)
+        
+        # NOW remove the Principled BSDF node
+        mat_node_tree.nodes.remove(principled_node)
+        
+        # Create basic setup (Transparent BSDF + Mix Shader + Material Output)
+        # Now node_tree has outputs from the channels we created
+        node_group, mix_shader = create_basic_setup(mat_node_tree, node_tree, ps_group_location)
+        mat_output = mat_node_tree.nodes.new(type='ShaderNodeOutputMaterial')
+        mat_output.location = mix_shader.location + Vector((200, 0))
+        mat_output.is_active_output = True
+        connect_sockets(mix_shader.outputs[0], mat_output.inputs[0])
+        
+        # Now create layers and assign images
+        if 'Color' in channels:
+            channel = channels['Color']
+            if 'Color' in extracted_images:
+                original_image, source_node, use_correct_aspect = extracted_images['Color']
+                if self.image_mode == 'DUPLICATE':
+                    duplicate_image = original_image.copy()
+                    duplicate_image.name = f"{original_image.name}.001"
+                    image_to_use = duplicate_image
+                    # Connect original image node to group input (color and alpha)
+                    if 'Color' in node_group.inputs:
+                        connect_sockets(source_node.outputs[0], node_group.inputs['Color'])
+                    if 'Color Alpha' in node_group.inputs and len(source_node.outputs) > 1:
+                        connect_sockets(source_node.outputs[1], node_group.inputs['Color Alpha'])
+                else:
+                    image_to_use = original_image
+                    # Remove source node in CONVERT mode
+                    if source_node in mat_node_tree.nodes[:]:
+                        mat_node_tree.nodes.remove(source_node)
+                
+                layer = channel.create_layer(context, layer_name=image_to_use.name, layer_type='IMAGE',
+                                             coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+                layer.image = image_to_use
+                layer.correct_image_aspect = use_correct_aspect
+            else:
+                channel.create_layer(context, layer_name='Image', layer_type='IMAGE',
+                                   coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+        
+        if 'Roughness' in channels:
+            channel = channels['Roughness']
+            if 'Roughness' in extracted_images:
+                original_image, source_node, use_correct_aspect = extracted_images['Roughness']
+                if self.image_mode == 'DUPLICATE':
+                    duplicate_image = original_image.copy()
+                    duplicate_image.name = f"{original_image.name}.001"
+                    image_to_use = duplicate_image
+                    # Connect original image node to group input
+                    if 'Roughness' in node_group.inputs:
+                        connect_sockets(source_node.outputs[0], node_group.inputs['Roughness'])
+                else:
+                    image_to_use = original_image
+                    if source_node in mat_node_tree.nodes[:]:
+                        mat_node_tree.nodes.remove(source_node)
+                
+                layer = channel.create_layer(context, layer_name=image_to_use.name, layer_type='IMAGE',
+                                             coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+                layer.image = image_to_use
+                layer.correct_image_aspect = use_correct_aspect
+            else:
+                channel.create_layer(context, layer_name='Roughness', layer_type='IMAGE',
+                                   coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+        
+        if 'Normal' in channels:
+            channel = channels['Normal']
+            if 'Normal' in extracted_images:
+                original_image, source_node, use_correct_aspect = extracted_images['Normal']
+                if self.image_mode == 'DUPLICATE':
+                    duplicate_image = original_image.copy()
+                    duplicate_image.name = f"{original_image.name}.001"
+                    image_to_use = duplicate_image
+                    # Connect original image node to group input
+                    if 'Normal' in node_group.inputs:
+                        connect_sockets(source_node.outputs[0], node_group.inputs['Normal'])
+                else:
+                    image_to_use = original_image
+                    if source_node in mat_node_tree.nodes[:]:
+                        mat_node_tree.nodes.remove(source_node)
+                
+                layer = channel.create_layer(context, layer_name=image_to_use.name, layer_type='IMAGE',
+                                             coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+                layer.image = image_to_use
+                layer.correct_image_aspect = use_correct_aspect
+            else:
+                # Add geometry layer for normals
+                channel.create_layer(context, layer_name='Object Normal', layer_type='GEOMETRY',
+                                   geometry_type='OBJECT_NORMAL', normalize_normal=True)
+                channel.create_layer(context, layer_name='Normal', layer_type='IMAGE',
+                                   coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+        
+        if 'Emission' in channels:
+            channel = channels['Emission']
+            if 'Emission' in extracted_images:
+                original_image, source_node, use_correct_aspect = extracted_images['Emission']
+                if self.image_mode == 'DUPLICATE':
+                    duplicate_image = original_image.copy()
+                    duplicate_image.name = f"{original_image.name}.001"
+                    image_to_use = duplicate_image
+                    # Connect original image node to group input
+                    if 'Emission' in node_group.inputs:
+                        connect_sockets(source_node.outputs[0], node_group.inputs['Emission'])
+                else:
+                    image_to_use = original_image
+                    # Remove source node in CONVERT mode (if not already removed above)
+                    if source_node in mat_node_tree.nodes[:]:
+                        mat_node_tree.nodes.remove(source_node)
+                
+                layer = channel.create_layer(context, layer_name=image_to_use.name, layer_type='IMAGE',
+                                             coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+                layer.image = image_to_use
+                layer.correct_image_aspect = use_correct_aspect
+            else:
+                channel.create_layer(context, layer_name='Emission', layer_type='SOLID_COLOR')
+        
+        # Set active channel
+        if ps_ctx.active_group:
+            ps_ctx.active_group.active_index = 0
+        
+        redraw_panel(context)
+        self.report({'INFO'}, f"Converted material '{mat.name}' to Paint System (Basic Emission)")
+        return {'FINISHED'}
+    
+    def _convert_to_pbr(self, context, ps_ctx, mat, mat_node_tree, principled_node, new_group, node_tree):
         material_output = get_material_output(mat_node_tree)
         
         # Store the principled node location for positioning the paint system group
@@ -674,14 +896,15 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
                 group_input_name = group_output  # The group input has the same name as output
                 
                 if group_input_name in node_group.inputs:
+                    # Transfer connection (creates link from source to group input)
                     has_connection = transfer_connection(
                         mat_node_tree, 
                         input_socket, 
                         node_group.inputs[group_input_name]
                     )
                     
-                    # Create layers if add_layers is enabled
-                    if self.add_layers and setup.get('needs_layers', False):
+                    # Create layers from inputs
+                    if setup.get('needs_layers', False):
                         # If there was a connection, try to create a layer from it
                         if has_connection:
                             # Check if the connected node is an image texture
@@ -690,8 +913,8 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
                                 if from_node.bl_idname == 'ShaderNodeTexImage' and from_node.image:
                                     original_image = from_node.image
                                     
-                                    # In DUPLICATE mode: original stays as input, duplicate becomes layer
-                                    # In CONVERT mode: use original as layer (becomes editable)
+                                    # DUPLICATE mode: Copy image for layer, keep original as group input
+                                    # CONVERT mode: Move original to layer, remove from node tree
                                     if self.image_mode == 'DUPLICATE':
                                         # Create a duplicate for the layer
                                         duplicate_image = original_image.copy()
@@ -699,7 +922,7 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
                                         image_to_use = duplicate_image
                                         layer_name = duplicate_image.name
                                     else:
-                                        # Convert mode: use original directly
+                                        # Convert mode: use original directly in layer
                                         image_to_use = original_image
                                         layer_name = original_image.name
                                     
@@ -717,6 +940,16 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
                                     # If extension is CLIP, disable correct_image_aspect
                                     if hasattr(from_node, 'extension') and from_node.extension == 'CLIP':
                                         layer.correct_image_aspect = False
+                                    
+                                    # CONVERT mode: Remove image from material node tree entirely
+                                    if self.image_mode == 'CONVERT':
+                                        # Disconnect group input (no longer needs external image)
+                                        if group_input_name in node_group.inputs:
+                                            links_to_remove = [link for link in node_group.inputs[group_input_name].links]
+                                            for link in links_to_remove:
+                                                mat_node_tree.links.remove(link)
+                                        # Remove the Image Texture node from material
+                                        mat_node_tree.nodes.remove(from_node)
                                 else:
                                     # For other node types, just add a placeholder layer
                                     channel.create_layer(
@@ -883,6 +1116,12 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
                         has_emission_strength = strength_socket.default_value > 0.01
                 self.setup_emission = is_linked or has_emission_strength
             
+            # Intelligently default template: PBR if metallic present, otherwise Basic (Emission)
+            if self.setup_metallic:
+                self.template = 'PBR'
+            else:
+                self.template = 'BASIC_EMISSION'
+            
             # If nothing is detected, default to standard PBR channels
             if not any([self.setup_color, self.setup_metallic, self.setup_roughness, self.setup_normal, self.setup_emission]):
                 self.setup_color = True
@@ -912,28 +1151,42 @@ class PAINTSYSTEM_OT_ConvertMaterialToPS(PSContextMixin, PSUVOptionsMixin, Multi
                 info_row = box.row()
                 info_row.label(text="Will only affect current object", icon='INFO')
 
-        box = layout.box()
-        row = box.row()
-        row.alignment = "CENTER"
-        row.label(text="Channels to Setup:", icon="MATERIAL")
-        col = box.column(align=True)
-        col.prop(self, "setup_color", text="Color", icon_value=get_icon('color_socket'))
-        col.prop(self, "setup_metallic", text="Metallic", icon_value=get_icon('float_socket'))
-        col.prop(self, "setup_roughness", text="Roughness", icon_value=get_icon('float_socket'))
-        col.prop(self, "setup_normal", text="Normal", icon_value=get_icon('vector_socket'))
-        col.prop(self, "setup_emission", text="Emission", icon_value=get_icon('color_socket'))
-        
+        # Template selection
         row = layout.row()
         scale_content(context, row, 1.5, 1.5)
-        row.prop(self, "add_layers", text="Create Layers From Inputs", icon_value=get_icon('layer_add'))
-        
-        if self.add_layers:
+        row.prop(self, "template", text="Template")
+
+        # Show channel options based on selected template
+        if self.template not in ['NONE']:
             box = layout.box()
             row = box.row()
-            row.label(text="Image Handling:", icon='IMAGE_DATA')
+            row.alignment = "CENTER"
+            row.label(text="Channels to Setup:", icon="MATERIAL")
             col = box.column(align=True)
-            col.prop(self, "image_mode", expand=True)
-            self.select_coord_type_ui(box, context)
+            
+            # Color - available for both templates
+            col.prop(self, "setup_color", text="Color", icon_value=get_icon('color_socket'))
+            
+            # Metallic - only for PBR
+            if self.template == 'PBR':
+                col.prop(self, "setup_metallic", text="Metallic", icon_value=get_icon('float_socket'))
+            
+            # Roughness - available for both templates
+            col.prop(self, "setup_roughness", text="Roughness", icon_value=get_icon('float_socket'))
+            
+            # Normal - available for both templates
+            col.prop(self, "setup_normal", text="Normal", icon_value=get_icon('vector_socket'))
+            
+            # Emission - available for both templates
+            col.prop(self, "setup_emission", text="Emission", icon_value=get_icon('color_socket'))
+        
+        # Image handling options
+        box = layout.box()
+        row = box.row()
+        row.label(text="Image Handling:", icon='IMAGE_DATA')
+        col = box.column(align=True)
+        col.prop(self, "image_mode", expand=True)
+        self.select_coord_type_ui(box, context)
         
         box = layout.box()
         row = box.row()
