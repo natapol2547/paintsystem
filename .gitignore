@@ -172,4 +172,5 @@ extension_build/
 *.blend1
 *.zip
 donation_cache.json
-version_cache.jsontmp/
+version_cache.json
+tmp/
