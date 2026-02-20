@@ -1,7 +1,6 @@
 import time
 import bpy
 from bpy.types import Context, Image, Material, Operator, UILayout
-from bpy.utils import register_classes_factory
 from bpy.props import StringProperty, BoolProperty, IntProperty, EnumProperty
 
 from .common import PSContextMixin, PSImageCreateMixin, DEFAULT_PS_UV_MAP_NAME
@@ -943,4 +942,42 @@ classes = (
     PAINTSYSTEM_OT_MergeUp,
 )
 
-register, unregister = register_classes_factory(classes)
+def _get_registered_class(cls):
+    class_name = getattr(cls, "__name__", None)
+    if class_name:
+        registered = getattr(bpy.types, class_name, None)
+        if registered is not None:
+            return registered
+    bl_idname = getattr(cls, "bl_idname", None)
+    if bl_idname:
+        parts = bl_idname.split(".", 1)
+        if len(parts) == 2:
+            rna_name = f"{parts[0].upper()}_OT_{parts[1]}"
+            return getattr(bpy.types, rna_name, None)
+    return None
+
+
+def _safe_unregister_class(cls):
+    if cls is None:
+        return
+    try:
+        bpy.utils.unregister_class(cls)
+    except Exception:
+        pass
+
+
+def register():
+    for cls in classes:
+        _safe_unregister_class(_get_registered_class(cls))
+        _safe_unregister_class(cls)
+    for cls in classes:
+        try:
+            bpy.utils.register_class(cls)
+        except ValueError as e:
+            if "already registered" not in str(e):
+                raise
+
+def unregister():
+    for cls in reversed(classes):
+        _safe_unregister_class(_get_registered_class(cls))
+        _safe_unregister_class(cls)
