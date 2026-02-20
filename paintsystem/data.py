@@ -3280,8 +3280,18 @@ classes = (
 _register, _unregister = register_classes_factory(classes)
 
 def register():
-    """Register the Paint System data module."""
-    _register()
+    """Register the Paint System data module with reload-safe error handling."""
+    try:
+        _register()
+    except ValueError as e:
+        if "already registered" in str(e):
+            try:
+                _unregister()
+            except Exception:
+                pass
+            _register()
+        else:
+            raise
     bpy.types.Scene.ps_scene_data = PointerProperty(
         type=PaintSystemGlobalData,
         name="Paint System Data",
@@ -3293,10 +3303,22 @@ def register():
         description="Material Data for the Paint System"
     )
     bpy.types.Material.paint_system = PointerProperty(type=LegacyPaintSystemGroups)
-    
+
 def unregister():
     """Unregister the Paint System data module."""
-    del bpy.types.Material.paint_system
-    del bpy.types.Material.ps_mat_data
-    del bpy.types.Scene.ps_scene_data
-    _unregister()
+    try:
+        del bpy.types.Material.paint_system
+    except Exception:
+        pass
+    try:
+        del bpy.types.Material.ps_mat_data
+    except Exception:
+        pass
+    try:
+        del bpy.types.Scene.ps_scene_data
+    except Exception:
+        pass
+    try:
+        _unregister()
+    except Exception:
+        pass
