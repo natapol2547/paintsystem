@@ -296,6 +296,7 @@ def register():
     bpy.app.handlers.save_pre.append(save_handler)
     bpy.app.handlers.load_post.append(refresh_image)
     bpy.app.handlers.depsgraph_update_post.append(paint_system_object_update)
+    bpy.app.handlers.depsgraph_update_post.append(material_name_update_handler)
     bpy.app.handlers.depsgraph_update_post.append(color_history_handler)
     bpy.app.timers.register(on_addon_enable, first_interval=0.1)
     bpy.msgbus.subscribe_rna(

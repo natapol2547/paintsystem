@@ -2924,7 +2924,7 @@ class PaintSystemGlobalData(PropertyGroup):
         self.active_clipboard_index = 0
 
 class MaterialData(PropertyGroup):
-    """Custom data for channels in the Paint System"""
+    """Per-material Paint System data (stored on ``Material.ps_mat_data``)."""
     groups: CollectionProperty(
         type=Group,
         name="Groups",
