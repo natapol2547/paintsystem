@@ -851,10 +851,17 @@ class PAINTSYSTEM_OT_MergeDown(BakeOperator):
     def get_below_layer(self, context, unprocessed: bool = False):
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
+        if not active_channel:
+            return None
         active_layer = ps_ctx.unlinked_layer if unprocessed else ps_ctx.active_layer
+        if not active_layer:
+            return None
         flattened_layers = active_channel.flattened_unlinked_layers if unprocessed else active_channel.flattened_layers
-        if active_layer and flattened_layers.index(active_layer) < len(flattened_layers) - 1:
-            return flattened_layers[flattened_layers.index(active_layer) + 1]
+        if not flattened_layers or active_layer not in flattened_layers:
+            return None
+        active_index = flattened_layers.index(active_layer)
+        if active_index < len(flattened_layers) - 1:
+            return flattened_layers[active_index + 1]
         return None
     
     @classmethod
@@ -879,6 +886,9 @@ class PAINTSYSTEM_OT_MergeDown(BakeOperator):
         self.get_coord_type(context)
         self.update_bake_multiple_objects(context)
         below_layer = self.get_below_layer(context)
+        if not below_layer:
+            self.report({'ERROR'}, "No layer below to merge")
+            return {'CANCELLED'}
         if below_layer:
             if below_layer.uses_coord_type:
                 if getattr(below_layer, 'coord_type', 'UV') == 'AUTO':
@@ -973,10 +983,17 @@ class PAINTSYSTEM_OT_MergeUp(BakeOperator):
     def get_above_layer(self, context, unprocessed: bool = False):
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
+        if not active_channel:
+            return None
         active_layer = ps_ctx.unlinked_layer if unprocessed else ps_ctx.active_layer
+        if not active_layer:
+            return None
         flattened_layers = active_channel.flattened_unlinked_layers if unprocessed else active_channel.flattened_layers
-        if active_layer and flattened_layers.index(active_layer) > 0:
-            return flattened_layers[flattened_layers.index(active_layer) - 1]
+        if not flattened_layers or active_layer not in flattened_layers:
+            return None
+        active_index = flattened_layers.index(active_layer)
+        if active_index > 0:
+            return flattened_layers[active_index - 1]
         return None
 
     @classmethod
@@ -1001,6 +1018,9 @@ class PAINTSYSTEM_OT_MergeUp(BakeOperator):
         self.get_coord_type(context)
         self.update_bake_multiple_objects(context)
         above_layer = self.get_above_layer(context)
+        if not above_layer:
+            self.report({'ERROR'}, "No layer above to merge")
+            return {'CANCELLED'}
         # Choose UV based on the layer above
         if above_layer:
             if above_layer.uses_coord_type:

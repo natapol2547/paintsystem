@@ -602,6 +602,8 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     mask_header.operator("paint_system.edit_layer_mask", text="Edit Mask", icon='GREASEPENCIL')
 
                 if mask_panel and active_layer.use_masks:
+                    actions_row = mask_panel.row(align=True)
+                    actions_row.operator("paint_system.delete_layer_mask", text="Delete Mask", icon='TRASH')
                     mask_box = mask_panel.box()
 
                     active_mask = None

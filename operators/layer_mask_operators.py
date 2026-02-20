@@ -22,6 +22,7 @@ from ..paintsystem.data import (
     add_empty_to_collection,
     get_layer_by_uid,
     save_image,
+    get_udim_tiles,
     update_active_image,
 )
 from ..utils import get_next_unique_name
@@ -48,6 +49,12 @@ class PAINTSYSTEM_OT_NewImageMask(PAINTSYSTEM_OT_NewImage):
         ps_ctx = cls.parse_context(context)
         active_layer = ps_ctx.active_layer
         return active_layer is not None and len(active_layer.layer_masks) == 0
+
+    multiple_objects: BoolProperty(
+        name="Multiple Objects",
+        description="Run the operator on multiple objects",
+        default=False,
+    )
 
     @staticmethod
     def _sanitize_name_part(value: str) -> str:
@@ -105,6 +112,11 @@ class PAINTSYSTEM_OT_NewImageMask(PAINTSYSTEM_OT_NewImage):
         if not active_layer:
             return "Mask"
         return get_next_unique_name("Mask", [layer_mask.layer_name for layer_mask in active_layer.layer_masks])
+
+    def get_coord_type(self, context):
+        PSUVOptionsMixin.get_coord_type(self, context)
+        ps_ctx = PSContextMixin.parse_context(context)
+        self.use_udim_tiles = get_udim_tiles(ps_ctx.ps_object, self.uv_map_name) != {1001}
 
     def _configure_mask_image(self, img: bpy.types.Image, fill_white: bool = False):
         if not img:

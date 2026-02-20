@@ -14,16 +14,26 @@ from ..utils import get_next_unique_name
 
 
 def _get_uv_editor_spaces(context: Context):
-    if not context or not context.screen:
-        return []
     spaces = []
-    for area in context.screen.areas:
-        if area.type != 'IMAGE_EDITOR':
-            continue
-        for space in area.spaces:
-            if space.type == 'IMAGE_EDITOR':
-                spaces.append(space)
-                break
+    screens = []
+    if context and getattr(context, "screen", None):
+        screens.append(context.screen)
+
+    wm = getattr(bpy.context, "window_manager", None)
+    if wm and getattr(wm, "windows", None):
+        for window in wm.windows:
+            screen = getattr(window, "screen", None)
+            if screen and screen not in screens:
+                screens.append(screen)
+
+    for screen in screens:
+        for area in screen.areas:
+            if area.type != 'IMAGE_EDITOR':
+                continue
+            for space in area.spaces:
+                if space.type == 'IMAGE_EDITOR':
+                    spaces.append(space)
+                    break
     return spaces
 
 
@@ -122,25 +132,35 @@ def _get_checker_material(ps_scene_data) -> bpy.types.Material:
 
 
 def _update_checker_preview(context: Context) -> None:
-    if not context or not context.scene or not context.scene.ps_scene_data:
+    active_context = bpy.context if getattr(bpy.context, "scene", None) else context
+    if not active_context or not active_context.scene or not active_context.scene.ps_scene_data:
         return
-    ps_scene_data = context.scene.ps_scene_data
+    ps_scene_data = active_context.scene.ps_scene_data
     if not ps_scene_data.uv_edit_enabled:
         return
-    ps_ctx = PSContextMixin.parse_context(context)
+
+    ps_ctx = PSContextMixin.parse_context(active_context)
     objects = ps_ctx.ps_objects or ([ps_ctx.ps_object] if ps_ctx.ps_object else [])
+    source_material = bpy.data.materials.get(ps_scene_data.uv_edit_source_material_name) if ps_scene_data.uv_edit_source_material_name else None
+    if not objects and source_material:
+        objects = _get_objects_with_material(active_context, source_material)
+
+    target_material = ps_ctx.active_material if ps_ctx.active_material else source_material
     _store_previous_uvs(ps_scene_data, objects)
     if ps_scene_data.uv_edit_checker_viewport_enabled:
         _apply_checker_uv(ps_scene_data, objects, ps_scene_data.uv_edit_target_uv)
-        _apply_checker_materials(ps_scene_data, objects, ps_ctx.active_material)
+        _apply_checker_materials(ps_scene_data, objects, target_material)
     else:
         _restore_checker_materials(ps_scene_data)
-    _store_uv_editor_image(ps_scene_data, context)
+    _store_uv_editor_image(ps_scene_data, active_context)
     if ps_scene_data.uv_edit_checker_enabled:
         checker_image = _get_checker_image(ps_scene_data)
-        _set_uv_editor_image(context, checker_image)
+        _set_uv_editor_image(active_context, checker_image)
     else:
-        _clear_uv_editor_image(context)
+        if ps_scene_data.uv_edit_previous_image:
+            _restore_uv_editor_image(ps_scene_data, active_context)
+        else:
+            _clear_uv_editor_image(active_context)
 
 
 def _ensure_uv_map(obj: bpy.types.Object, uv_name: str) -> bpy.types.MeshUVLoopLayer:
@@ -614,6 +634,38 @@ class PAINTSYSTEM_OT_UpdateUVChecker(PSContextMixin, Operator):
         return {'FINISHED'}
 
 
+class PAINTSYSTEM_OT_ToggleUVCheckerImage(PSContextMixin, Operator):
+    bl_idname = "paint_system.toggle_uv_checker_image"
+    bl_label = "Toggle UV Checker Image"
+    bl_description = "Show or hide the UV checker image"
+
+    @classmethod
+    def poll(cls, context):
+        return bool(context and context.scene and getattr(context.scene, "ps_scene_data", None))
+
+    def execute(self, context: Context):
+        ps_scene_data = context.scene.ps_scene_data
+        ps_scene_data.uv_edit_checker_enabled = not ps_scene_data.uv_edit_checker_enabled
+        _update_checker_preview(context)
+        return {'FINISHED'}
+
+
+class PAINTSYSTEM_OT_ToggleUVCheckerViewport(PSContextMixin, Operator):
+    bl_idname = "paint_system.toggle_uv_checker_viewport"
+    bl_label = "Toggle UV Checker Viewport"
+    bl_description = "Show or hide UV checker materials on viewport objects"
+
+    @classmethod
+    def poll(cls, context):
+        return bool(context and context.scene and getattr(context.scene, "ps_scene_data", None))
+
+    def execute(self, context: Context):
+        ps_scene_data = context.scene.ps_scene_data
+        ps_scene_data.uv_edit_checker_viewport_enabled = not ps_scene_data.uv_edit_checker_viewport_enabled
+        _update_checker_preview(context)
+        return {'FINISHED'}
+
+
 class PAINTSYSTEM_OT_StartUVEdit(PSContextMixin, Operator):
     bl_idname = "paint_system.start_uv_edit"
     bl_label = "Start UV Edit"
@@ -670,6 +722,7 @@ class PAINTSYSTEM_OT_StartUVEdit(PSContextMixin, Operator):
             bpy.ops.object.mode_set(mode='EDIT')
         except Exception:
             pass
+        _store_uv_editor_image(ps_scene_data, context)
         _set_uv_editor_image(context, _get_checker_image(ps_scene_data))
         ps_scene_data.uv_edit_enabled = True
         ps_scene_data.uv_edit_checker_enabled = True
@@ -899,6 +952,8 @@ classes = (
     PAINTSYSTEM_OT_GrabActiveLayerUV,
     PAINTSYSTEM_OT_SyncUVNames,
     PAINTSYSTEM_OT_UpdateUVChecker,
+    PAINTSYSTEM_OT_ToggleUVCheckerImage,
+    PAINTSYSTEM_OT_ToggleUVCheckerViewport,
     PAINTSYSTEM_OT_StartUVEdit,
     PAINTSYSTEM_OT_ClearUnusedUVs,
     PAINTSYSTEM_OT_ApplyUVEdit,

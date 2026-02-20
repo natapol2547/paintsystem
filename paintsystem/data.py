@@ -3057,10 +3057,37 @@ class PaintSystemGlobalData(PropertyGroup):
     """
 
     def update_uv_checker(self, context):
-        try:
-            bpy.ops.paint_system.update_uv_checker()
-        except Exception:
-            pass
+        max_attempts = 8
+
+        def _refresh_checker():
+            try:
+                from ..operators.uv_edit_operators import _update_checker_preview
+                active_context = bpy.context if getattr(bpy.context, "screen", None) else context
+                if not active_context:
+                    return False
+                _update_checker_preview(active_context)
+                wm = getattr(bpy.context, "window_manager", None)
+                if wm and getattr(wm, "windows", None):
+                    for window in wm.windows:
+                        for area in window.screen.areas:
+                            area.tag_redraw()
+                return True
+            except Exception:
+                return False
+
+        if not _refresh_checker():
+            try:
+                attempts = {"count": 0}
+
+                def _retry_refresh():
+                    attempts["count"] += 1
+                    if _refresh_checker() or attempts["count"] >= max_attempts:
+                        return None
+                    return 0.05
+
+                bpy.app.timers.register(_retry_refresh, first_interval=0.01)
+            except Exception:
+                pass
     
     def get_brush_color(self, context):
         settings = context.tool_settings.image_paint
