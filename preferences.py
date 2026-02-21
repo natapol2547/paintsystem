@@ -7,8 +7,8 @@ def addon_package() -> str:
 @dataclass
 class PaintSystemPreferences:
     show_tooltips: bool = True
-    show_hex_color: bool = False
-    show_more_color_picker_settings: bool = False
+    show_hex_color: bool = True
+    show_more_color_picker_settings: bool = True
     use_compact_design: bool = False
     color_picker_scale: float = 1.0
     color_picker_scale_rmb: float = 1.2
@@ -26,6 +26,8 @@ class PaintSystemPreferences:
     preferred_coord_type: str = 'UNDETECTED'
     show_opacity_in_layer_list: bool = True
     use_panel_quick_access: bool = False
+    automatic_name_sync: bool = True
+    automatic_name_syncing: bool = True
 
 def get_preferences(context) -> PaintSystemPreferences:
     """Get the Paint System preferences"""
