@@ -7,11 +7,14 @@ from bpy.types import Operator, Context, NodeTree
 from bpy.utils import register_classes_factory
 import mathutils
 
+from ..paintsystem.list_manager import ListManager
+
 from ..paintsystem.data import (
     ACTION_BIND_ENUM,
     ACTION_TYPE_ENUM,
     ADJUSTMENT_TYPE_ENUM,
     ATTRIBUTE_TYPE_ENUM,
+    MASK_TYPE_ENUM,
     TEXTURE_TYPE_ENUM,
     GRADIENT_TYPE_ENUM,
     GEOMETRY_TYPE_ENUM,
@@ -76,7 +79,7 @@ class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSImageCreateMixin, MultiMaterialO
         """Get the next image name from the active channel"""
         ps_ctx = self.parse_context(context)
         if ps_ctx.active_channel:
-            return get_next_unique_name("Image", [layer.name for layer in ps_ctx.active_channel.layers])
+            return get_next_unique_name("Image", [layer.layer_name for layer in ps_ctx.active_channel.layers])
 
     def process_material(self, context):
         self.store_coord_type(context)
@@ -1083,74 +1086,6 @@ class PAINTSYSTEM_OT_ProjectionViewReset(PSContextMixin, Operator):
         return {'FINISHED'}
 
 
-# Masks
-class PAINTSYSTEM_OT_NewValueMask(PSContextMixin, Operator):
-    """Create a new value mask"""
-    bl_idname = "paint_system.new_value_mask"
-    bl_label = "New Value Mask"
-    bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Create a new value mask"
-    
-    @classmethod
-    def poll(cls, context):
-        return cls.parse_context(context).active_layer is not None
-    
-    def execute(self, context):
-        ps_ctx = self.parse_context(context)
-        ps_ctx.active_layer.create_mask("VALUE")
-        return {'FINISHED'}
-
-
-class PAINTSYSTEM_OT_NewImageMask(PSContextMixin, Operator):
-    """Create a new image mask"""
-    bl_idname = "paint_system.new_image_mask"
-    bl_label = "New Image Mask"
-    bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Create a new image mask"
-    
-    @classmethod
-    def poll(cls, context):
-        return cls.parse_context(context).active_layer is not None
-    
-    def execute(self, context):
-        ps_ctx = self.parse_context(context)
-        ps_ctx.active_layer.create_mask("IMAGE")
-        return {'FINISHED'}
-
-
-class PAINTSYSTEM_OT_NewAttributeMask(PSContextMixin, Operator):
-    """Create a new attribute mask"""
-    bl_idname = "paint_system.new_attribute_mask"
-    bl_label = "New Attribute Mask"
-    bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Create a new attribute mask"
-    
-    @classmethod
-    def poll(cls, context):
-        return cls.parse_context(context).active_layer is not None
-    
-    def execute(self, context):
-        ps_ctx = self.parse_context(context)
-        ps_ctx.active_layer.create_mask("ATTRIBUTE")
-        return {'FINISHED'}
-
-
-class PAINTSYSTEM_OT_NewTextureMask(PSContextMixin, Operator):
-    """Create a new texture mask"""
-    bl_idname = "paint_system.new_texture_mask"
-    bl_label = "New Texture Mask"
-    bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Create a new texture mask"
-    
-    @classmethod
-    def poll(cls, context):
-        return cls.parse_context(context).active_layer is not None
-    
-    def execute(self, context):
-        ps_ctx = self.parse_context(context)
-        ps_ctx.active_layer.create_mask("TEXTURE")
-        return {'FINISHED'}
-
 
 classes = (
     PAINTSYSTEM_OT_NewImage,
@@ -1178,10 +1113,6 @@ classes = (
     PAINTSYSTEM_OT_ShowLayerWarnings,
     PAINTSYSTEM_OT_SetProjectionView,
     PAINTSYSTEM_OT_ProjectionViewReset,
-    PAINTSYSTEM_OT_NewValueMask,
-    PAINTSYSTEM_OT_NewImageMask,
-    PAINTSYSTEM_OT_NewAttributeMask,
-    PAINTSYSTEM_OT_NewTextureMask,
 )
 
 register, unregister = register_classes_factory(classes)
