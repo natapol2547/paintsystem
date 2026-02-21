@@ -7,21 +7,17 @@ from .common import (
     PSImageFilterMixin,
     get_unified_settings,
     get_icon,
-    blender_image_to_numpy,
-    PIL_AVAILABLE
+    blender_image_to_numpy
 )
 from ..paintsystem.image import set_image_pixels, ImageTiles
 from .image_filters import list_brush_presets, resolve_brush_preset_path
+from ..paintsystem.graph.common import DEFAULT_PS_UV_MAP_NAME
 import numpy
 
-# Conditionally import PIL-dependent functions and classes
-if PIL_AVAILABLE:
+IMAGE_FILTERS_AVAILABLE = True
+if IMAGE_FILTERS_AVAILABLE:
     from .image_filters import gaussian_blur, sharpen_image
     from .image_filters.brush_painter_core import BrushPainterCore
-else:
-    gaussian_blur = None
-    sharpen_image = None
-    BrushPainterCore = None
 
 import os
 
@@ -177,8 +173,8 @@ class PAINTSYSTEM_OT_FillImage(PSImageFilterMixin, Operator):
         layout.prop(self, "color", text="")
 
 
-# Conditionally define PIL-dependent operators
-if PIL_AVAILABLE:
+# Image filter operators
+if IMAGE_FILTERS_AVAILABLE:
     class PAINTSYSTEM_OT_GaussianBlur(PSContextMixin, PSImageFilterMixin, Operator):
         bl_idname = "paint_system.gaussian_blur"
         bl_label = "Gaussian Blur"
@@ -296,6 +292,44 @@ if PIL_AVAILABLE:
         
         custom_image_gradient: BoolProperty(name="Use Custom Image Gradient", default=False)
         custom_image_name: StringProperty(name="Custom Image Name", default="")
+        use_uv_seam_duplication: BoolProperty(
+            name="Use UV Seam Duplication",
+            description="Duplicate brush stamps across matching UV seam edges",
+            default=False,
+        )
+        use_random_rotation: BoolProperty(
+            name="Random Rotation",
+            description="Randomize the rotation of each brush stamp",
+            default=False,
+        )
+        random_rotation_range: FloatProperty(
+            name="Rotation Range",
+            description="How many degrees the rotation can deviate (±half this value)",
+            default=360.0,
+            min=0.0,
+            max=360.0,
+        )
+
+        def _resolve_uv_map_name(self, ps_ctx) -> str | None:
+            active_layer = ps_ctx.active_layer
+            ps_object = ps_ctx.ps_object
+            if not active_layer or not ps_object or not ps_object.data:
+                return None
+
+            uv_layers = ps_object.data.uv_layers
+            if not uv_layers:
+                return None
+
+            if active_layer.coord_type == 'AUTO':
+                if uv_layers.get(DEFAULT_PS_UV_MAP_NAME):
+                    return DEFAULT_PS_UV_MAP_NAME
+                return None
+
+            if active_layer.coord_type == 'UV':
+                uv_name = active_layer.uv_map_name
+                if uv_name and uv_layers.get(uv_name):
+                    return uv_name
+            return None
         
         def execute(self, context):
             ps_ctx = self.parse_context(context)
@@ -320,6 +354,9 @@ if PIL_AVAILABLE:
             painter.value_shift = self.value_shift if self.use_hsv_shift else 0.0
             painter.use_random_seed = self.use_random_seed
             painter.random_seed = self.random_seed
+            painter.enable_seam_duplication = self.use_uv_seam_duplication
+            painter.use_random_rotation = self.use_random_rotation
+            painter.random_rotation_range = self.random_rotation_range
             # Set brush paths based on mode
             brush_folder_path = None
             brush_texture_path = None
@@ -344,7 +381,16 @@ if PIL_AVAILABLE:
                 wm.progress_update(brush_applied)
             
             image = image.copy()
-            new_image = painter.apply_brush_painting(image, brush_folder_path=brush_folder_path, brush_texture_path=brush_texture_path, custom_image_gradient=custom_image_gradient, brush_callback=callback)
+            uv_map_name = self._resolve_uv_map_name(ps_ctx)
+            new_image = painter.apply_brush_painting(
+                image,
+                brush_folder_path=brush_folder_path,
+                brush_texture_path=brush_texture_path,
+                custom_image_gradient=custom_image_gradient,
+                brush_callback=callback,
+                mesh_object=ps_ctx.ps_object,
+                uv_map_name=uv_map_name,
+            )
             
             wm.progress_end()
             if ps_ctx.active_channel.use_bake_image:
@@ -388,6 +434,10 @@ if PIL_AVAILABLE:
             col.prop(self, "custom_image_gradient")
             if self.custom_image_gradient:
                 col.prop_search(self, "custom_image_name", bpy.data, "images", text="Image")
+            col.prop(self, "use_uv_seam_duplication")
+            col.prop(self, "use_random_rotation")
+            if self.use_random_rotation:
+                col.prop(self, "random_rotation_range", slider=True)
             box = layout.box()
             col = box.column()
             row = col.row()
@@ -404,7 +454,7 @@ if PIL_AVAILABLE:
             col.prop(self, "end_opacity", slider=True)
             col.prop(self, "gaussian_sigma")
 
-# Conditionally build classes list based on PIL availability
+# Build classes list
 classes = [
     PAINTSYSTEM_OT_InvertColors,
     PAINTSYSTEM_OT_ResizeImage,
@@ -412,7 +462,7 @@ classes = [
     PAINTSYSTEM_OT_FillImage,
 ]
 
-if PIL_AVAILABLE:
+if IMAGE_FILTERS_AVAILABLE:
     classes.extend([
         PAINTSYSTEM_OT_GaussianBlur,
         PAINTSYSTEM_OT_SharpenImage,

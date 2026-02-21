@@ -1,14 +1,7 @@
 import bpy
 from bpy.types import Image
-try:
-    from PIL import Image as PILImage
-    PIL_AVAILABLE = True
-except ImportError:
-    PIL_AVAILABLE = False
-    PILImage = None
 import numpy as np
 import time
-from pathlib import Path
 import os
 import re
 from dataclasses import dataclass
@@ -190,11 +183,7 @@ def blender_image_to_numpy(image: Image) -> Optional[ImageTiles]:
             print(f"Blender image to numpy took {(end_time - start_time)*1000} milliseconds")
         return ImageTiles(tiles=tiles_dict, ori_path=image.filepath, ori_packed=(image.packed_file or image.filepath == ''))
     
-    # UDIM image - need to load all tiles from disk
-    if not PIL_AVAILABLE:
-        raise ImportError("PIL (Pillow) is required to process UDIM images. Please install Pillow.")
-    
-    # Remember original state
+    # UDIM image - read each tile directly from Blender
     was_packed = (image.packed_file or image.filepath == '')
     original_filepath = image.filepath
     
@@ -220,25 +209,22 @@ def blender_image_to_numpy(image: Image) -> Optional[ImageTiles]:
             tile_path = _resolve_tile_path(directory, prefix, extension, tile_number)
         
         if tile_path and os.path.exists(tile_path):
-            # Load tile using PIL
-            pil_img = PILImage.open(tile_path)
-            if pil_img.mode != 'RGBA':
-                pil_img = pil_img.convert('RGBA')
-            
-            # Convert to numpy
-            img_uint8 = np.array(pil_img, dtype=np.uint8)
-            pixels = img_uint8.astype(np.float32) / 255.0
-            
-            # Ensure correct dimensions
-            if pixels.shape[:2] != (height, width):
-                pil_img = pil_img.resize((width, height), PILImage.Resampling.LANCZOS)
-                img_uint8 = np.array(pil_img, dtype=np.uint8)
-                pixels = img_uint8.astype(np.float32) / 255.0
-            
-            # Flip vertically (Blender uses bottom-left origin, numpy uses top-left)
-            pixels = np.flipud(pixels)
-            
-            tiles_dict[tile_number] = pixels
+            # Load tile using a temporary Blender image (no PIL required)
+            tmp_img = bpy.data.images.load(tile_path, check_existing=False)
+            try:
+                tmp_img.colorspace_settings.name = 'Non-Color'
+                # Resize if tile dimensions don't match
+                t_w, t_h = tmp_img.size
+                if t_w != width or t_h != height:
+                    tmp_img.scale(width, height)
+                pixels = np.empty(width * height * 4, dtype=np.float32)
+                tmp_img.pixels.foreach_get(pixels)
+                pixels = pixels.reshape((height, width, 4))
+                # Flip vertically (Blender uses bottom-left origin, numpy uses top-left)
+                pixels = np.flipud(pixels)
+                tiles_dict[tile_number] = pixels
+            finally:
+                bpy.data.images.remove(tmp_img)
         else:
             # Tile file not found, try to get from Blender's pixel data (first tile only)
             if tile_number == image.tiles[0].number:
@@ -293,21 +279,6 @@ def numpy_to_blender_image(array, image_name="BrushPainted", create_new=True) ->
     if debug_mode:
         print(f"Numpy to blender image took {(end_time - start_time)*1000} milliseconds")
     return new_image
-
-def numpy_to_pil(numpy_array):
-    if not PIL_AVAILABLE:
-        raise ImportError("PIL (Pillow) is not available. Please install Pillow to use this feature.")
-    img_uint8 = (np.clip(numpy_array, 0, 1) * 255).astype(np.uint8)
-    img_pil = PILImage.fromarray(img_uint8, mode='RGBA')
-    return img_pil
-
-def pil_to_numpy(pil_image):
-    """Convert a PIL image to a float32 numpy array in [0, 1] range."""
-    if not PIL_AVAILABLE:
-        raise ImportError("PIL (Pillow) is not available. Please install Pillow to use this feature.")
-    img_uint8 = np.array(pil_image, dtype=np.uint8)
-    img_float = img_uint8.astype(np.float32) / 255.0
-    return img_float
 
 def is_temp_filepath(filepath: str) -> bool:
     """
@@ -382,8 +353,6 @@ def set_image_pixels(image: Image, image_tiles: ImageTiles):
     
     if image_tiles.is_udim or is_udim:
         # UDIM image - save tiles to disk
-        if not PIL_AVAILABLE:
-            raise ImportError("PIL (Pillow) is required to process UDIM images. Please install Pillow.")
         
         directory, filename = _get_image_dir_and_filename(image)
         prefix, extension = parse_udim_filename(filename)
@@ -392,9 +361,6 @@ def set_image_pixels(image: Image, image_tiles: ImageTiles):
         for tile_number, array in image_tiles.tiles.items():
             array = np.flipud(array.copy())
             array = np.clip(array, 0, 1)
-            
-            img_uint8 = (array * 255).astype(np.uint8)
-            pil_img = PILImage.fromarray(img_uint8, mode='RGBA')
             
             # Construct tile filename, preferring existing file path
             tile_filename = f"{prefix}.{tile_number}.{extension}"
@@ -405,7 +371,19 @@ def set_image_pixels(image: Image, image_tiles: ImageTiles):
             if existing_path:
                 tile_path = existing_path
             
-            pil_img.save(tile_path)
+            # Save tile using a temporary Blender image (no PIL required)
+            t_height, t_width = array.shape[:2]
+            tmp_img = bpy.data.images.new("__tmp_tile_save__", width=t_width, height=t_height, alpha=True)
+            try:
+                tmp_img.colorspace_settings.name = 'Non-Color'
+                tmp_img.pixels.foreach_set(array.ravel().astype(np.float32))
+                tmp_img.filepath_raw = tile_path
+                ext = os.path.splitext(tile_path)[1].lower().lstrip('.')
+                fmt_map = {'png': 'PNG', 'jpg': 'JPEG', 'jpeg': 'JPEG', 'exr': 'OPEN_EXR', 'tif': 'TIFF', 'tiff': 'TIFF'}
+                tmp_img.file_format = fmt_map.get(ext, 'PNG')
+                tmp_img.save()
+            finally:
+                bpy.data.images.remove(tmp_img)
         
         # Reload image to update tiles
         image.reload()
