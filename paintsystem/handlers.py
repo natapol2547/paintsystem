@@ -1,9 +1,9 @@
 import bpy
 
-from .versioning import get_layer_parent_map, migrate_global_layer_data, migrate_blend_mode, migrate_source_node, migrate_socket_names, update_layer_name, update_layer_version, update_library_nodetree_version
+from .versioning import get_layer_parent_map, migrate_global_layer_data, migrate_blend_mode, migrate_source_node, migrate_socket_names, migrate_texture_masks_to_image, update_layer_name, update_layer_version, update_library_nodetree_version
 from .version_check import get_latest_version
 from .context import parse_context
-from .data import sort_actions, get_all_layers, is_valid_uuidv4, iter_all_layers
+from .data import sort_actions, get_all_layers, is_valid_uuidv4, iter_all_layers, update_material_name
 from .image import save_image
 from .graph.basic_layers import get_layer_version_for_type
 import time
@@ -62,10 +62,13 @@ def frame_change_pre(scene: bpy.types.Scene):
             layer.enabled = enabled
 
 
-def load_paint_system_data():
+def load_paint_system_data(scene: bpy.types.Scene = None):
     print(f"Loading Paint System data...")
     start_time = time.time()
-    ps_scene_data = get_ps_scene_data(bpy.context.scene)
+    scene = scene or bpy.context.scene
+    if not scene:
+        return
+    ps_scene_data = get_ps_scene_data(scene)
     if not ps_scene_data:
         return
     
@@ -89,6 +92,7 @@ def load_paint_system_data():
     migrate_blend_mode(layer_parent_map)
     migrate_source_node(layer_parent_map)
     migrate_socket_names(layer_parent_map)
+    migrate_texture_masks_to_image(layer_parent_map)
     update_layer_version(layer_parent_map)
     update_layer_name(layer_parent_map)
     update_library_nodetree_version()
@@ -105,11 +109,14 @@ def load_paint_system_data():
 
 @bpy.app.handlers.persistent
 def load_post(scene):
-    ps_scene_data = get_ps_scene_data(bpy.context.scene)
+    scene = scene or bpy.context.scene
+    if not scene:
+        return
+    ps_scene_data = get_ps_scene_data(scene)
     if not ps_scene_data:
         return
     ensure_color_history_palette(ps_scene_data)
-    load_paint_system_data()
+    load_paint_system_data(scene)
     get_latest_version()
 
 @bpy.app.handlers.persistent
@@ -184,6 +191,110 @@ def color_history_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph
         pass
 
 @bpy.app.handlers.persistent
+def transform_gizmo_mode_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph = None):
+    """Automatically disable transform gizmos in paint-like modes,
+    and restore based on stored preferences when exiting paint modes.
+    """
+    try:
+        obj = bpy.context.object
+        screen = bpy.context.screen
+    except Exception:
+        return
+    
+    if not screen:
+        return
+    
+    # Get all VIEW_3D spaces
+    view3d_spaces = []
+    for area in screen.areas:
+        if area.type == 'VIEW_3D':
+            for space in area.spaces:
+                if space.type == 'VIEW_3D':
+                    view3d_spaces.append(space)
+                    break
+    
+    if not view3d_spaces:
+        return
+
+    paint_like_modes = {
+        'PAINT_TEXTURE',
+        'SCULPT',
+        'PAINT_VERTEX',
+        'PAINT_WEIGHT',
+        'PAINT_GREASE_PENCIL',
+        'SCULPT_GREASE_PENCIL',
+        'PAINT_GPENCIL',
+        'PAINT_GPENCIL_LEGACY',
+        'SCULPT_GPENCIL',
+    }
+    
+    current_mode = obj.mode if (obj and hasattr(obj, 'mode')) else None
+    in_paint_mode = current_mode in paint_like_modes
+    was_in_paint_mode = bpy.context.window_manager.get("ps_gizmo_in_paint_mode", False)
+    last_mode = bpy.context.window_manager.get("ps_gizmo_last_mode", None)
+
+    wm = bpy.context.window_manager
+    
+    # If user has manually toggled gizmos off via the toggle button, don't interfere
+    if wm.get("ps_gizmo_toggled_off", False):
+        return
+    
+    # Detect mode change
+    mode_changed = (last_mode != current_mode)
+    if mode_changed:
+        wm["ps_gizmo_last_mode"] = current_mode
+    
+    # Apply settings to all VIEW_3D spaces
+    for space in view3d_spaces:
+        if in_paint_mode:
+            # Entering or staying in paint mode - disable gizmos
+            # Save current state when entering paint mode
+            if mode_changed and not was_in_paint_mode:
+                current_t = bool(getattr(space, "show_gizmo_object_translate", False))
+                current_r = bool(getattr(space, "show_gizmo_object_rotate", False))
+                current_s = bool(getattr(space, "show_gizmo_object_scale", False))
+                
+                # Save pre-paint state
+                wm["ps_gizmo_pre_paint_translate"] = current_t
+                wm["ps_gizmo_pre_paint_rotate"] = current_r
+                wm["ps_gizmo_pre_paint_scale"] = current_s
+                wm["ps_gizmo_in_paint_mode"] = True
+            
+            # Turn off all gizmos while in paint mode
+            space.show_gizmo_object_translate = False
+            space.show_gizmo_object_rotate = False
+            space.show_gizmo_object_scale = False
+        else:
+            # Not in paint mode
+            # If we were in paint mode and are now exiting, restore the pre-paint state
+            if mode_changed and was_in_paint_mode:
+                t = wm.get("ps_gizmo_pre_paint_translate", True)
+                r = wm.get("ps_gizmo_pre_paint_rotate", True)
+                s = wm.get("ps_gizmo_pre_paint_scale", False)
+                
+                space.show_gizmo_object_translate = bool(t)
+                space.show_gizmo_object_rotate = bool(r)
+                space.show_gizmo_object_scale = bool(s)
+                
+                wm["ps_gizmo_in_paint_mode"] = False
+            elif not was_in_paint_mode:
+                # Not in paint mode and never was - use persistent user preferences
+                if wm.get("ps_gizmo_translate") is not None:
+                    t = wm.get("ps_gizmo_translate", True)
+                    r = wm.get("ps_gizmo_rotate", True)
+                    s = wm.get("ps_gizmo_scale", False)
+                else:
+                    # Initialize defaults only once
+                    t, r, s = True, True, False
+                    wm["ps_gizmo_translate"] = t
+                    wm["ps_gizmo_rotate"] = r
+                    wm["ps_gizmo_scale"] = s
+                
+                space.show_gizmo_object_translate = bool(t)
+                space.show_gizmo_object_rotate = bool(r)
+                space.show_gizmo_object_scale = bool(s)
+
+@bpy.app.handlers.persistent
 def paint_system_object_update(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph = None):
     """Handle object changes and update paint canvas"""
     
@@ -223,9 +334,66 @@ def paint_system_object_update(scene: bpy.types.Scene, depsgraph: bpy.types.Deps
                 pass
 
 
+@bpy.app.handlers.persistent
+def material_name_update_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph = None):
+    if not depsgraph:
+        return
+    if not depsgraph.id_type_updated('MATERIAL'):
+        return
+    def _strip_numeric_suffix(name: str) -> str:
+        if "." in name:
+            base, suffix = name.rsplit(".", 1)
+            if suffix.isdigit():
+                return base
+        return name
+    try:
+        for update in depsgraph.updates:
+            material = update.id
+            if not isinstance(material, bpy.types.Material):
+                continue
+            if not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
+                continue
+            last_name = material.ps_mat_data.last_material_name
+            if last_name and last_name != material.name:
+                update_material_name(material, bpy.context)
+            elif not last_name:
+                inferred_old = ""
+                if material.ps_mat_data.groups:
+                    for group in material.ps_mat_data.groups:
+                        if group.name.startswith("PS_"):
+                            inferred_old = _strip_numeric_suffix(group.name[3:])
+                            break
+                        if not inferred_old:
+                            inferred_old = _strip_numeric_suffix(group.name)
+                if inferred_old and inferred_old != material.name:
+                    material.ps_mat_data.last_material_name = inferred_old
+                    update_material_name(material, bpy.context)
+                else:
+                    material.ps_mat_data.last_material_name = material.name
+    except Exception:
+        pass
+
+
 # --- On Addon Enable ---
 def on_addon_enable():
-    load_post(bpy.context.scene)
+    context = bpy.context
+    window = getattr(context, "window", None)
+    screen = getattr(window, "screen", None) if window else None
+    scene = getattr(context, "scene", None)
+    if not scene or not window or not screen or not getattr(screen, "areas", None):
+        return 0.25
+
+    load_post(scene)
+    get_latest_version()
+    try:
+        for material in bpy.data.materials:
+            if hasattr(material, 'ps_mat_data') and material.ps_mat_data:
+                if not material.ps_mat_data.last_material_name:
+                    material.ps_mat_data.last_material_name = material.name
+    except Exception:
+        pass
+
+    return None
 
 
 owner = object()
@@ -236,13 +404,44 @@ def brush_color_callback(*args):
         context.scene.ps_scene_data.update_hsv_color(context)
 
 
+def uv_edit_mode_guard(*args):
+    context = bpy.context
+    if not context or not context.scene or not hasattr(context.scene, 'ps_scene_data'):
+        return
+    ps_scene_data = context.scene.ps_scene_data
+    if not ps_scene_data or not ps_scene_data.uv_edit_enabled:
+        return
+    obj = context.object
+    if obj and getattr(obj, "mode", None) == 'PAINT_TEXTURE':
+        try:
+            bpy.ops.object.mode_set(mode='OBJECT')
+        except Exception:
+            pass
+
+
+def material_name_msgbus_callback(*args):
+    try:
+        for material in bpy.data.materials:
+            if not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
+                continue
+            last_name = material.ps_mat_data.last_material_name
+            if last_name and last_name != material.name:
+                update_material_name(material, bpy.context)
+            elif not last_name:
+                material.ps_mat_data.last_material_name = material.name
+    except Exception:
+        pass
+
+
 def register():
     bpy.app.handlers.frame_change_pre.append(frame_change_pre)
     bpy.app.handlers.load_post.append(load_post)
     bpy.app.handlers.save_pre.append(save_handler)
     bpy.app.handlers.load_post.append(refresh_image)
     bpy.app.handlers.depsgraph_update_post.append(paint_system_object_update)
+    bpy.app.handlers.depsgraph_update_post.append(material_name_update_handler)
     bpy.app.handlers.depsgraph_update_post.append(color_history_handler)
+    bpy.app.handlers.depsgraph_update_post.append(transform_gizmo_mode_handler)
     bpy.app.timers.register(on_addon_enable, first_interval=0.1)
     bpy.msgbus.subscribe_rna(
         key=(bpy.types.UnifiedPaintSettings, "color"),
@@ -262,6 +461,18 @@ def register():
         args=(None,),
         notify=brush_color_callback,
     )
+    bpy.msgbus.subscribe_rna(
+        key=(bpy.types.Object, "mode"),
+        owner=owner,
+        args=(None,),
+        notify=uv_edit_mode_guard,
+    )
+    bpy.msgbus.subscribe_rna(
+        key=(bpy.types.Material, "name"),
+        owner=owner,
+        args=(None,),
+        notify=material_name_msgbus_callback,
+    )
 
 def unregister():
     bpy.msgbus.clear_by_owner(owner)
@@ -270,4 +481,6 @@ def unregister():
     bpy.app.handlers.save_pre.remove(save_handler)
     bpy.app.handlers.load_post.remove(refresh_image)
     bpy.app.handlers.depsgraph_update_post.remove(paint_system_object_update)
+    bpy.app.handlers.depsgraph_update_post.remove(material_name_update_handler)
     bpy.app.handlers.depsgraph_update_post.remove(color_history_handler)
+    bpy.app.handlers.depsgraph_update_post.remove(transform_gizmo_mode_handler)

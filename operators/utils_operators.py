@@ -1,16 +1,16 @@
 import addon_utils
 import bpy
 import gpu
-from bpy.props import EnumProperty, IntProperty
+from mathutils import Vector
+from bpy.props import FloatProperty, IntProperty
 from bpy.types import Operator
 from bpy.utils import register_classes_factory
-from bpy_extras.node_utils import connect_sockets
 
-from ..paintsystem.data import update_active_image
+from ..paintsystem.data import update_active_image, sync_names
 
 # ---
 from ..preferences import addon_package
-from ..utils.nodes import find_node, get_material_output
+from ..utils.nodes import find_node, get_material_output, capture_group_links, restore_group_links
 from ..utils.version import is_newer_than
 from ..utils.unified_brushes import get_unified_settings
 from .brushes import get_brushes_from_library
@@ -106,17 +106,16 @@ class PAINTSYSTEM_OT_IsolateChannel(PSContextMixin, Operator):
     bl_label = "Isolate Channel"
     bl_options = {'REGISTER', 'UNDO'}
     bl_description = "Isolate the active channel"
-    
+
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
         return ps_ctx.ps_object is not None and ps_ctx.active_material is not None and ps_ctx.active_channel is not None
-    
+
     def execute(self, context):
         ps_ctx = self.parse_context(context)
         ps_ctx.active_channel.isolate_channel(context)
-                
-        # Change render mode
+
         if bpy.context.space_data.shading.type not in {'RENDERED', 'MATERIAL'}:
             bpy.context.space_data.shading.type = 'RENDERED'
         return {'FINISHED'}
@@ -127,7 +126,7 @@ class PAINTSYSTEM_OT_ToggleBrushEraseAlpha(Operator):
     bl_label = "Toggle Brush Erase Alpha"
     bl_options = {'REGISTER', 'UNDO'}
     bl_description = "Toggle between brush and erase alpha"
-    
+
     @classmethod
     def poll(cls, context):
         return context.mode == 'PAINT_TEXTURE'
@@ -139,9 +138,9 @@ class PAINTSYSTEM_OT_ToggleBrushEraseAlpha(Operator):
             brush = tool_settings.brush
             if brush is not None:
                 if brush.blend == 'ERASE_ALPHA':
-                    brush.blend = 'MIX'  # Switch back to normal blending
+                    brush.blend = 'MIX'
                 else:
-                    brush.blend = 'ERASE_ALPHA'  # Switch to Erase Alpha mode
+                    brush.blend = 'ERASE_ALPHA'
         return {'FINISHED'}
 
 
@@ -152,13 +151,13 @@ class PAINTSYSTEM_OT_ColorSample(PSContextMixin, Operator):
 
     x: IntProperty()
     y: IntProperty()
-    
+
     @classmethod
     def poll(cls, context):
         return context.mode == 'PAINT_TEXTURE'
 
     def execute(self, context):
-        if is_newer_than(4,4):
+        if is_newer_than(4, 4):
             bpy.ops.paint.sample_color('INVOKE_DEFAULT', merged=True, palette=False)
             return {'FINISHED'}
 
@@ -211,6 +210,26 @@ class PAINTSYSTEM_OT_OpenPaintSystemPreferences(Operator):
         return {'FINISHED'}
 
 
+class PAINTSYSTEM_OT_SyncNames(PSContextMixin, Operator):
+    bl_idname = "paint_system.sync_names"
+    bl_label = "Sync Names"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Synchronize material, group, layer, and image names"
+
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_material is not None
+
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        if not ps_ctx.active_material:
+            self.report({'WARNING'}, "No active material to sync")
+            return {'CANCELLED'}
+        sync_names(context, material=ps_ctx.active_material, force=True)
+        return {'FINISHED'}
+
+
 class PAINTSYSTEM_OT_FlipNormals(Operator):
     """Flip normals of the selected mesh"""
     bl_idname = "paint_system.flip_normals"
@@ -255,25 +274,196 @@ class PAINTSYSTEM_OT_RecalculateNormals(Operator):
         return {'FINISHED'}
 
 
-class PAINTSYSTEM_OT_AddCameraPlane(Operator):
-    bl_idname = "paint_system.add_camera_plane"
-    bl_label = "Add Camera Plane"
+class PAINTSYSTEM_OT_ToggleTransformGizmos(Operator):
+    bl_idname = "paint_system.toggle_transform_gizmos"
+    bl_label = "Toggle Transform Gizmos"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Add a plane with a camera texture"
+    bl_description = "Toggle transform gizmos with mode-aware behavior"
 
-    align_up: EnumProperty(
-        name="Align Up",
-        items=[
-            ('NONE', "None", "No alignment"),
-            ('X', "X", "Align up with X axis"),
-            ('Y', "Y", "Align up with Y axis"),
-            ('Z', "Z", "Align up with Z axis"),
-        ],
-        default='NONE'
-    )
+    @classmethod
+    def poll(cls, context):
+        return context.area and context.area.type == 'VIEW_3D'
 
     def execute(self, context):
-        bpy.ops.mesh.primitive_plane_add('INVOKE_DEFAULT', align='VIEW')
+        space = context.area.spaces[0]
+        if space.type != 'VIEW_3D':
+            return {'CANCELLED'}
+
+        wm = context.window_manager
+        overlay_state = None
+        if hasattr(space, 'overlay'):
+            overlay_state = space.overlay.show_overlays
+
+        current_translate = bool(getattr(space, "show_gizmo_object_translate", False))
+        current_rotate = bool(getattr(space, "show_gizmo_object_rotate", False))
+        current_scale = bool(getattr(space, "show_gizmo_object_scale", False))
+
+        any_gizmo_on = current_translate or current_rotate or current_scale
+
+        if any_gizmo_on:
+            wm["ps_gizmo_translate"] = current_translate
+            wm["ps_gizmo_rotate"] = current_rotate
+            wm["ps_gizmo_scale"] = current_scale
+            wm["ps_gizmo_toggled_off"] = True
+
+            space.show_gizmo_object_translate = False
+            space.show_gizmo_object_rotate = False
+            space.show_gizmo_object_scale = False
+        else:
+            has_saved = wm.get("ps_gizmo_translate") is not None
+            if has_saved:
+                translate_pref = wm.get("ps_gizmo_translate", False)
+                rotate_pref = wm.get("ps_gizmo_rotate", False)
+                scale_pref = wm.get("ps_gizmo_scale", False)
+            else:
+                translate_pref = True
+                rotate_pref = True
+                scale_pref = False
+                wm["ps_gizmo_translate"] = translate_pref
+                wm["ps_gizmo_rotate"] = rotate_pref
+                wm["ps_gizmo_scale"] = scale_pref
+
+            wm["ps_gizmo_toggled_off"] = False
+
+            space.show_gizmo_object_translate = translate_pref
+            space.show_gizmo_object_rotate = rotate_pref
+            space.show_gizmo_object_scale = scale_pref
+
+        if overlay_state is not None and hasattr(space, 'overlay'):
+            space.overlay.show_overlays = overlay_state
+
+        return {'FINISHED'}
+
+class PAINTSYSTEM_OT_AddCameraPlane(Operator):
+    bl_idname = "paint_system.add_camera_plane"
+    bl_label = "Add View Capture Plane"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Capture current viewport and create an aligned textured plane"
+
+    distance: FloatProperty(
+        name="Distance",
+        description="Distance from current view origin to place the plane",
+        default=1.0,
+        min=0.001,
+        soft_max=100.0,
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return (
+            context.area is not None and
+            context.area.type == 'VIEW_3D' and
+            context.space_data is not None and
+            context.space_data.region_3d is not None
+        )
+
+    def _capture_viewport_image(self, context, area, region):
+        scene = context.scene
+        space = context.space_data
+
+        original_res_x = scene.render.resolution_x
+        original_res_y = scene.render.resolution_y
+        original_res_pct = scene.render.resolution_percentage
+
+        try:
+            scene.render.resolution_x = max(1, region.width)
+            scene.render.resolution_y = max(1, region.height)
+            scene.render.resolution_percentage = 100
+
+            with context.temp_override(area=area, region=region, space_data=space):
+                bpy.ops.render.opengl(write_still=False, view_context=True)
+
+            render_result = bpy.data.images.get("Render Result")
+            if not render_result or render_result.size[0] <= 0 or render_result.size[1] <= 0:
+                return None
+
+            width, height = render_result.size
+            image_name = f"PS_ViewCapture_{context.scene.frame_current:04d}"
+            image = bpy.data.images.new(name=image_name, width=width, height=height, alpha=True)
+            image.pixels.foreach_set(render_result.pixels[:])
+            image.update()
+            image.pack()
+            return image
+        finally:
+            scene.render.resolution_x = original_res_x
+            scene.render.resolution_y = original_res_y
+            scene.render.resolution_percentage = original_res_pct
+
+    def _create_material(self, image):
+        material = bpy.data.materials.new(name=f"PS_ViewCapture_{image.name}")
+        material.use_nodes = True
+        node_tree = material.node_tree
+        nodes = node_tree.nodes
+        links = node_tree.links
+        nodes.clear()
+
+        output = nodes.new("ShaderNodeOutputMaterial")
+        shader = nodes.new("ShaderNodeBsdfPrincipled")
+        texture = nodes.new("ShaderNodeTexImage")
+
+        texture.image = image
+        texture.interpolation = 'Linear'
+
+        links.new(texture.outputs["Color"], shader.inputs["Base Color"])
+        if "Alpha" in texture.outputs and "Alpha" in shader.inputs:
+            links.new(texture.outputs["Alpha"], shader.inputs["Alpha"])
+        links.new(shader.outputs["BSDF"], output.inputs["Surface"])
+
+        output.location = (360, 0)
+        shader.location = (140, 0)
+        texture.location = (-120, 0)
+
+        if hasattr(material, "surface_render_method"):
+            material.surface_render_method = 'BLENDED'
+        elif hasattr(material, "blend_method"):
+            material.blend_method = 'BLEND'
+
+        return material
+
+    def execute(self, context):
+        area = context.area
+        space = context.space_data
+        region_3d = space.region_3d
+        region = next((reg for reg in area.regions if reg.type == 'WINDOW'), None)
+
+        if not region:
+            self.report({'ERROR'}, "No active viewport region found")
+            return {'CANCELLED'}
+
+        image = self._capture_viewport_image(context, area, region)
+        if not image:
+            self.report({'ERROR'}, "Could not capture viewport image")
+            return {'CANCELLED'}
+
+        bpy.ops.mesh.primitive_plane_add(size=1.0, align='WORLD')
+        plane = context.active_object
+        if not plane:
+            self.report({'ERROR'}, "Could not create plane")
+            return {'CANCELLED'}
+
+        plane.name = f"PS_ViewCapturePlane_{image.name}"
+
+        view_matrix_inv = region_3d.view_matrix.inverted()
+        view_location, view_rotation, _ = view_matrix_inv.decompose()
+        view_forward = -(view_rotation @ Vector((0.0, 0.0, 1.0)))
+
+        plane.location = view_location + view_forward * self.distance
+        plane.rotation_euler = view_rotation.to_euler()
+
+        width, height = image.size
+        if width > 0 and height > 0:
+            aspect = width / height
+            if aspect >= 1.0:
+                plane.scale.x = aspect
+                plane.scale.y = 1.0
+            else:
+                plane.scale.x = 1.0
+                plane.scale.y = 1.0 / aspect
+
+        material = self._create_material(image)
+        plane.data.materials.clear()
+        plane.data.materials.append(material)
+
         return {'FINISHED'}
 
 
@@ -320,26 +510,7 @@ class PAINTSYSTEM_OT_DuplicatePaintSystemData(PSContextMixin, MultiMaterialOpera
             
             # Store links connected to the original node group before replacing
             group_nodes = [n for n in mat.node_tree.nodes if n.type == 'GROUP' and n.node_tree == original_node_tree]
-            relink_map = {}
-            for node_group in group_nodes:
-                input_links = []
-                output_links = []
-                for input_socket in node_group.inputs[:]:
-                    for link in input_socket.links:
-                        input_links.append({
-                            'from_socket': link.from_socket,
-                            'dest_name': getattr(input_socket, "name", None),
-                        })
-                for output_socket in node_group.outputs[:]:
-                    for link in output_socket.links:
-                        output_links.append({
-                            'to_socket': link.to_socket,
-                            'src_name': getattr(link.from_socket, "name", None),
-                        })
-                relink_map[node_group] = {
-                    'input_links': input_links,
-                    'output_links': output_links,
-                }
+            relink_map = capture_group_links(group_nodes)
             
             node_tree = bpy.data.node_groups.new(name=f"Paint System ({mat.name})", type='ShaderNodeTree')
             group.node_tree = node_tree
@@ -355,75 +526,10 @@ class PAINTSYSTEM_OT_DuplicatePaintSystemData(PSContextMixin, MultiMaterialOpera
             group.update_node_tree(context)
             
             # Reconnect the sockets using stored endpoints
-            for node_group, links in relink_map.items():
-                node_group.node_tree = group.node_tree
-                for link in links['input_links']:
-                    dest_name = link.get('dest_name')
-                    from_socket = link.get('from_socket')
-                    if dest_name and dest_name in node_group.inputs and from_socket:
-                        connect_sockets(from_socket, node_group.inputs[dest_name])
-                for link in links['output_links']:
-                    src_name = link.get('src_name')
-                    to_socket = link.get('to_socket')
-                    if src_name and src_name in node_group.outputs and to_socket:
-                        connect_sockets(node_group.outputs[src_name], to_socket)
+            restore_group_links(relink_map, group.node_tree)
         redraw_panel(context)
         return {'FINISHED'}
 
-
-class PAINTSYSTEM_OT_ToggleTransformGizmos(Operator):
-    bl_idname = "paint_system.toggle_transform_gizmos"
-    bl_label = "Toggle Transform Gizmos"
-    bl_options = {'REGISTER'}
-    bl_description = "Toggle transform gizmos on/off with state memory for paint mode"
-
-    def execute(self, context):
-        space = context.area.spaces[0] if context.area and context.area.spaces else None
-        if not space or space.type != 'VIEW_3D':
-            return {'CANCELLED'}
-        
-        wm = context.window_manager
-        obj = context.active_object
-        
-        # Determine current gizmo state
-        gizmos_enabled = (space.show_gizmo_object_translate or
-                         space.show_gizmo_object_rotate or
-                         space.show_gizmo_object_scale)
-        
-        # Treat paint, sculpt, vertex/weight paint, and GP draw modes the same for gizmos
-        paint_like_modes = {
-            'PAINT_TEXTURE',
-            'SCULPT',
-            'PAINT_VERTEX',
-            'PAINT_WEIGHT',
-            'PAINT_GPENCIL',
-            'PAINT_GPENCIL_LEGACY',
-            'PAINT_GREASE_PENCIL',
-        }
-        in_paint_mode = obj and obj.mode in paint_like_modes
-        
-        if in_paint_mode:
-            # Store current gizmo state before entering paint mode
-            wm["ps_gizmo_translate"] = space.show_gizmo_object_translate
-            wm["ps_gizmo_rotate"] = space.show_gizmo_object_rotate
-            wm["ps_gizmo_scale"] = space.show_gizmo_object_scale
-            # Keep gizmos disabled during paint mode
-            space.show_gizmo_object_translate = False
-            space.show_gizmo_object_rotate = False
-            space.show_gizmo_object_scale = False
-        else:
-            # Not in paint mode - toggle gizmos normally
-            new_state = not gizmos_enabled
-            space.show_gizmo_object_translate = new_state
-            space.show_gizmo_object_rotate = new_state
-            space.show_gizmo_object_scale = new_state
-        
-        # Redraw the viewport
-        for area in context.screen.areas:
-            if area.type == 'VIEW_3D':
-                area.tag_redraw()
-        
-        return {'FINISHED'}
 
 def split_area(context: bpy.types.Context, direction: str = 'VERTICAL', factor: float = 0.55) -> bpy.types.Area | None:
     screen = context.screen
@@ -437,7 +543,6 @@ def split_area(context: bpy.types.Context, direction: str = 'VERTICAL', factor: 
         return None
     new_area = new_areas.pop()
     return new_area
-
 
 class PAINTSYSTEM_OT_ToggleImageEditor(PSContextMixin, Operator):
     bl_idname = "paint_system.toggle_image_editor"
@@ -465,11 +570,10 @@ class PAINTSYSTEM_OT_ToggleImageEditor(PSContextMixin, Operator):
 
         # Change the new area to Image Editor
         new_area.type = 'IMAGE_EDITOR'
-        
+
         if new_area.x < context.area.x:
             new_area.type = context.area.type
             context.area.type = 'IMAGE_EDITOR'
-        
         if image:
             space = new_area.spaces[0]
             space.show_region_ui = False
@@ -484,15 +588,15 @@ class PAINTSYSTEM_OT_ToggleImageEditor(PSContextMixin, Operator):
 
 class PAINTSYSTEM_OT_FocusPSNode(PSContextMixin, Operator):
     bl_idname = "paint_system.focus_ps_node"
-    bl_label = "Focus PS Node"
+    bl_label = "Focus Paint System Node"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Focus the active node in the Paint System"
-    
+    bl_description = "Open Shader Editor and focus active Paint System node group"
+
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        return ps_ctx.active_group is not None
-    
+        return ps_ctx.active_group is not None and ps_ctx.active_material is not None
+
     def execute(self, context):
         ps_ctx = self.parse_context(context)
         active_group = ps_ctx.active_group
@@ -539,14 +643,60 @@ classes = (
     PAINTSYSTEM_OT_ToggleBrushEraseAlpha,
     PAINTSYSTEM_OT_ColorSample,
     PAINTSYSTEM_OT_OpenPaintSystemPreferences,
+    PAINTSYSTEM_OT_SyncNames,
     PAINTSYSTEM_OT_FlipNormals,
     PAINTSYSTEM_OT_RecalculateNormals,
+    PAINTSYSTEM_OT_ToggleTransformGizmos,
     PAINTSYSTEM_OT_AddCameraPlane,
     PAINTSYSTEM_OT_HidePaintingTips,
     PAINTSYSTEM_OT_DuplicatePaintSystemData,
-    PAINTSYSTEM_OT_ToggleTransformGizmos,
     PAINTSYSTEM_OT_ToggleImageEditor,
     PAINTSYSTEM_OT_FocusPSNode,
 )
 
-register, unregister = register_classes_factory(classes)
+addon_keymaps = []
+
+_register, _unregister = register_classes_factory(classes)
+
+def register():
+    """Register operators with idempotent error handling."""
+    # Defensive cleanup in case Blender kept classes from a previous load
+    # (notably in CI where the addon may be enabled twice within one process).
+    for cls in classes:
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception:
+            # Fine if it was not registered yet.
+            pass
+    try:
+        _register()
+    except ValueError as e:
+        if "already registered" in str(e):
+            print(f"Paint System: Operators already registered (module reload): {e}")
+        else:
+            raise
+
+    wm = bpy.context.window_manager
+    kc = wm.keyconfigs.addon
+    if kc:
+        km = kc.keymaps.new(name="3D View", space_type='VIEW_3D')
+        kmi = km.keymap_items.new(
+            PAINTSYSTEM_OT_ToggleImageEditor.bl_idname, type='I', value='PRESS', repeat=True)
+        addon_keymaps.append((km, kmi))
+        kmi = km.keymap_items.new(
+            PAINTSYSTEM_OT_ToggleBrushEraseAlpha.bl_idname, type='E', value='PRESS')
+        addon_keymaps.append((km, kmi))
+
+def unregister():
+    """Unregister operators with idempotent error handling."""
+    for km, kmi in addon_keymaps:
+        try:
+            km.keymap_items.remove(kmi)
+        except Exception as e:
+            print(f"Paint System: Error removing keymap: {e}")
+    addon_keymaps.clear()
+    
+    try:
+        _unregister()
+    except Exception as e:
+        print(f"Paint System: Error unregistering operators: {e}")
