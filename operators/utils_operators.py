@@ -1,7 +1,8 @@
 import addon_utils
 import bpy
 import gpu
-from bpy.props import EnumProperty, IntProperty
+from mathutils import Vector
+from bpy.props import FloatProperty, IntProperty
 from bpy.types import Operator
 from bpy.utils import register_classes_factory
 from bpy_extras.node_utils import connect_sockets
@@ -106,17 +107,16 @@ class PAINTSYSTEM_OT_IsolateChannel(PSContextMixin, Operator):
     bl_label = "Isolate Channel"
     bl_options = {'REGISTER', 'UNDO'}
     bl_description = "Isolate the active channel"
-    
+
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
         return ps_ctx.ps_object is not None and ps_ctx.active_material is not None and ps_ctx.active_channel is not None
-    
+
     def execute(self, context):
         ps_ctx = self.parse_context(context)
         ps_ctx.active_channel.isolate_channel(context)
-                
-        # Change render mode
+
         if bpy.context.space_data.shading.type not in {'RENDERED', 'MATERIAL'}:
             bpy.context.space_data.shading.type = 'RENDERED'
         return {'FINISHED'}
@@ -127,7 +127,7 @@ class PAINTSYSTEM_OT_ToggleBrushEraseAlpha(Operator):
     bl_label = "Toggle Brush Erase Alpha"
     bl_options = {'REGISTER', 'UNDO'}
     bl_description = "Toggle between brush and erase alpha"
-    
+
     @classmethod
     def poll(cls, context):
         return context.mode == 'PAINT_TEXTURE'
@@ -139,9 +139,9 @@ class PAINTSYSTEM_OT_ToggleBrushEraseAlpha(Operator):
             brush = tool_settings.brush
             if brush is not None:
                 if brush.blend == 'ERASE_ALPHA':
-                    brush.blend = 'MIX'  # Switch back to normal blending
+                    brush.blend = 'MIX'
                 else:
-                    brush.blend = 'ERASE_ALPHA'  # Switch to Erase Alpha mode
+                    brush.blend = 'ERASE_ALPHA'
         return {'FINISHED'}
 
 
@@ -152,13 +152,13 @@ class PAINTSYSTEM_OT_ColorSample(PSContextMixin, Operator):
 
     x: IntProperty()
     y: IntProperty()
-    
+
     @classmethod
     def poll(cls, context):
         return context.mode == 'PAINT_TEXTURE'
 
     def execute(self, context):
-        if is_newer_than(4,4):
+        if is_newer_than(4, 4):
             bpy.ops.paint.sample_color('INVOKE_DEFAULT', merged=True, palette=False)
             return {'FINISHED'}
 
@@ -257,23 +257,134 @@ class PAINTSYSTEM_OT_RecalculateNormals(Operator):
 
 class PAINTSYSTEM_OT_AddCameraPlane(Operator):
     bl_idname = "paint_system.add_camera_plane"
-    bl_label = "Add Camera Plane"
+    bl_label = "Add View Capture Plane"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Add a plane with a camera texture"
+    bl_description = "Capture current viewport and create an aligned textured plane"
 
-    align_up: EnumProperty(
-        name="Align Up",
-        items=[
-            ('NONE', "None", "No alignment"),
-            ('X', "X", "Align up with X axis"),
-            ('Y', "Y", "Align up with Y axis"),
-            ('Z', "Z", "Align up with Z axis"),
-        ],
-        default='NONE'
+    distance: FloatProperty(
+        name="Distance",
+        description="Distance from current view origin to place the plane",
+        default=1.0,
+        min=0.001,
+        soft_max=100.0,
     )
 
+    @classmethod
+    def poll(cls, context):
+        return (
+            context.area is not None and
+            context.area.type == 'VIEW_3D' and
+            context.space_data is not None and
+            context.space_data.region_3d is not None
+        )
+
+    def _capture_viewport_image(self, context, area, region):
+        scene = context.scene
+        space = context.space_data
+
+        original_res_x = scene.render.resolution_x
+        original_res_y = scene.render.resolution_y
+        original_res_pct = scene.render.resolution_percentage
+
+        try:
+            scene.render.resolution_x = max(1, region.width)
+            scene.render.resolution_y = max(1, region.height)
+            scene.render.resolution_percentage = 100
+
+            with context.temp_override(area=area, region=region, space_data=space):
+                bpy.ops.render.opengl(write_still=False, view_context=True)
+
+            render_result = bpy.data.images.get("Render Result")
+            if not render_result or render_result.size[0] <= 0 or render_result.size[1] <= 0:
+                return None
+
+            width, height = render_result.size
+            image_name = f"PS_ViewCapture_{context.scene.frame_current:04d}"
+            image = bpy.data.images.new(name=image_name, width=width, height=height, alpha=True)
+            image.pixels.foreach_set(render_result.pixels[:])
+            image.update()
+            image.pack()
+            return image
+        finally:
+            scene.render.resolution_x = original_res_x
+            scene.render.resolution_y = original_res_y
+            scene.render.resolution_percentage = original_res_pct
+
+    def _create_material(self, image):
+        material = bpy.data.materials.new(name=f"PS_ViewCapture_{image.name}")
+        material.use_nodes = True
+        node_tree = material.node_tree
+        nodes = node_tree.nodes
+        links = node_tree.links
+        nodes.clear()
+
+        output = nodes.new("ShaderNodeOutputMaterial")
+        shader = nodes.new("ShaderNodeBsdfPrincipled")
+        texture = nodes.new("ShaderNodeTexImage")
+
+        texture.image = image
+        texture.interpolation = 'Linear'
+
+        links.new(texture.outputs["Color"], shader.inputs["Base Color"])
+        if "Alpha" in texture.outputs and "Alpha" in shader.inputs:
+            links.new(texture.outputs["Alpha"], shader.inputs["Alpha"])
+        links.new(shader.outputs["BSDF"], output.inputs["Surface"])
+
+        output.location = (360, 0)
+        shader.location = (140, 0)
+        texture.location = (-120, 0)
+
+        if hasattr(material, "surface_render_method"):
+            material.surface_render_method = 'BLENDED'
+        elif hasattr(material, "blend_method"):
+            material.blend_method = 'BLEND'
+
+        return material
+
     def execute(self, context):
-        bpy.ops.mesh.primitive_plane_add('INVOKE_DEFAULT', align='VIEW')
+        area = context.area
+        space = context.space_data
+        region_3d = space.region_3d
+        region = next((reg for reg in area.regions if reg.type == 'WINDOW'), None)
+
+        if not region:
+            self.report({'ERROR'}, "No active viewport region found")
+            return {'CANCELLED'}
+
+        image = self._capture_viewport_image(context, area, region)
+        if not image:
+            self.report({'ERROR'}, "Could not capture viewport image")
+            return {'CANCELLED'}
+
+        bpy.ops.mesh.primitive_plane_add(size=1.0, align='WORLD')
+        plane = context.active_object
+        if not plane:
+            self.report({'ERROR'}, "Could not create plane")
+            return {'CANCELLED'}
+
+        plane.name = f"PS_ViewCapturePlane_{image.name}"
+
+        view_matrix_inv = region_3d.view_matrix.inverted()
+        view_location, view_rotation, _ = view_matrix_inv.decompose()
+        view_forward = -(view_rotation @ Vector((0.0, 0.0, 1.0)))
+
+        plane.location = view_location + view_forward * self.distance
+        plane.rotation_euler = view_rotation.to_euler()
+
+        width, height = image.size
+        if width > 0 and height > 0:
+            aspect = width / height
+            if aspect >= 1.0:
+                plane.scale.x = aspect
+                plane.scale.y = 1.0
+            else:
+                plane.scale.x = 1.0
+                plane.scale.y = 1.0 / aspect
+
+        material = self._create_material(image)
+        plane.data.materials.clear()
+        plane.data.materials.append(material)
+
         return {'FINISHED'}
 
 
@@ -438,7 +549,6 @@ def split_area(context: bpy.types.Context, direction: str = 'VERTICAL', factor: 
     new_area = new_areas.pop()
     return new_area
 
-
 class PAINTSYSTEM_OT_ToggleImageEditor(PSContextMixin, Operator):
     bl_idname = "paint_system.toggle_image_editor"
     bl_label = "Toggle Image Editor"
@@ -541,10 +651,10 @@ classes = (
     PAINTSYSTEM_OT_OpenPaintSystemPreferences,
     PAINTSYSTEM_OT_FlipNormals,
     PAINTSYSTEM_OT_RecalculateNormals,
+    PAINTSYSTEM_OT_ToggleTransformGizmos,
     PAINTSYSTEM_OT_AddCameraPlane,
     PAINTSYSTEM_OT_HidePaintingTips,
     PAINTSYSTEM_OT_DuplicatePaintSystemData,
-    PAINTSYSTEM_OT_ToggleTransformGizmos,
     PAINTSYSTEM_OT_ToggleImageEditor,
     PAINTSYSTEM_OT_FocusPSNode,
 )
