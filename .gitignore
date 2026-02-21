@@ -173,3 +173,4 @@ extension_build/
 *.zip
 donation_cache.json
 version_cache.json
+tmp/

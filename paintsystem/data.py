@@ -812,8 +812,23 @@ class Layer(BaseNestedListItem):
     ref_layer_id: StringProperty()
     
     def update_name(self, context):
+        if self.updating_name_flag:
+            return
+        self.updating_name_flag = True
         if self.layer_name != self.name:
             self.layer_name = self.name
+
+        prefs = get_preferences(context)
+        if getattr(prefs, "automatic_name_syncing", True):
+            material = find_material_for_layer(self)
+            if material:
+                new_name = ensure_layer_name_prefix(self.name, material.name)
+                if new_name != self.name:
+                    self.name = new_name
+                    self.layer_name = new_name
+            if self.type == 'IMAGE' and self.image:
+                self.image.name = self.name
+        self.updating_name_flag = False
         self.update_node_tree(context)
     
     name: StringProperty(
@@ -821,6 +836,31 @@ class Layer(BaseNestedListItem):
         description="Layer name",
         default="Layer",
         update=update_name
+    )
+    updating_name_flag: BoolProperty(
+        default=False,
+        options={'SKIP_SAVE'}  # Don't save this flag in the .blend file
+    )
+    
+    def get_display_name(self):
+        """Return only the suffix part of the name (after underscore) for UI display"""
+        if '_' in self.name:
+            return self.name.split('_', 1)[1]
+        return self.name
+    
+    def set_display_name(self, value):
+        """Set the layer name preserving the material prefix"""
+        if '_' in self.name:
+            prefix = self.name.split('_', 1)[0]
+            self.name = f"{prefix}_{value}"
+        else:
+            self.name = value
+    
+    display_name: StringProperty(
+        name="Name",
+        description="Layer name without prefix",
+        get=get_display_name,
+        set=set_display_name
     )
     
     def update_node_tree(self, context):
@@ -880,7 +920,7 @@ class Layer(BaseNestedListItem):
         
         match self.type:
             case "IMAGE":
-                if self.image:
+                if self.image and getattr(get_preferences(context), "automatic_name_syncing", True):
                     self.image.name = self.name
             case "GRADIENT":
                 if self.gradient_type in ('LINEAR', 'RADIAL', 'FAKE_LIGHT'):
@@ -2678,7 +2718,7 @@ class Group(PropertyGroup):
                         # Disable alpha
                         channel.use_alpha = False
                 if add_layers:
-                    channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+                    channel.create_layer(context, layer_name=f'{mat.name}_Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
                 return channel
             case "METALLIC":
                 channel = self.create_channel(context, channel_name='Metallic', channel_type='FLOAT', use_alpha=False, use_max_min=True, color_space='NONCOLOR')
@@ -2706,8 +2746,8 @@ class Group(PropertyGroup):
                         connect_sockets(node_group.outputs['Normal'], normal_socket)
                 if add_layers:
                     if not socket_transferred:
-                        channel.create_layer(context, layer_name='Normal', layer_type='GEOMETRY', geometry_type='OBJECT_NORMAL', normalize_normal=True)
-                    channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+                        channel.create_layer(context, layer_name=f'{mat.name}_Normal', layer_type='GEOMETRY', geometry_type='OBJECT_NORMAL', normalize_normal=True)
+                    channel.create_layer(context, layer_name=f'{mat.name}_Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
             case _:
                 raise ValueError(f"Invalid template: {template}")
     
@@ -2884,10 +2924,7 @@ class PaintSystemGlobalData(PropertyGroup):
         self.active_clipboard_index = 0
 
 class MaterialData(PropertyGroup):
-    """Per-material Paint System data (stored on ``Material.ps_mat_data``).
-    
-    Contains groups, preview state, and helper methods for creating groups.
-    """
+    """Per-material Paint System data (stored on ``Material.ps_mat_data``)."""
     groups: CollectionProperty(
         type=Group,
         name="Groups",
@@ -2963,6 +3000,106 @@ class Filter(PropertyGroup):
         description="Iterations of the filter",
         default=1
     )
+
+
+def find_material_for_layer(layer: "Layer") -> Material | None:
+    target_layer = layer.get_layer_data() if hasattr(layer, "get_layer_data") else layer
+    if not target_layer:
+        return None
+    target_uid = getattr(target_layer, "uid", None)
+    if not target_uid:
+        return None
+    for material in bpy.data.materials:
+        if hasattr(material, 'ps_mat_data') and material.ps_mat_data:
+            for group in material.ps_mat_data.groups:
+                for channel in group.channels:
+                    for item in channel.layers:
+                        item_layer = item.get_layer_data() if hasattr(item, "get_layer_data") else item
+                        if item_layer and getattr(item_layer, "uid", None) == target_uid:
+                            return material
+    return None
+
+
+def get_layer_suffix(layer_name: str, old_material_name: str | None = None) -> str:
+    if old_material_name and layer_name == old_material_name:
+        return ""
+    if old_material_name and layer_name.startswith(f"{old_material_name}_"):
+        return layer_name.split("_", 1)[1]
+    if "_" in layer_name:
+        return layer_name.split("_", 1)[1]
+    return layer_name
+
+
+def ensure_layer_name_prefix(layer_name: str, material_name: str, old_material_name: str | None = None) -> str:
+    if layer_name == material_name:
+        return layer_name
+    if layer_name.startswith(f"{material_name}_"):
+        return layer_name
+    suffix = get_layer_suffix(layer_name, old_material_name)
+    if not suffix:
+        return material_name
+    return f"{material_name}_{suffix}"
+
+
+def _set_layer_name(layer: "Layer", new_name: str, context: Context):
+    if not layer or not new_name:
+        return
+    if layer.name == new_name:
+        return
+    previous_flag = getattr(layer, "updating_name_flag", False)
+    layer.updating_name_flag = True
+    layer.name = new_name
+    layer.layer_name = new_name
+    layer.updating_name_flag = previous_flag
+    layer.update_node_tree(context)
+
+
+def update_material_name(material: Material, context: Context = None, force: bool = False):
+    context = context or bpy.context
+    if not material or not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
+        return
+    prefs = get_preferences(context)
+    if not force and not getattr(prefs, "automatic_name_syncing", True):
+        material.ps_mat_data.last_material_name = material.name
+        return
+
+    ps_mat_data = material.ps_mat_data
+    old_name = ps_mat_data.last_material_name or material.name
+    new_name = material.name
+
+    # Update group names with PS_ prefix
+    for group in ps_mat_data.groups:
+        base_name = f"PS_{new_name}"
+        unique_name = get_next_unique_name(base_name, [g.name for g in ps_mat_data.groups if g != group])
+        if group.name != unique_name:
+            group.name = unique_name
+
+    # Update layer names (all types) and image datablocks
+    for group in ps_mat_data.groups:
+        for channel in group.channels:
+            for layer in channel.layers:
+                if layer.is_linked:
+                    continue
+                layer_data = layer.get_layer_data()
+                if not layer_data:
+                    continue
+                new_layer_name = ensure_layer_name_prefix(layer_data.name, new_name, old_name)
+                _set_layer_name(layer_data, new_layer_name, context)
+                if layer_data.image and layer_data.image.name != layer_data.name:
+                    layer_data.image.name = layer_data.name
+
+    ps_mat_data.last_material_name = new_name
+
+
+def sync_names(context: Context, material: Material | None = None, force: bool = False):
+    context = context or bpy.context
+    if material:
+        update_material_name(material, context, force=force)
+        return
+    ps_ctx = parse_context(context)
+    if ps_ctx.active_material:
+        update_material_name(ps_ctx.active_material, context, force=force)
+
 
 def iter_all_layers() -> Generator[tuple[Material, Group, Channel, Layer], None, None]:
     """Yield (material, group, channel, layer) for every layer across all materials.

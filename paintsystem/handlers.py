@@ -3,7 +3,7 @@ import bpy
 from .versioning import get_layer_parent_map, migrate_global_layer_data, migrate_blend_mode, migrate_source_node, migrate_socket_names, update_layer_name, update_layer_version, update_library_nodetree_version
 from .version_check import get_latest_version
 from .context import parse_context
-from .data import sort_actions, get_all_layers, is_valid_uuidv4, iter_all_layers
+from .data import sort_actions, get_all_layers, is_valid_uuidv4, iter_all_layers, update_material_name
 from .image import save_image
 from .graph.basic_layers import get_layer_version_for_type
 import time
@@ -223,9 +223,48 @@ def paint_system_object_update(scene: bpy.types.Scene, depsgraph: bpy.types.Deps
                 pass
 
 
+@bpy.app.handlers.persistent
+def material_name_update_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph = None):
+    if not depsgraph:
+        return
+    if not depsgraph.id_type_updated('MATERIAL'):
+        return
+    try:
+        for update in depsgraph.updates:
+            material = update.id
+            if not isinstance(material, bpy.types.Material):
+                continue
+            if not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
+                continue
+            last_name = material.ps_mat_data.last_material_name
+            if last_name and last_name != material.name:
+                update_material_name(material, bpy.context)
+            elif not last_name:
+                inferred_old = ""
+                if material.ps_mat_data.groups:
+                    for group in material.ps_mat_data.groups:
+                        if group.name.startswith("PS_"):
+                            inferred_old = group.name[3:]
+                            break
+                if inferred_old and inferred_old != material.name:
+                    material.ps_mat_data.last_material_name = inferred_old
+                    update_material_name(material, bpy.context)
+                else:
+                    material.ps_mat_data.last_material_name = material.name
+    except Exception:
+        pass
+
+
 # --- On Addon Enable ---
 def on_addon_enable():
     load_post(bpy.context.scene)
+    try:
+        for material in bpy.data.materials:
+            if hasattr(material, 'ps_mat_data') and material.ps_mat_data:
+                if not material.ps_mat_data.last_material_name:
+                    material.ps_mat_data.last_material_name = material.name
+    except Exception:
+        pass
 
 
 owner = object()
@@ -236,12 +275,28 @@ def brush_color_callback(*args):
         context.scene.ps_scene_data.update_hsv_color(context)
 
 
+def material_name_msgbus_callback(*args):
+    try:
+        for material in bpy.data.materials:
+            if not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
+                continue
+            last_name = material.ps_mat_data.last_material_name
+            if last_name and last_name != material.name:
+                update_material_name(material, bpy.context)
+            elif not last_name:
+                material.ps_mat_data.last_material_name = material.name
+    except Exception:
+        pass
+
+
+
 def register():
     bpy.app.handlers.frame_change_pre.append(frame_change_pre)
     bpy.app.handlers.load_post.append(load_post)
     bpy.app.handlers.save_pre.append(save_handler)
     bpy.app.handlers.load_post.append(refresh_image)
     bpy.app.handlers.depsgraph_update_post.append(paint_system_object_update)
+    bpy.app.handlers.depsgraph_update_post.append(material_name_update_handler)
     bpy.app.handlers.depsgraph_update_post.append(color_history_handler)
     bpy.app.timers.register(on_addon_enable, first_interval=0.1)
     bpy.msgbus.subscribe_rna(
@@ -262,6 +317,12 @@ def register():
         args=(None,),
         notify=brush_color_callback,
     )
+    bpy.msgbus.subscribe_rna(
+        key=(bpy.types.Material, "name"),
+        owner=owner,
+        args=(None,),
+        notify=material_name_msgbus_callback,
+    )
 
 def unregister():
     bpy.msgbus.clear_by_owner(owner)
@@ -270,4 +331,5 @@ def unregister():
     bpy.app.handlers.save_pre.remove(save_handler)
     bpy.app.handlers.load_post.remove(refresh_image)
     bpy.app.handlers.depsgraph_update_post.remove(paint_system_object_update)
+    bpy.app.handlers.depsgraph_update_post.remove(material_name_update_handler)
     bpy.app.handlers.depsgraph_update_post.remove(color_history_handler)
