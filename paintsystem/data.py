@@ -107,11 +107,12 @@ LAYER_TYPE_ENUM = [
     ('BLANK', "Blank", "Blank layer"),
 ]
 
-CHANNEL_TYPE_ENUM = [
-    ('COLOR', "Color", "Color channel", get_icon('color_socket'), 1),
-    ('VECTOR', "Vector", "Vector channel", get_icon('vector_socket'), 2),
-    ('FLOAT', "Value", "Value channel", get_icon('float_socket'), 3),
-]
+def CHANNEL_TYPE_ENUM(self, context):
+    return [
+        ('COLOR', "Color", "Color channel", get_icon('color_socket') or 0, 1),
+        ('VECTOR', "Vector", "Vector channel", get_icon('vector_socket') or 0, 2),
+        ('FLOAT', "Value", "Value channel", get_icon('float_socket') or 0, 3),
+    ]
 
 GRADIENT_TYPE_ENUM = [
     ('GRADIENT_MAP', "Gradient Map", "Gradient map"),
