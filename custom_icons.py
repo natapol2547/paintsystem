@@ -32,9 +32,9 @@ def unload_icons():
 
 def get_icon(custom_icon_name):
     if custom_icons is None:
-        return None
+        return 0
     if custom_icon_name not in custom_icons:
-        return None
+        return 0
     return custom_icons[custom_icon_name].icon_id
 
     
@@ -48,7 +48,7 @@ def get_icon_from_socket_type(socket_type: str) -> int:
 
 def get_image_editor_icon(current_image_editor: str) -> int:
         if not current_image_editor:
-            return None
+            return 0
         editor_path = pathlib.Path(current_image_editor)
         app_name = editor_path.name.lower()
         if "clipstudiopaint" in app_name:

@@ -13,11 +13,37 @@ import re
 
 LIBRARY_FILENAME = "library2.blend"
 DEFAULT_PS_UV_MAP_NAME = "PS_UVMap"
+PAINT_SYSTEM_COLLECTION_NAME = "Paint System"
 
 LIBRARY_NODE_TREE_VERSIONS = {
     ".PS Projection": 1,
     ".PS Tangent Normal": 2,
 }
+
+
+def get_paint_system_collection(context: bpy.types.Context) -> bpy.types.Collection:
+    """Return the collection used to store Paint System helper empties.
+
+    The collection is created and linked to the active scene collection when missing.
+    """
+    collection = bpy.data.collections.get(PAINT_SYSTEM_COLLECTION_NAME)
+    if collection is None:
+        collection = bpy.data.collections.new(PAINT_SYSTEM_COLLECTION_NAME)
+
+    if context and context.scene and context.scene.collection:
+        scene_collection = context.scene.collection
+        if collection.name not in scene_collection.children:
+            scene_collection.children.link(collection)
+
+    return collection
+
+
+def add_empty_to_collection(context: bpy.types.Context, empty_object: bpy.types.Object) -> bpy.types.Collection:
+    """Ensure *empty_object* is linked to the Paint System helper collection."""
+    collection = get_paint_system_collection(context)
+    if empty_object and empty_object.name not in collection.objects:
+        collection.objects.link(empty_object)
+    return collection
 
 def get_layer_blend_type(layer: Layer) -> str:
     """Get the blend mode of the global layer"""

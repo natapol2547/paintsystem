@@ -98,6 +98,33 @@ def migrate_socket_names(layer_parent_map: dict[Layer, LayerParent]):
             layer.auto_update_node_tree = True
             layer.update_node_tree(bpy.context)
 
+
+def migrate_texture_masks_to_image(layer_parent_map: dict[Layer, LayerParent]):
+    """Migrate legacy TEXTURE masks to IMAGE masks.
+
+    This keeps startup-compatible behaviour for files created with older
+    mask enums where texture masks were stored as a dedicated type.
+    """
+    for layer, layer_parent in layer_parent_map.items():
+        did_migrate = False
+
+        for masks_attr in ("masks", "layer_masks"):
+            mask_collection = getattr(layer, masks_attr, None)
+            if not mask_collection:
+                continue
+            for mask in mask_collection:
+                if getattr(mask, "type", None) == "TEXTURE":
+                    mask.type = "IMAGE"
+                    did_migrate = True
+
+        if did_migrate:
+            print(f"Migrated texture mask(s) to image for layer {layer.name}")
+            try:
+                layer.update_node_tree(bpy.context)
+                layer_parent["channel"].update_node_tree(bpy.context)
+            except Exception as e:
+                print(f"Error updating migrated texture masks for layer {layer.name}: {e}")
+
 def update_layer_version(layer_parent_map: dict[Layer, LayerParent]):
     for layer, layer_parent in layer_parent_map.items():
         # Updating layer to the target version
