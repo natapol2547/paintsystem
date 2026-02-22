@@ -85,7 +85,7 @@ MASK_COORDINATE_TYPE_ENUM = [
 
 TEMPLATE_ENUM = [
     ('BASIC', "Blank Canvas", "Blank canvas painting setup", "IMAGE", 0),
-    ('PAINT_OVER', "Paint Over", "Paint over the existing material", get_icon('paintbrush'), 1),
+    ('PAINT_OVER', "Paint Over", "Paint over the existing material", get_icon('paintbrush') or 0, 1),
     ('PBR', "PBR", "PBR painting setup", "MATERIAL", 2),
     ('NORMAL', "Normals Painting", "Start off with a normal painting setup", "NORMALS_VERTEX_FACE", 3),
     ('NONE', "None", "Just add node group to material", "NONE", 4),
