@@ -241,6 +241,8 @@ def transform_gizmo_mode_handler(scene: bpy.types.Scene, depsgraph: bpy.types.De
             wm["ps_gizmo_rotate"] = active_r
             wm["ps_gizmo_scale"] = active_s
         else:
+            if wm.get("ps_gizmo_toggled_off", False):
+                return
             wm["ps_gizmo_toggled_off"] = True
             wm["ps_gizmo_translate"] = False
             wm["ps_gizmo_rotate"] = False
