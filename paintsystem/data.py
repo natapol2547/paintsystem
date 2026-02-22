@@ -61,7 +61,6 @@ for blend_mode in bpy.types.ShaderNodeMixRGB.bl_rna.properties['blend_type'].enu
     if blend_mode.identifier in ["MIX", "COLOR_BURN", "ADD", "LINEAR_LIGHT", "DIVIDE"]:
         if blend_mode.identifier == "MIX":
             BLEND_MODE_ENUM.append(("PASSTHROUGH", "Pass Through", "Pass Through"))
-        BLEND_MODE_ENUM.append(None)
 
 MASK_BLEND_MODE_ENUM = [
     ('SUBTRACT', "Subtract", "Subtract"),
@@ -1349,7 +1348,7 @@ class Layer(BaseNestedListItem):
         for channel in find_channels_containing_layer(layer_data):
             channel.update_node_tree(context)
     def get_blend_mode_items(self, context: Context) -> list[tuple[str, str, str]]:
-        return BLEND_MODE_ENUM if self.type == "FOLDER" else [blend_mode for blend_mode in BLEND_MODE_ENUM if blend_mode is None or blend_mode[0] != "PASSTHROUGH"]
+        return BLEND_MODE_ENUM if self.type == "FOLDER" else [blend_mode for blend_mode in BLEND_MODE_ENUM if blend_mode[0] != "PASSTHROUGH"]
     blend_mode: EnumProperty(
         items=get_blend_mode_items,
         name="Blend Mode",
