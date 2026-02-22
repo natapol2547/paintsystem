@@ -29,7 +29,6 @@ from bpy.types import (
     PropertyGroup,
     Material,
 )
-from bpy.utils import register_classes_factory
 from bpy_extras.node_utils import connect_sockets
 from typing import Optional
 from mathutils import Color, Euler, Vector
@@ -108,9 +107,9 @@ LAYER_TYPE_ENUM = [
 ]
 
 CHANNEL_TYPE_ENUM = [
-    ('COLOR', "Color", "Color channel", get_icon('color_socket'), 1),
-    ('VECTOR', "Vector", "Vector channel", get_icon('vector_socket'), 2),
-    ('FLOAT', "Value", "Value channel", get_icon('float_socket'), 3),
+    ('COLOR', "Color", "Color channel", get_icon('color_socket') or 0, 1),
+    ('VECTOR', "Vector", "Vector channel", get_icon('vector_socket') or 0, 2),
+    ('FLOAT', "Value", "Value channel", get_icon('float_socket') or 0, 3),
 ]
 
 GRADIENT_TYPE_ENUM = [
@@ -208,10 +207,10 @@ EDIT_EXTERNAL_MODE_ENUM = [
 
 
 CHANNEL_TEMPLATE_ENUM = [
-    ("COLOR", "Color", "Color", get_icon('color_socket'), 0),
-    ("METALLIC", "Metallic", "Metallic", get_icon('float_socket'), 1),
-    ("ROUGHNESS", "Roughness", "Roughness", get_icon('float_socket'), 2),
-    ("NORMAL", "Normal", "Normal", get_icon('vector_socket'), 3),
+    ("COLOR", "Color", "Color", get_icon('color_socket') or 0, 0),
+    ("METALLIC", "Metallic", "Metallic", get_icon('float_socket') or 0, 1),
+    ("ROUGHNESS", "Roughness", "Roughness", get_icon('float_socket') or 0, 2),
+    ("NORMAL", "Normal", "Normal", get_icon('vector_socket') or 0, 3),
 ]
 
 def is_valid_uuidv4(uuid_string):
@@ -3277,11 +3276,58 @@ classes = (
     LegacyPaintSystemGroups,
     )
 
-_register, _unregister = register_classes_factory(classes)
+
+def _get_registered_class_by_name(class_name: str):
+    registered_cls = getattr(bpy.types, class_name, None)
+    return registered_cls if isinstance(registered_cls, type) else None
+
+
+def _unregister_classes_by_name() -> None:
+    for cls in reversed(classes):
+        registered_cls = _get_registered_class_by_name(cls.__name__)
+        if not registered_cls:
+            continue
+        try:
+            bpy.utils.unregister_class(registered_cls)
+        except RuntimeError:
+            pass
+
+
+def _register_classes_safe() -> None:
+    for cls in classes:
+        try:
+            bpy.utils.register_class(cls)
+        except (ValueError, RuntimeError) as exc:
+            if "already registered as a subclass" in str(exc):
+                registered_cls = _get_registered_class_by_name(cls.__name__)
+                if registered_cls is not None:
+                    try:
+                        bpy.utils.unregister_class(registered_cls)
+                    except RuntimeError:
+                        pass
+                try:
+                    bpy.utils.register_class(cls)
+                except (ValueError, RuntimeError) as retry_exc:
+                    if "already registered as a subclass" in str(retry_exc):
+                        continue
+                    raise
+                continue
+            raise
+
+
+def _unregister_classes_safe() -> None:
+    _unregister_classes_by_name()
 
 def register():
     """Register the Paint System data module."""
-    _register()
+    _unregister_classes_by_name()
+    _register_classes_safe()
+    if hasattr(bpy.types.Material, "paint_system"):
+        del bpy.types.Material.paint_system
+    if hasattr(bpy.types.Material, "ps_mat_data"):
+        del bpy.types.Material.ps_mat_data
+    if hasattr(bpy.types.Scene, "ps_scene_data"):
+        del bpy.types.Scene.ps_scene_data
     bpy.types.Scene.ps_scene_data = PointerProperty(
         type=PaintSystemGlobalData,
         name="Paint System Data",
@@ -3296,7 +3342,10 @@ def register():
     
 def unregister():
     """Unregister the Paint System data module."""
-    del bpy.types.Material.paint_system
-    del bpy.types.Material.ps_mat_data
-    del bpy.types.Scene.ps_scene_data
-    _unregister()
+    if hasattr(bpy.types.Material, "paint_system"):
+        del bpy.types.Material.paint_system
+    if hasattr(bpy.types.Material, "ps_mat_data"):
+        del bpy.types.Material.ps_mat_data
+    if hasattr(bpy.types.Scene, "ps_scene_data"):
+        del bpy.types.Scene.ps_scene_data
+    _unregister_classes_safe()
