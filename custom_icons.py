@@ -32,9 +32,9 @@ def unload_icons():
 
 def get_icon(custom_icon_name):
     if custom_icons is None:
-        return None
+        return 0
     if custom_icon_name not in custom_icons:
-        return None
+        return 0
     return custom_icons[custom_icon_name].icon_id
 
     
