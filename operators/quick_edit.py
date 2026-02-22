@@ -122,6 +122,12 @@ def set_rgb_to_zero_if_alpha_zero(image):
         print(f"Error: Input '{image.name}' is not a bpy.types.Image.")
         return False
 
+    # if not image.has_data:
+    #     print(f"Error: Image '{image.name}' has no pixel data loaded.")
+    #     # You might want to pack the image or ensure the file path is correct
+    #     # before calling this function if this happens.
+    #     return False
+
     # --- Method 1: Using Numpy (Generally Faster for large images) ---
     width = image.size[0]
     height = image.size[1]
@@ -149,8 +155,37 @@ def set_rgb_to_zero_if_alpha_zero(image):
     pixel_data[alpha_zero_mask, 0:3] = 0.0
 
     # Flatten the array back and update the image pixels
-    image.pixels = pixel_data.ravel()
+    image.pixels = pixel_data.ravel()  # Update with modified data
 
+    # --- Method 2: Direct Pixel Iteration (Simpler, potentially slower) ---
+    # Uncomment this section and comment out Method 1 if you prefer
+    # or if numpy is unavailable (though it ships with Blender).
+    #
+    # if image.channels != 4:
+    #     print(f"Error: Image '{image.name}' does not have 4 channels (RGBA). Found {image.channels}.")
+    #     return False
+    #
+    # pixels = image.pixels # Get a reference (can be modified directly)
+    # num_pixels = len(pixels) // 4 # Calculate total number of pixels
+    #
+    # modified = False
+    # for i in range(num_pixels):
+    #     idx_alpha = i * 4 + 3
+    #
+    #     if pixels[idx_alpha] == 0.0:
+    #         idx_r = i * 4
+    #         idx_g = i * 4 + 1
+    #         idx_b = i * 4 + 2
+    #
+    #         # Check if modification is needed (avoids unnecessary writes)
+    #         if pixels[idx_r] != 0.0 or pixels[idx_g] != 0.0 or pixels[idx_b] != 0.0:
+    #             pixels[idx_r] = 0.0
+    #             pixels[idx_g] = 0.0
+    #             pixels[idx_b] = 0.0
+    #             modified = True
+
+    # --- Final Step ---
+    # Mark the image as updated so Blender recognizes the changes
     return True
 
 
@@ -176,10 +211,18 @@ class PAINTSYSTEM_OT_ProjectApply(PSContextMixin, Operator):
         external_image = active_layer.external_image
         external_image_name = str(active_layer.external_image.name)
 
+        # external_image_name = str(external_image.name)
+        # print(external_image_name)
+
         external_image.reload()
         if app_name == "CLIPStudioPaint.exe":
             set_rgb_to_zero_if_alpha_zero(external_image)
             external_image.update_tag()
+
+        # if image is None:
+        #     self.report({'ERROR'}, rpt_(
+        #         "Could not find image '{:s}'").format(external_image_name))
+        #     return {'CANCELLED'}
 
         with bpy.context.temp_override(**{'mode': 'IMAGE_PAINT'}):
             bpy.ops.paint.project_image(image=external_image_name)
@@ -218,6 +261,60 @@ def _check_path_and_add(enum, paths, enum_id, name, description, icon_value=None
         if os.path.exists(path):
             enum.append((enum_id, name, description, icon_value, len(enum)))
             return True
+    return False
+
+
+def _detect_photoshop(program_files, program_files_x86):
+    """Detect Adobe Photoshop installation."""
+    search_paths = [program_files, program_files_x86]
+    for base_path in search_paths:
+        if not os.path.exists(base_path):
+            continue
+        
+        for item in _safe_listdir(base_path):
+            if not item.startswith('Adobe') or not os.path.isdir(os.path.join(base_path, item)):
+                continue
+            
+            adobe_dir = os.path.join(base_path, item)
+            for subitem in _safe_listdir(adobe_dir):
+                if subitem.startswith('Adobe Photoshop'):
+                    photoshop_exe = os.path.join(adobe_dir, subitem, 'Photoshop.exe')
+                    if os.path.exists(photoshop_exe):
+                        return True
+    return False
+
+
+def _detect_gimp(program_files, program_files_x86, local_appdata):
+    """Detect GIMP installation (any version)."""
+    # Check Program Files and Program Files (x86) for GIMP folders
+    search_paths = [program_files, program_files_x86]
+    for base_path in search_paths:
+        if not os.path.exists(base_path):
+            continue
+        
+        # Look for any "GIMP X" folder (GIMP 2, GIMP 3, etc.)
+        for item in _safe_listdir(base_path):
+            if item.startswith('GIMP ') and os.path.isdir(os.path.join(base_path, item)):
+                gimp_bin_dir = os.path.join(base_path, item, 'bin')
+                executables = _find_executables_in_dir(gimp_bin_dir, 'gimp-')
+                if executables:
+                    return True
+    
+    # Check Local AppData for GIMP 3
+    gimp3_path = os.path.join(local_appdata, 'Programs', 'GIMP 3', 'bin', 'gimp-3.exe')
+    if os.path.exists(gimp3_path):
+        return True
+    
+    # Also check for any GIMP folder in Local AppData\Programs
+    programs_dir = os.path.join(local_appdata, 'Programs')
+    if os.path.exists(programs_dir):
+        for item in _safe_listdir(programs_dir):
+            if item.startswith('GIMP '):
+                gimp_bin_dir = os.path.join(programs_dir, item, 'bin')
+                executables = _find_executables_in_dir(gimp_bin_dir, 'gimp-')
+                if executables:
+                    return True
+    
     return False
 
 
@@ -339,11 +436,11 @@ class PAINTSYSTEM_OT_QuickEdit(PSContextMixin, Operator):
             _check_path_and_add(enum, clip_studio_paths, 'CLIPSTUDIO_PAINT', 'Clip Studio Paint', 'Clip Studio Paint', get_icon('clip_studio_paint'))
             
             # Check for Photoshop
-            if _find_photoshop_path(program_files, program_files_x86):
+            if _detect_photoshop(program_files, program_files_x86):
                 enum.append(('PHOTOSHOP', 'Photoshop', 'Adobe Photoshop', get_icon('photoshop'), len(enum)))
             
             # Check for GIMP (any version)
-            if _find_gimp_path(program_files, program_files_x86, local_appdata):
+            if _detect_gimp(program_files, program_files_x86, local_appdata):
                 enum.append(('GIMP', 'GIMP', 'GNU Image Manipulation Program', get_icon('gimp'), len(enum)))
             
             # Check for Krita
@@ -387,11 +484,10 @@ class PAINTSYSTEM_OT_QuickEdit(PSContextMixin, Operator):
             app_path = _get_application_path(self.external_application, program_files, program_files_x86, local_appdata)
             if app_path:
                 context.preferences.filepaths.image_editor = app_path
-                current_image_editor = app_path
             else:
                 self.report({'WARNING'}, f"Could not find {self.external_application} installation")
-        else:
-            current_image_editor = context.preferences.filepaths.image_editor
+        
+        current_image_editor = context.preferences.filepaths.image_editor
         if not current_image_editor:
             self.report({'ERROR'}, "No image editor set")
             return {'CANCELLED'}
@@ -513,9 +609,16 @@ class PAINTSYSTEM_OT_QuickEdit(PSContextMixin, Operator):
                 box.alert = True
                 box.label(text="No image on active layer!", icon="ERROR")
             elif image_needs_save(active_layer.image):
+                # image = active_layer.image
                 box = layout.box()
                 box.label(text=f"Save Directory:", icon="IMAGE_DATA")
                 box.prop(self, "save_directory", text="")
+                # Check if image needs to be saved
+                # if image_needs_save(image):
+                #     box = layout.box()
+                #     col = box.column(align=True)
+                #     col.label(text="Image will be saved in:", icon="INFO")
+                #     col.label(text=f"{self.save_directory}", icon="BLANK1")
         else:
             
             box = layout.box()
@@ -545,12 +648,6 @@ class PAINTSYSTEM_OT_ReloadImage(PSContextMixin, Operator):
     bl_label = "Reload Image"
     bl_options = {'REGISTER'}
     bl_description = "Reload the image"
-    
-    @classmethod
-    def poll(cls, context):
-        ps_ctx = cls.parse_context(context)
-        active_layer = ps_ctx.active_layer
-        return active_layer and active_layer.external_image
 
     def execute(self, context):
         ps_ctx = self.parse_context(context)
