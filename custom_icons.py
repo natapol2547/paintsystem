@@ -25,7 +25,7 @@ def load_icons():
 
 def unload_icons():
     global custom_icons
-    if hasattr(bpy.utils, 'previews'):
+    if hasattr(bpy.utils, 'previews') and custom_icons is not None:
         bpy.utils.previews.remove(custom_icons)
         custom_icons = None
 
