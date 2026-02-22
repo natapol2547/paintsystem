@@ -222,14 +222,33 @@ def transform_gizmo_mode_handler(scene: bpy.types.Scene, depsgraph: bpy.types.De
     in_paint_mode = current_mode in paint_like_modes
     wm = bpy.context.window_manager
 
-    if wm.get("ps_gizmo_toggled_off", False):
-        return
+    active_space = view3d_spaces[0]
+    active_t = bool(getattr(active_space, "show_gizmo_object_translate", False))
+    active_r = bool(getattr(active_space, "show_gizmo_object_rotate", False))
+    active_s = bool(getattr(active_space, "show_gizmo_object_scale", False))
+    any_gizmo_on = active_t or active_r or active_s
 
     was_in_paint_mode = wm.get("ps_gizmo_in_paint_mode", False)
     last_mode = wm.get("ps_gizmo_last_mode", None)
     mode_changed = (last_mode != current_mode)
     if mode_changed:
         wm["ps_gizmo_last_mode"] = current_mode
+
+    if not in_paint_mode and not was_in_paint_mode:
+        if any_gizmo_on:
+            wm["ps_gizmo_toggled_off"] = False
+            wm["ps_gizmo_translate"] = active_t
+            wm["ps_gizmo_rotate"] = active_r
+            wm["ps_gizmo_scale"] = active_s
+        else:
+            wm["ps_gizmo_toggled_off"] = True
+            wm["ps_gizmo_translate"] = False
+            wm["ps_gizmo_rotate"] = False
+            wm["ps_gizmo_scale"] = False
+            return
+
+    if wm.get("ps_gizmo_toggled_off", False):
+        return
 
     for space in view3d_spaces:
         if in_paint_mode:
@@ -248,15 +267,6 @@ def transform_gizmo_mode_handler(scene: bpy.types.Scene, depsgraph: bpy.types.De
                 space.show_gizmo_object_rotate = bool(wm.get("ps_gizmo_pre_paint_rotate", True))
                 space.show_gizmo_object_scale = bool(wm.get("ps_gizmo_pre_paint_scale", False))
                 wm["ps_gizmo_in_paint_mode"] = False
-            elif not was_in_paint_mode:
-                if wm.get("ps_gizmo_translate") is None:
-                    wm["ps_gizmo_translate"] = True
-                    wm["ps_gizmo_rotate"] = True
-                    wm["ps_gizmo_scale"] = False
-
-                space.show_gizmo_object_translate = bool(wm.get("ps_gizmo_translate", True))
-                space.show_gizmo_object_rotate = bool(wm.get("ps_gizmo_rotate", True))
-                space.show_gizmo_object_scale = bool(wm.get("ps_gizmo_scale", False))
 
 @bpy.app.handlers.persistent
 def paint_system_object_update(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph = None):
