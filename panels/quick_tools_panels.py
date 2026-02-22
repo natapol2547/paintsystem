@@ -33,6 +33,12 @@ class MAT_PT_PaintSystemQuickToolsDisplay(PSContextMixin, Panel):
         if not ps_ctx.ps_settings.use_compact_design:
             row.scale_y = 1
             row.scale_x = 1
+        wm = context.window_manager
+        if wm.get("ps_gizmo_translate") is None:
+            wm["ps_gizmo_translate"] = True
+            wm["ps_gizmo_rotate"] = True
+            wm["ps_gizmo_scale"] = False
+        gizmo_toggled_off = bool(wm.get("ps_gizmo_toggled_off", False))
         any_gizmo_on = (
             bool(getattr(space, "show_gizmo_object_translate", False)) or
             bool(getattr(space, "show_gizmo_object_rotate", False)) or
@@ -51,13 +57,18 @@ class MAT_PT_PaintSystemQuickToolsDisplay(PSContextMixin, Panel):
             'SCULPT_GPENCIL',
             'SCULPT_GREASE_PENCIL',
         }
-        row.enabled = context.mode not in paint_like_modes
-        row.prop(space, "show_gizmo_object_translate",
-                 text="", icon='EMPTY_ARROWS')
-        row.prop(space, "show_gizmo_object_rotate",
-                 text="", icon='FILE_REFRESH')
-        row.prop(space, "show_gizmo_object_scale",
-                 text="", icon='MOD_MESHDEFORM')
+        row.enabled = context.mode not in paint_like_modes and not gizmo_toggled_off
+        if gizmo_toggled_off:
+            row.prop(wm, '["ps_gizmo_translate"]', text="", icon='EMPTY_ARROWS', toggle=True)
+            row.prop(wm, '["ps_gizmo_rotate"]', text="", icon='FILE_REFRESH', toggle=True)
+            row.prop(wm, '["ps_gizmo_scale"]', text="", icon='MOD_MESHDEFORM', toggle=True)
+        else:
+            row.prop(space, "show_gizmo_object_translate",
+                     text="", icon='EMPTY_ARROWS')
+            row.prop(space, "show_gizmo_object_rotate",
+                     text="", icon='FILE_REFRESH')
+            row.prop(space, "show_gizmo_object_scale",
+                     text="", icon='MOD_MESHDEFORM')
 
 
 class MAT_PT_PaintSystemQuickToolsMesh(PSContextMixin, Panel):
