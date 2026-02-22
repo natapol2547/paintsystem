@@ -374,55 +374,49 @@ class PAINTSYSTEM_OT_DuplicatePaintSystemData(PSContextMixin, MultiMaterialOpera
 class PAINTSYSTEM_OT_ToggleTransformGizmos(Operator):
     bl_idname = "paint_system.toggle_transform_gizmos"
     bl_label = "Toggle Transform Gizmos"
-    bl_options = {'REGISTER'}
-    bl_description = "Toggle transform gizmos on/off with state memory for paint mode"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Toggle transform gizmos with mode-aware behavior"
+
+    @classmethod
+    def poll(cls, context):
+        return context.area and context.area.type == 'VIEW_3D'
 
     def execute(self, context):
-        space = context.area.spaces[0] if context.area and context.area.spaces else None
-        if not space or space.type != 'VIEW_3D':
+        space = context.area.spaces[0]
+        if space.type != 'VIEW_3D':
             return {'CANCELLED'}
-        
+
         wm = context.window_manager
-        obj = context.active_object
-        
-        # Determine current gizmo state
-        gizmos_enabled = (space.show_gizmo_object_translate or
-                         space.show_gizmo_object_rotate or
-                         space.show_gizmo_object_scale)
-        
-        # Treat paint, sculpt, vertex/weight paint, and GP draw modes the same for gizmos
-        paint_like_modes = {
-            'PAINT_TEXTURE',
-            'SCULPT',
-            'PAINT_VERTEX',
-            'PAINT_WEIGHT',
-            'PAINT_GPENCIL',
-            'PAINT_GPENCIL_LEGACY',
-            'PAINT_GREASE_PENCIL',
-        }
-        in_paint_mode = obj and obj.mode in paint_like_modes
-        
-        if in_paint_mode:
-            # Store current gizmo state before entering paint mode
-            wm["ps_gizmo_translate"] = space.show_gizmo_object_translate
-            wm["ps_gizmo_rotate"] = space.show_gizmo_object_rotate
-            wm["ps_gizmo_scale"] = space.show_gizmo_object_scale
-            # Keep gizmos disabled during paint mode
+
+        current_translate = bool(getattr(space, "show_gizmo_object_translate", False))
+        current_rotate = bool(getattr(space, "show_gizmo_object_rotate", False))
+        current_scale = bool(getattr(space, "show_gizmo_object_scale", False))
+        any_gizmo_on = current_translate or current_rotate or current_scale
+
+        if any_gizmo_on:
+            wm["ps_gizmo_translate"] = current_translate
+            wm["ps_gizmo_rotate"] = current_rotate
+            wm["ps_gizmo_scale"] = current_scale
+            wm["ps_gizmo_toggled_off"] = True
+
             space.show_gizmo_object_translate = False
             space.show_gizmo_object_rotate = False
             space.show_gizmo_object_scale = False
         else:
-            # Not in paint mode - toggle gizmos normally
-            new_state = not gizmos_enabled
-            space.show_gizmo_object_translate = new_state
-            space.show_gizmo_object_rotate = new_state
-            space.show_gizmo_object_scale = new_state
-        
-        # Redraw the viewport
+            if wm.get("ps_gizmo_translate") is None:
+                wm["ps_gizmo_translate"] = True
+                wm["ps_gizmo_rotate"] = True
+                wm["ps_gizmo_scale"] = False
+
+            wm["ps_gizmo_toggled_off"] = False
+            space.show_gizmo_object_translate = bool(wm.get("ps_gizmo_translate", True))
+            space.show_gizmo_object_rotate = bool(wm.get("ps_gizmo_rotate", True))
+            space.show_gizmo_object_scale = bool(wm.get("ps_gizmo_scale", False))
+
         for area in context.screen.areas:
             if area.type == 'VIEW_3D':
                 area.tag_redraw()
-        
+
         return {'FINISHED'}
 
 def split_area(context: bpy.types.Context, direction: str = 'VERTICAL', factor: float = 0.55) -> bpy.types.Area | None:

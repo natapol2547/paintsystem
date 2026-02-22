@@ -257,9 +257,9 @@ if IMAGE_FILTERS_AVAILABLE:
             description="Choose brush texture source",
             items=[
                 ('PRESET', "Brush Preset", "Use a brush preset", "BRUSH_DATA", 1),
-                ('FOLDER', "Brush Folder", "Use multiple brushes from a folder", get_icon('folder'), 2),
+                ('FOLDER', "Brush Folder", "Use multiple brushes from a folder", get_icon('folder') or 0, 2),
                 ('SINGLE', "Single Brush", "Use a single brush texture", "GREASEPENCIL", 3),
-                ('DEFAULT', "Circular", "Use default circular brush", get_icon('channel'), 4)
+                ('DEFAULT', "Circular", "Use default circular brush", get_icon('channel') or 0, 4)
             ],
             default='PRESET'
         )

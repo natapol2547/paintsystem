@@ -33,14 +33,42 @@ class MAT_PT_PaintSystemQuickToolsDisplay(PSContextMixin, Panel):
         if not ps_ctx.ps_settings.use_compact_design:
             row.scale_y = 1
             row.scale_x = 1
-        row.prop(space, "show_gizmo", text="Toggle Gizmo", icon='GIZMO')
+        wm = context.window_manager
+        if wm.get("ps_gizmo_translate") is None:
+            wm["ps_gizmo_translate"] = True
+            wm["ps_gizmo_rotate"] = True
+            wm["ps_gizmo_scale"] = False
+        gizmo_toggled_off = bool(wm.get("ps_gizmo_toggled_off", False))
+        any_gizmo_on = (
+            bool(getattr(space, "show_gizmo_object_translate", False)) or
+            bool(getattr(space, "show_gizmo_object_rotate", False)) or
+            bool(getattr(space, "show_gizmo_object_scale", False))
+        )
+        row.operator("paint_system.toggle_transform_gizmos", text="Toggle Gizmo", icon='GIZMO', depress=any_gizmo_on)
         row = row.row(align=True)
-        row.prop(space, "show_gizmo_object_translate",
-                 text="", icon='EMPTY_ARROWS')
-        row.prop(space, "show_gizmo_object_rotate",
-                 text="", icon='FILE_REFRESH')
-        row.prop(space, "show_gizmo_object_scale",
-                 text="", icon='MOD_MESHDEFORM')
+        paint_like_modes = {
+            'PAINT_TEXTURE',
+            'SCULPT',
+            'PAINT_VERTEX',
+            'PAINT_WEIGHT',
+            'PAINT_GPENCIL',
+            'PAINT_GPENCIL_LEGACY',
+            'PAINT_GREASE_PENCIL',
+            'SCULPT_GPENCIL',
+            'SCULPT_GREASE_PENCIL',
+        }
+        row.enabled = context.mode not in paint_like_modes and not gizmo_toggled_off
+        if gizmo_toggled_off:
+            row.prop(wm, '["ps_gizmo_translate"]', text="", icon='EMPTY_ARROWS', toggle=True)
+            row.prop(wm, '["ps_gizmo_rotate"]', text="", icon='FILE_REFRESH', toggle=True)
+            row.prop(wm, '["ps_gizmo_scale"]', text="", icon='MOD_MESHDEFORM', toggle=True)
+        else:
+            row.prop(space, "show_gizmo_object_translate",
+                     text="", icon='EMPTY_ARROWS')
+            row.prop(space, "show_gizmo_object_rotate",
+                     text="", icon='FILE_REFRESH')
+            row.prop(space, "show_gizmo_object_scale",
+                     text="", icon='MOD_MESHDEFORM')
 
 
 class MAT_PT_PaintSystemQuickToolsMesh(PSContextMixin, Panel):

@@ -12,6 +12,7 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 import bpy
+from importlib import import_module
 from bpy.utils import register_submodule_factory
 from .custom_icons import load_icons, unload_icons
 
@@ -39,13 +40,26 @@ submodules = [
     "keymaps",
 ]
 
+for submodule in submodules:
+    globals()[submodule] = import_module(f".{submodule}", __name__)
+
 _register, _unregister = register_submodule_factory(__name__, submodules)
 
 def register():
+    try:
+        _unregister()
+    except Exception:
+        pass
     load_icons()
-    _register()
+    try:
+        _register()
+    except Exception:
+        unload_icons()
+        raise
     
 def unregister():
-    _unregister()
-    unload_icons()
+    try:
+        _unregister()
+    finally:
+        unload_icons()
     print("Paint System: Unregistered", __package__)

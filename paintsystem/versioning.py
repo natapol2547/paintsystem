@@ -98,6 +98,13 @@ def migrate_socket_names(layer_parent_map: dict[Layer, LayerParent]):
             layer.auto_update_node_tree = True
             layer.update_node_tree(bpy.context)
 
+
+def migrate_texture_masks_to_image(layer_parent_map: dict[Layer, LayerParent]):
+    for layer, _layer_parent in layer_parent_map.items():
+        for mask in layer.masks:
+            if mask.type == "TEXTURE" and mask.mask_image and mask.type != "IMAGE":
+                mask.type = "IMAGE"
+
 def update_layer_version(layer_parent_map: dict[Layer, LayerParent]):
     for layer, layer_parent in layer_parent_map.items():
         # Updating layer to the target version
