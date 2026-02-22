@@ -11,6 +11,7 @@ submodules = [
     "quick_edit",
     "versioning_operators",
     "bake_operators",
+    "uv_edit_operators",
     "shader_editor",
 ]
 

@@ -259,6 +259,13 @@ def update_active_image(self=None, context: bpy.types.Context = None):
 
     if image_paint.mode == 'MATERIAL':
         image_paint.mode = 'IMAGE'
+    if context.scene and context.scene.ps_scene_data and context.scene.ps_scene_data.uv_edit_enabled:
+        target_uv = context.scene.ps_scene_data.uv_edit_target_uv
+        if obj and obj.data.uv_layers.get(target_uv):
+            obj.data.uv_layers[target_uv].active = True
+        image_paint.canvas = None
+        # Painting is disabled during UV edit mode
+        return
     if not active_layer or active_layer.lock_layer or active_channel.use_bake_image:
         image_paint.canvas = None
         # Unable to paint
@@ -2798,6 +2805,16 @@ class PaintSystemGlobalData(PropertyGroup):
             b = int(color[2] * 255)
             hex_color = "#{:02x}{:02x}{:02x}".format(r, g, b).upper()
             context.scene.ps_scene_data.hex_color = hex_color
+
+    def update_uv_checker(self, context):
+        if not context or not context.scene or not context.scene.ps_scene_data:
+            return
+        if not context.scene.ps_scene_data.uv_edit_enabled:
+            return
+        try:
+            bpy.ops.paint_system.update_uv_checker()
+        except Exception:
+            pass
     
     clipboard_layers: CollectionProperty(
         type=ClipboardLayer,
@@ -2867,6 +2884,234 @@ class PaintSystemGlobalData(PropertyGroup):
         name="Temp Materials",
         description="Collection of materials in the temporary collection",
         options={'SKIP_SAVE'}
+    )
+
+    uv_edit_enabled: BoolProperty(
+        name="UV Edit Enabled",
+        description="Enable UV edit mode",
+        default=False
+    )
+    uv_edit_source_uv: StringProperty(
+        name="Active UV",
+        description="Active UV map name for UV edit workflow",
+        default=""
+    )
+    uv_edit_target_uv: StringProperty(
+        name="Target UV",
+        description="Target UV map name for UV edit workflow",
+        default=""
+    )
+    uv_edit_target_mode: EnumProperty(
+        items=[
+            ('EXISTING', "Use Existing UV", "Use an existing UV map"),
+            ('NEW', "Create New UV", "Create a new UV map"),
+        ],
+        name="Target Mode",
+        description="Target UV selection mode",
+        default='EXISTING'
+    )
+    uv_edit_new_uv_method: EnumProperty(
+        items=[
+            ('COPY', "Base on Current UV", "Copy the current UV map"),
+            ('UNWRAP_ANGLE', "Angle Based", "Unwrap using Angle Based"),
+            ('UNWRAP_CONFORMAL', "Conformal", "Unwrap using Conformal"),
+            ('MIN_STRETCH', "Minimum Stretch", "Minimize stretch"),
+            ('SMART', "Smart UV Project", "Run Smart UV Project"),
+            ('LIGHTMAP', "Lightmap Pack", "Lightmap Pack"),
+        ],
+        name="New UV Method",
+        description="How to create a new UV map",
+        default='COPY'
+    )
+    uv_edit_smart_angle_limit: FloatProperty(
+        name="Angle Limit",
+        description="Smart UV Project angle limit",
+        default=math.radians(66.0),
+        min=math.radians(1.0),
+        max=math.radians(89.0),
+        subtype='ANGLE'
+    )
+    uv_edit_smart_island_margin: FloatProperty(
+        name="Island Margin",
+        description="Smart UV Project island margin",
+        default=0.02,
+        min=0.0,
+        max=1.0,
+        subtype='FACTOR'
+    )
+    uv_edit_smart_area_weight: FloatProperty(
+        name="Area Weight",
+        description="Smart UV Project area weight",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        subtype='FACTOR'
+    )
+    uv_edit_smart_correct_aspect: BoolProperty(
+        name="Correct Aspect",
+        description="Correct aspect for Smart UV Project",
+        default=True
+    )
+    uv_edit_smart_scale_to_bounds: BoolProperty(
+        name="Scale to Bounds",
+        description="Scale islands to bounds",
+        default=False
+    )
+    uv_edit_smart_margin_method: EnumProperty(
+        items=[
+            ('SCALED', "Scaled", "Scale margins based on island size"),
+            ('ADD', "Add", "Add margin in UV space"),
+            ('FRACTION', "Fraction", "Margin as fraction of island size"),
+        ],
+        name="Margin Method",
+        description="Smart UV Project margin method",
+        default='SCALED'
+    )
+    uv_edit_smart_rotate_method: EnumProperty(
+        items=[
+            ('AXIS_ALIGNED', "Axis-aligned (Vertical)", "Align islands to vertical axis"),
+            ('AXIS_ALIGNED_X', "Axis-aligned (Horizontal)", "Align islands to horizontal axis"),
+            ('MINIMUM', "Minimum", "Minimize bounding box rotation"),
+        ],
+        name="Rotation Method",
+        description="Smart UV Project rotation method",
+        default='AXIS_ALIGNED'
+    )
+    uv_edit_unwrap_fill_holes: BoolProperty(
+        name="Fill Holes",
+        description="Fill holes when unwrapping",
+        default=True
+    )
+    uv_edit_unwrap_correct_aspect: BoolProperty(
+        name="Correct Aspect",
+        description="Correct aspect when unwrapping",
+        default=True
+    )
+    uv_edit_unwrap_use_subsurf: BoolProperty(
+        name="Use Subsurf",
+        description="Use subdivision surfaces for unwrapping",
+        default=False
+    )
+    uv_edit_unwrap_margin: FloatProperty(
+        name="Margin",
+        description="Unwrap margin",
+        default=0.001,
+        min=0.0,
+        max=1.0,
+        subtype='FACTOR'
+    )
+    uv_edit_min_stretch_blend: FloatProperty(
+        name="Blend",
+        description="Minimize stretch blend",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        subtype='FACTOR'
+    )
+    uv_edit_min_stretch_iterations: IntProperty(
+        name="Iterations",
+        description="Minimize stretch iterations",
+        default=5,
+        min=1,
+        max=50
+    )
+    uv_edit_lightmap_quality: IntProperty(
+        name="Quality",
+        description="Lightmap pack quality",
+        default=1,
+        min=1,
+        max=48
+    )
+    uv_edit_lightmap_margin: FloatProperty(
+        name="Margin",
+        description="Lightmap pack margin",
+        default=0.02,
+        min=0.0,
+        max=1.0,
+        subtype='FACTOR'
+    )
+    uv_edit_lightmap_pack_in_one: BoolProperty(
+        name="Pack In One",
+        description="Pack all faces into one UV map",
+        default=True
+    )
+    uv_edit_keep_old_uv: BoolProperty(
+        name="Keep Old UV",
+        description="Keep the original UV map after applying",
+        default=True
+    )
+    uv_edit_image_resolution: EnumProperty(
+        items=[
+            ('1024', "1024", "1024x1024"),
+            ('2048', "2048", "2048x2048"),
+            ('4096', "4096", "4096x4096"),
+            ('8192', "8192", "8192x8192"),
+            ('CUSTOM', "Custom", "Custom Resolution"),
+        ],
+        name="Image Resolution",
+        default='2048'
+    )
+    uv_edit_image_width: IntProperty(
+        name="Width",
+        default=2048,
+        min=1,
+        subtype='PIXEL'
+    )
+    uv_edit_image_height: IntProperty(
+        name="Height",
+        default=2048,
+        min=1,
+        subtype='PIXEL'
+    )
+    uv_edit_use_udim_tiles: BoolProperty(
+        name="Use UDIM Tiles",
+        description="Use UDIM tiles for new baked images",
+        default=False
+    )
+    uv_edit_use_float: BoolProperty(
+        name="Use Float",
+        description="Use float buffer for new baked images",
+        default=False
+    )
+    uv_edit_checker_type: EnumProperty(
+        items=[
+            ('UV_GRID', "UV Grid", "UV grid"),
+            ('COLOR_GRID', "Color Grid", "Color grid"),
+        ],
+        name="Checker Type",
+        description="UV checker preview type",
+        default='UV_GRID',
+        update=update_uv_checker
+    )
+    uv_edit_checker_resolution: EnumProperty(
+        items=[
+            ('256', "256", "256x256"),
+            ('512', "512", "512x512"),
+            ('1024', "1024", "1024x1024"),
+            ('2048', "2048", "2048x2048"),
+            ('4096', "4096", "4096x4096"),
+            ('8192', "8192", "8192x8192"),
+        ],
+        name="Checker Resolution",
+        description="UV checker resolution",
+        default='1024',
+        update=update_uv_checker
+    )
+    uv_edit_checker_enabled: BoolProperty(
+        name="Enable Checker",
+        description="Show checker preview on the object",
+        default=False,
+        update=update_uv_checker
+    )
+    uv_edit_checker_material: StringProperty(
+        name="Checker Material",
+        description="Material name for UV checker preview",
+        default=""
+    )
+    uv_edit_material_overrides: StringProperty(
+        name="UV Edit Material Overrides",
+        description="Stored material overrides for UV edit mode",
+        default=""
     )
     
     def add_layer_to_clipboard(self, layer: "Layer"):
