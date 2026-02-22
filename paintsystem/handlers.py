@@ -228,6 +228,18 @@ def transform_gizmo_mode_handler(scene: bpy.types.Scene, depsgraph: bpy.types.De
     active_s = bool(getattr(active_space, "show_gizmo_object_scale", False))
     any_gizmo_on = active_t or active_r or active_s
 
+    if wm.get("ps_gizmo_translate") is None:
+        wm["ps_gizmo_translate"] = True
+        wm["ps_gizmo_rotate"] = True
+        wm["ps_gizmo_scale"] = False
+        wm["ps_gizmo_toggled_off"] = False
+        if not in_paint_mode and not was_in_paint_mode and not any_gizmo_on:
+            for space in view3d_spaces:
+                space.show_gizmo_object_translate = True
+                space.show_gizmo_object_rotate = True
+                space.show_gizmo_object_scale = False
+            any_gizmo_on = True
+
     was_in_paint_mode = wm.get("ps_gizmo_in_paint_mode", False)
     last_mode = wm.get("ps_gizmo_last_mode", None)
     mode_changed = (last_mode != current_mode)
