@@ -2221,8 +2221,8 @@ class Channel(BaseNestedListManager):
             # Restore surface socket
             if from_socket:
                 connect_sockets(surface_socket, from_socket)
-            
-            if force_alpha:
+
+            if force_alpha and orig_use_alpha is not None:
                 self.use_alpha = orig_use_alpha
                 
             if as_tangent_normal:
