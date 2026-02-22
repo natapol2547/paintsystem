@@ -46,6 +46,10 @@ for submodule in submodules:
 _register, _unregister = register_submodule_factory(__name__, submodules)
 
 def register():
+    try:
+        _unregister()
+    except Exception:
+        pass
     load_icons()
     try:
         _register()
@@ -54,6 +58,8 @@ def register():
         raise
     
 def unregister():
-    _unregister()
-    unload_icons()
+    try:
+        _unregister()
+    finally:
+        unload_icons()
     print("Paint System: Unregistered", __package__)

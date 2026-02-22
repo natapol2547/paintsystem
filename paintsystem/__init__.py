@@ -14,4 +14,19 @@ submodules = [
 for submodule in submodules:
     globals()[submodule] = import_module(f".{submodule}", __name__)
 
-register, unregister = register_submodule_factory(__name__, submodules)
+_register, _unregister = register_submodule_factory(__name__, submodules)
+
+
+def register():
+    try:
+        _unregister()
+    except Exception:
+        pass
+    _register()
+
+
+def unregister():
+    try:
+        _unregister()
+    except Exception:
+        pass
