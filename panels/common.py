@@ -36,6 +36,14 @@ def get_icon_from_channel(channel: Channel) -> int:
     return get_icon(type_to_icon.get(channel.type, 'color_socket'))
 
 
+def is_uv_edit_active(context: bpy.types.Context) -> bool:
+    scene = getattr(context, "scene", None)
+    ps_scene_data = getattr(scene, "ps_scene_data", None)
+    if ps_scene_data is None:
+        return False
+    return bool(getattr(ps_scene_data, "uv_edit_enabled", False))
+
+
 
 
 def get_event_icons(kmi: bpy.types.KeyMapItem) -> list[str]:
