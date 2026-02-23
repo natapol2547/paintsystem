@@ -177,10 +177,7 @@ class MAT_PT_PaintSystemMaterialSettings(PSContextMixin, Panel):
             row.prop(ps_ctx.active_group, "name", text="")
             row.operator("paint_system.new_group", icon='ADD', text="")
             row.operator("wm.call_menu", text="", icon="REMOVE").name = "MAT_MT_DeleteGroupMenu"
-
-            sync_row = layout.row(align=True)
-            scale_content(context, sync_row, 1.2, 1.1)
-            sync_row.operator("paint_system.sync_names", text="Sync Names", icon="FILE_REFRESH")
+            row.operator("paint_system.sync_names", text="", icon="FILE_REFRESH")
 
 class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_PaintSystemMainPanel'
@@ -199,7 +196,6 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
                 row.popover("MAT_PT_PaintSystemGroups", text="", icon="NODETREE")
             row.operator("paint_system.new_group", icon='ADD', text="")
             row.operator("wm.call_menu", text="", icon="REMOVE").name = "MAT_MT_DeleteGroupMenu"
-            row.prop(groups[0], "name", text="")
         else:
             row.popover("MAT_PT_Support", icon="FUND", text="Wah!")
     
