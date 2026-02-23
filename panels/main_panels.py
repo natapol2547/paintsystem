@@ -197,6 +197,8 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
                 row.popover("MAT_PT_PaintSystemGroups", text="", icon="NODETREE")
             row.operator("paint_system.new_group", icon='ADD', text="")
             row.operator("wm.call_menu", text="", icon="REMOVE").name = "MAT_MT_DeleteGroupMenu"
+            row.separator()
+            row.operator("paint_system.sync_names", text="", icon="FILE_REFRESH")
         else:
             row.popover("MAT_PT_Support", icon="FUND", text="Wah!")
     
