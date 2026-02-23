@@ -47,7 +47,6 @@ from .context import get_legacy_global_layer, parse_context
 from .graph import (
     NodeTreeBuilder,
     Add_Node,
-    create_layer_graph,
     get_alpha_over_nodetree,
     get_layer_blend_type,
     set_layer_blend_type,
