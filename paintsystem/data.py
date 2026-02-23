@@ -29,7 +29,6 @@ from bpy.types import (
     PropertyGroup,
     Material,
 )
-from bpy.utils import register_classes_factory
 from bpy_extras.node_utils import connect_sockets
 from typing import Optional
 from mathutils import Color, Euler, Vector
@@ -48,12 +47,13 @@ from .context import get_legacy_global_layer, parse_context
 from .graph import (
     NodeTreeBuilder,
     Add_Node,
-    PSNodeTreeBuilder,
+    create_layer_graph,
     get_alpha_over_nodetree,
     get_layer_blend_type,
     set_layer_blend_type,
     get_paint_system_collection,
     add_empty_to_collection,
+    PSNodeTreeBuilder,
 )
 from .graph.common import get_library_nodetree, get_library_object, DEFAULT_PS_UV_MAP_NAME
 from .nested_list_manager import BaseNestedListManager, BaseNestedListItem
@@ -72,12 +72,28 @@ MASK_BLEND_MODE_ENUM = [
     ('MULTIPLY', "Multiply", "Multiply"),
 ]
 
+MASK_TYPE_ENUM = [
+    ('VALUE', "Value", "Value mask"),
+    ('IMAGE', "Image", "Image mask"),
+    ('ATTRIBUTE', "Attribute", "Attribute mask"),
+    ('TEXTURE', "Texture", "Texture mask"),
+]
+
+MASK_COORDINATE_TYPE_ENUM = [
+    ('AUTO', "Auto UV", "Automatically create a new UV Map"),
+    ('UV', "UV", "Open an existing UV Map"),
+    ('OBJECT', "Object", "Use a object output of Texture Coordinate node"),
+    ('POSITION', "Position", "Use a position output of Geometry node"),
+    ('GENERATED', "Generated", "Use a generated output of Texture Coordinate node"),
+]
+
 TEMPLATE_ENUM = [
     ('BASIC', "Blank Canvas", "Blank canvas painting setup", "IMAGE", 0),
     ('PAINT_OVER', "Paint Over", "Paint over the existing material", get_icon('paintbrush'), 1),
     ('PBR', "PBR", "PBR painting setup", "MATERIAL", 2),
-    ('NORMAL', "Normals Painting", "Start off with a normal painting setup", "NORMALS_VERTEX_FACE", 3),
-    ('NONE', "None", "Just add node group to material", "NONE", 4),
+    ('BASIC_EMISSION', "Basic (Emission)", "Basic painting with emission channel", "LIGHT", 3),
+    ('NORMAL', "Normals Painting", "Start off with a normal painting setup", "NORMALS_VERTEX_FACE", 4),
+    ('NONE', "None", "Just add node group to material", "NONE", 5),
 ]
 
 LAYER_TYPE_ENUM = [
@@ -94,13 +110,35 @@ LAYER_TYPE_ENUM = [
     ('BLANK', "Blank", "Blank layer"),
 ]
 
+
+def _safe_set_id_name(id_block, new_name: str) -> bool:
+    if not id_block or not new_name:
+        return False
+    try:
+        current_name = getattr(id_block, "name", None)
+        if current_name == new_name:
+            return True
+    except Exception:
+        pass
+    if getattr(id_block, "library", None) is not None:
+        return False
+    if getattr(id_block, "is_embedded_data", False):
+        return False
+    try:
+        id_block.name = new_name
+        return True
+    except Exception:
+        return False
+
+
+def is_auto_name_sync_enabled(context: Context | None = None) -> bool:
+    prefs = get_preferences(context or bpy.context)
+    if hasattr(prefs, "automatic_name_syncing"):
+        return bool(getattr(prefs, "automatic_name_syncing"))
+    return bool(getattr(prefs, "automatic_name_sync", True))
+
 MASK_TYPE_ENUM = [
     ('IMAGE', "Image", "Image layer"),
-    ('SOLID_COLOR', "Solid Color", "Solid Color layer"),
-    ('ATTRIBUTE', "Attribute", "Attribute layer"),
-    ('GRADIENT', "Gradient", "Gradient layer"),
-    ('RANDOM', "Random", "Random Color layer"),
-    ('TEXTURE', "Texture", "Texture layer"),
 ]
 
 CHANNEL_TYPE_ENUM = [
@@ -141,21 +179,6 @@ TEXTURE_TYPE_ENUM = [
 ]
 
 COORDINATE_TYPE_ENUM = [
-    ('AUTO', "Auto UV", "Automatically create a new UV Map"),
-    ('UV', "UV", "Open an existing UV Map"),
-    ('OBJECT', "Object", "Use a object output of Texture Coordinate node"),
-    ('CAMERA', "Camera", "Use a camera output of Texture Coordinate node"),
-    ('WINDOW', "Window", "Use a window output of Texture Coordinate node"),
-    ('REFLECTION', "Reflection", "Use a reflection output of Texture Coordinate node"),
-    ('POSITION', "Position", "Use a position output of Geometry node"),
-    ('GENERATED', "Generated", "Use a generated output of Texture Coordinate node"),
-    ('DECAL', "Decal", "Use a decal output of Geometry node"),
-    ('PROJECT', "Projection", "Define a projection coordinate"),
-    ('PARALLAX', 'Parallax', 'Use a parallax coordinate'),
-]
-
-MASK_COORDINATE_TYPE_ENUM = [
-    ('LAYER', "Layer", "Use the layer's coordinate type"),
     ('AUTO', "Auto UV", "Automatically create a new UV Map"),
     ('UV', "UV", "Open an existing UV Map"),
     ('OBJECT', "Object", "Use a object output of Texture Coordinate node"),
@@ -270,18 +293,50 @@ def update_active_image(self=None, context: bpy.types.Context = None):
 
     if image_paint.mode == 'MATERIAL':
         image_paint.mode = 'IMAGE'
+    if context.scene and context.scene.ps_scene_data and context.scene.ps_scene_data.uv_edit_enabled:
+        target_uv = context.scene.ps_scene_data.uv_edit_target_uv
+        if obj and target_uv and obj.data.uv_layers.get(target_uv):
+            uv_layer = obj.data.uv_layers.get(target_uv)
+            uv_layer.active = True
+            uv_layer.active_render = True
+        return
     if not active_layer or active_layer.lock_layer or active_channel.use_bake_image:
         image_paint.canvas = None
         # Unable to paint
         return
-    
+
     selected_image: Image = active_layer.image
+    active_coord_type = active_layer.coord_type
+    active_uv_map_name = active_layer.uv_map_name
+    if active_layer.edit_mask and active_layer.use_masks and active_layer.layer_masks:
+        active_mask_index = max(0, min(active_layer.active_layer_mask_index, len(active_layer.layer_masks) - 1))
+        active_mask = active_layer.layer_masks[active_mask_index]
+        if active_mask.type == 'IMAGE' and active_mask.mask_image:
+            selected_image = active_mask.mask_image
+            active_coord_type = active_mask.coord_type
+            active_uv_map_name = active_mask.mask_uv_map or active_layer.uv_map_name
+
     image_paint.canvas = selected_image
-    if active_layer.coord_type == 'UV':
-        if active_layer.uv_map_name and obj.data.uv_layers.get(active_layer.uv_map_name):
-            obj.data.uv_layers[active_layer.uv_map_name].active = True
-    elif active_layer.coord_type == 'AUTO' and obj.data.uv_layers.get(DEFAULT_PS_UV_MAP_NAME):
-        obj.data.uv_layers[DEFAULT_PS_UV_MAP_NAME].active = True
+    if obj and getattr(obj, "data", None) and getattr(obj.data, "uv_layers", None):
+        if active_coord_type == 'UV':
+            if active_uv_map_name and obj.data.uv_layers.get(active_uv_map_name):
+                uv_layer = obj.data.uv_layers[active_uv_map_name]
+                uv_layer.active = True
+                uv_layer.active_render = True
+        elif active_coord_type == 'AUTO' and obj.data.uv_layers.get(DEFAULT_PS_UV_MAP_NAME):
+            uv_layer = obj.data.uv_layers[DEFAULT_PS_UV_MAP_NAME]
+            uv_layer.active = True
+            uv_layer.active_render = True
+    
+    # Auto-enter PAINT_TEXTURE mode when entering mask edit
+    if active_layer.edit_mask and context.mode != 'PAINT_TEXTURE' and obj:
+        try:
+            # Make object active before setting mode
+            if context.view_layer:
+                context.view_layer.objects.active = obj
+            bpy.ops.object.mode_set(mode='PAINT_TEXTURE')
+        except Exception:
+            pass  # Silently fail if mode change not possible
 
 def update_active_layer(self, context):
     ps_ctx = parse_context(context)
@@ -784,32 +839,48 @@ class LayerMask(PropertyGroup):
         description="Name of the mask",
         default="Mask",
     )
+    node_tree: PointerProperty(
+        name="Node Tree",
+        type=NodeTree,
+    )
     type: EnumProperty(
         items=MASK_TYPE_ENUM,
         name="Mask Type",
         description="Mask type",
         default='IMAGE',
+        update=update_active_layer,
     )
     coord_type: EnumProperty(
-        items=COORDINATE_TYPE_ENUM,
+        items=MASK_COORDINATE_TYPE_ENUM,
         name="Coordinate Type",
         description="Coordinate type",
         default='UV',
+        update=update_active_layer,
     )
     blend_mode: EnumProperty(
         items=MASK_BLEND_MODE_ENUM,
         name="Blend Mode",
         description="Blend mode",
         default='MULTIPLY',
+        update=update_active_layer,
+    )
+    enabled: BoolProperty(
+        name="Enabled",
+        description="Toggle mask visibility",
+        default=True,
+        update=update_active_layer,
+        options=set(),
     )
     mask_image: PointerProperty(
         name="Mask Image",
         type=Image,
+        update=update_active_layer,
     )
     mask_uv_map: StringProperty(
         name="Mask UV Map",
         description="Mask UV map",
         default="",
+        update=update_active_layer,
     )
     empty_object: PointerProperty(
         name="Empty Object",
@@ -825,6 +896,7 @@ class LayerMask(PropertyGroup):
         items=TEXTURE_TYPE_ENUM,
         name="Texture Type",
         description="Texture type",
+        update=update_active_layer,
     )
     node_tree: PointerProperty(
         name="Node Tree",
@@ -859,8 +931,15 @@ class Layer(BaseNestedListItem):
     ref_layer_id: StringProperty()
     
     def update_name(self, context):
+        if self.updating_name_flag:
+            return
+        self.updating_name_flag = True
         if self.layer_name != self.name:
             self.layer_name = self.name
+        # Keep image datablock name aligned with layer name
+        if context and self.type == 'IMAGE' and self.image:
+            _safe_set_id_name(self.image, self.name)
+        self.updating_name_flag = False
         self.update_node_tree(context)
     
     name: StringProperty(
@@ -868,6 +947,31 @@ class Layer(BaseNestedListItem):
         description="Layer name",
         default="Layer",
         update=update_name
+    )
+    updating_name_flag: BoolProperty(
+        default=False,
+        options={'SKIP_SAVE'}  # Don't save this flag in the .blend file
+    )
+    
+    def get_display_name(self):
+        """Return only the suffix part of the name (after underscore) for UI display"""
+        if '_' in self.name:
+            return self.name.split('_', 1)[1]
+        return self.name
+    
+    def set_display_name(self, value):
+        """Set the layer name preserving the material prefix"""
+        if '_' in self.name:
+            prefix = self.name.split('_', 1)[0]
+            self.name = f"{prefix}_{value}"
+        else:
+            self.name = value
+    
+    display_name: StringProperty(
+        name="Name",
+        description="Layer name without prefix",
+        get=get_display_name,
+        set=set_display_name
     )
     
     def update_node_tree(self, context):
@@ -877,8 +981,15 @@ class Layer(BaseNestedListItem):
         if self.get_layer_data().coord_type == 'AUTO':
             ensure_paint_system_uv_map(context)
         
+        # If the layer is linked, do nothing
         if self.is_linked:
             return
+        
+        # Ensure a valid UUID
+        if not is_valid_uuidv4(self.uid):
+            self.uid = str(uuid.uuid4())
+        
+        # If the layer is blank, do nothing
         if self.type == "BLANK":
             return
         
@@ -886,9 +997,9 @@ class Layer(BaseNestedListItem):
         if self.blend_mode == "PASSTHROUGH" and self.type != "FOLDER":
             self.blend_mode = "MIX"
         
-        # Create node tree if it doesn't exist
-        if not self.node_tree and not self.is_linked:
-            node_tree = bpy.data.node_groups.new(name=f"PS_Layer ({self.layer_name})", type='ShaderNodeTree')
+        # Ensure node tree
+        if not self.node_tree:
+            node_tree = bpy.data.node_groups.new(name=f"PS_Layer ({self.name})", type='ShaderNodeTree')
             self.node_tree = node_tree
             expected_input = [
                 ExpectedSocket(name="Clip", socket_type="NodeSocketBool"),
@@ -905,19 +1016,73 @@ class Layer(BaseNestedListItem):
             ensure_sockets(node_tree, expected_input, "INPUT")
             ensure_sockets(node_tree, expected_output, "OUTPUT")
         
-        if self.layer_name:
-            self.node_tree.name = f"PS {self.layer_name} ({self.uid[:8]})"
+        if self.layer_name and self.node_tree:
+            _safe_set_id_name(self.node_tree, f"PS {self.layer_name} ({self.uid[:8]})")
 
         # Generate UUID if it doesn't exist or is invalid
         if not is_valid_uuidv4(self.uid):
             self.uid = str(uuid.uuid4())
         
-        # Create node tree based on layer type
+        # Ensure sockets
+        expected_input = [
+            ExpectedSocket(name="Clip", socket_type="NodeSocketBool"),
+            ExpectedSocket(name="Color", socket_type="NodeSocketColor"),
+            ExpectedSocket(name="Alpha", socket_type="NodeSocketFloat"),
+        ]
+        if self.type == "FOLDER":
+            expected_input.append(ExpectedSocket(name="Over Color", socket_type="NodeSocketColor"))
+            expected_input.append(ExpectedSocket(name="Over Alpha", socket_type="NodeSocketFloat"))
+        expected_output = [
+            ExpectedSocket(name="Color", socket_type="NodeSocketColor"),
+            ExpectedSocket(name="Alpha", socket_type="NodeSocketFloat"),
+        ]
+        ensure_sockets(self.node_tree, expected_input, "INPUT")
+        ensure_sockets(self.node_tree, expected_output, "OUTPUT")
+        
+        # Update node tree name
+        if self.name:
+            try:
+                self.node_tree.name = f"PS {self.name} ({self.uid[:8]})"
+            except AttributeError:
+                pass
+        
+        if self.coord_type == "DECAL":
+            if not self.empty_object:
+                self.ensure_empty_object()
+                self.empty_object.empty_display_type = 'SINGLE_ARROW'
+            elif self.empty_object.name not in context.view_layer.objects:
+                add_empty_to_collection(context, self.empty_object)
+        
+        match self.type:
+            case "IMAGE":
+                if self.image:
+                    _safe_set_id_name(self.image, self.name)
+            case "GRADIENT":
+                if self.gradient_type in ('LINEAR', 'RADIAL', 'FAKE_LIGHT'):
+                    if not self.empty_object:
+                        self.ensure_empty_object()
+                        if self.gradient_type == 'LINEAR':
+                            self.empty_object.empty_display_type = 'SINGLE_ARROW'
+                        elif self.gradient_type == 'RADIAL':
+                            self.empty_object.empty_display_type = 'SPHERE'
+                        elif self.gradient_type == 'FAKE_LIGHT':
+                            self.empty_object.location += Vector((0, 0, 2))
+                            self.empty_object.rotation_euler = Euler((3*math.pi/4, math.pi/4, 0))
+                            self.empty_object.empty_display_type = 'SINGLE_ARROW'
+                    elif self.empty_object.name not in context.view_layer.objects:
+                        add_empty_to_collection(context, self.empty_object)
+        
+        # Clean up
+        if self.empty_object and self.type not in ["GRADIENT", "IMAGE", "TEXTURE", "FAKE_LIGHT"]:
+            collection = get_paint_system_collection(context)
+            if self.empty_object.name in collection.objects:
+                collection.objects.unlink(self.empty_object)
+        elif self.type == "IMAGE" and self.empty_object and self.coord_type != "DECAL":
+            collection = get_paint_system_collection(context)
+            if self.empty_object.name in collection.objects:
+                collection.objects.unlink(self.empty_object)
+        
         layer_graph = PSNodeTreeBuilder.create_layer_graph(self, context)
-
-        if not self.enabled:
-            layer_graph.link("group_input", "group_output", "Color", "Color")
-            layer_graph.link("group_input", "group_output", "Alpha", "Alpha")
         layer_graph.compile()
         
         # For fake light, we need to update the empty object rotation via drivers
@@ -1132,6 +1297,8 @@ class Layer(BaseNestedListItem):
     )
     def set_projection_view(self, context: Context):
         ps_ctx = parse_context(context)
+        if not context or not getattr(context, "area", None) or not context.area.spaces:
+            return
         active_space = context.area.spaces.active
         if active_space.type == 'VIEW_3D':
             region_3d = active_space.region_3d
@@ -1273,11 +1440,25 @@ class Layer(BaseNestedListItem):
         default=False,
         update=update_active_channel
     )
+
+    def update_enabled(self, context):
+        layer_data = self.get_layer_data()
+        channels_to_update = set(find_channels_containing_layer(self))
+
+        if layer_data:
+            layer_data.update_node_tree(context)
+            channels_to_update.update(find_channels_containing_layer(layer_data))
+
+        for channel in channels_to_update:
+            if channel.use_bake_image:
+                channel.use_bake_image = False
+            channel.update_node_tree(context)
+
     enabled: BoolProperty(
         name="Enabled",
         description="Toggle layer visibility",
         default=True,
-        update=update_node_tree,
+        update=update_enabled,
         options=set()
     )
     lock_alpha: BoolProperty(
@@ -1302,7 +1483,14 @@ class Layer(BaseNestedListItem):
     active_layer_mask_index: IntProperty(
         name="Active Layer Mask Index",
         description="Active layer mask index",
-        default=0
+        default=0,
+        update=update_active_image,
+    )
+    edit_mask: BoolProperty(
+        name="Edit Mask",
+        description="Edit active mask image instead of layer image",
+        default=False,
+        update=update_active_image,
     )
     
     # For parallax coordinate type
@@ -1360,6 +1548,18 @@ class Layer(BaseNestedListItem):
         update=update_node_tree
     )
     
+    # Layer masks
+    masks: CollectionProperty(
+        name="Layer Masks",
+        type=LayerMask,
+    )
+    
+    active_mask_index: IntProperty(
+        name="Active Mask Index",
+        description="Active mask index",
+        update=update_node_tree
+    )
+    
     def update_blend_mode(self, context: Context):
         layer_data = self.get_layer_data()
         layer_data.update_node_tree(context)
@@ -1406,6 +1606,17 @@ class Layer(BaseNestedListItem):
         options={'SKIP_SAVE'}
     )
     
+    def create_mask(self, mask_type: str):
+        mask = self.masks.add()
+        mask.type = mask_type
+        return mask
+    
+    def remove_mask(self, index: int):
+        self.masks.remove(index)
+    
+    def remove_active_mask(self):
+        self.masks.remove(self.active_mask_index)
+        
     def add_action(self, name: str, action_bind: str, action_type: str, frame: int|None = None, marker_name: str|None = None):
         action = self.actions.add()
         action.name = name
@@ -1582,9 +1793,21 @@ class Layer(BaseNestedListItem):
     def create_layer_mask(self, context: Context, layer_mask_name: str, layer_mask_type: str, **kwargs):
         layer_mask = self.layer_masks.add()
         layer_mask.name = layer_mask_name
-        layer_mask.type = layer_mask_type
+        layer_mask.layer_name = layer_mask_name
+        layer_mask.type = 'IMAGE'
+        if not is_valid_uuidv4(layer_mask.uid):
+            layer_mask.uid = str(uuid.uuid4())
+        if not layer_mask.node_tree:
+            layer_mask.node_tree = bpy.data.node_groups.new(
+                name=f"PS_Mask ({layer_mask_name})",
+                type='ShaderNodeTree'
+            )
         for key, value in kwargs.items():
             setattr(layer_mask, key, value)
+        if layer_mask.type != 'IMAGE':
+            layer_mask.type = 'IMAGE'
+        if layer_mask.uid and layer_mask.node_tree:
+            _safe_set_id_name(layer_mask.node_tree, f"PS Mask {layer_mask_name} ({layer_mask.uid[:8]})")
         self.update_node_tree(context)
         return layer_mask
     
@@ -1654,14 +1877,21 @@ def restore_cycles_settings(settings):
     scene.cycles.use_denoising = settings['use_denoising']
     scene.cycles.use_adaptive_sampling = settings['use_adaptive_sampling']
 
-def ps_bake(context, objects: list[Object], mat: Material, uv_layer, bake_image, use_gpu=True, use_clear=True, margin=8, margin_type='ADJACENT_FACES'):
+def ps_bake(context, objects: list[Object], mat: Material, uv_layer, bake_image, use_gpu=True, use_clear=True, margin=8, margin_type='ADJACENT_FACES', disable_deform_modifiers=False):
     bake_objects = []
     
     ensure_udim_tiles(bake_image, objects, uv_layer)
     
     for obj in objects:
-        if mat.name in obj.data.materials:
-            bake_objects.append(obj)
+        if obj.type != 'MESH':
+            continue
+        for slot in obj.material_slots:
+            if slot.material == mat:
+                bake_objects.append(obj)
+                break
+
+    if not bake_objects:
+        raise ValueError("No objects found for baking")
     
     cycles_settings = save_cycles_settings()
     # Switch to Cycles if needed
@@ -1669,6 +1899,17 @@ def ps_bake(context, objects: list[Object], mat: Material, uv_layer, bake_image,
     orig_view_transform = str(context.scene.view_settings.view_transform)
     
     node_tree = mat.node_tree
+    
+    # Store and optionally disable deform modifiers
+    modifier_states = {}
+    if disable_deform_modifiers:
+        for obj in bake_objects:
+            if obj.type == 'MESH':
+                modifier_states[obj] = {}
+                for mod in obj.modifiers:
+                    if mod.type in {'ARMATURE', 'LATTICE', 'CURVE', 'MESH_DEFORM', 'SHRINKWRAP', 'SIMPLE_DEFORM', 'SMOOTH', 'CAST', 'WAVE', 'HOOK'}:
+                        modifier_states[obj][mod] = mod.show_render
+                        mod.show_render = False
     
     image_node = node_tree.nodes.new(type='ShaderNodeTexImage')
     image_node.image = bake_image
@@ -1701,6 +1942,11 @@ def ps_bake(context, objects: list[Object], mat: Material, uv_layer, bake_image,
 
     # Delete bake nodes
     node_tree.nodes.remove(image_node)
+    
+    # Restore modifier states
+    for obj, mod_dict in modifier_states.items():
+        for mod, state in mod_dict.items():
+            mod.show_render = state
     
     context.scene.view_settings.view_transform = orig_view_transform
     
@@ -1811,7 +2057,7 @@ class Channel(BaseNestedListManager):
             return
         _invalidate_material_layer_cache(parse_context(context).active_material)
         
-        self.node_tree.name = f"PS {self.name}"
+        _safe_set_id_name(self.node_tree, f"PS {self.name}")
         if len(self.node_tree.interface.items_tree) == 0:
             self.node_tree.interface.new_socket("Color", in_out="OUTPUT", socket_type="NodeSocketColor")
             self.node_tree.interface.new_socket("Alpha", in_out="OUTPUT", socket_type="NodeSocketFloat")
@@ -1880,9 +2126,24 @@ class Channel(BaseNestedListManager):
                 node_builder.link("bake_image", "group_output", "Alpha", "Alpha")
                 node_builder.compile()
                 return
+
+        def is_layer_enabled_in_stack(unlinked_layer: "Layer") -> bool:
+            if not unlinked_layer.enabled:
+                return False
+            parent_id = unlinked_layer.parent_id
+            while parent_id != -1:
+                parent_layer = self.get_item_by_id(parent_id)
+                if not parent_layer:
+                    break
+                if not parent_layer.enabled:
+                    return False
+                parent_id = parent_layer.parent_id
+            return True
             
         if len(flattened_unlinked_layers) > 0:
             for unlinked_layer in flattened_unlinked_layers:
+                if not is_layer_enabled_in_stack(unlinked_layer):
+                    continue
                 layer = unlinked_layer.get_layer_data()
                 if layer is None or not layer.node_tree:
                     continue
@@ -1996,7 +2257,7 @@ class Channel(BaseNestedListManager):
             return
         if not self.node_tree:
             return
-        self.node_tree.name = f".PS_Channel ({self.name})"
+        _safe_set_id_name(self.node_tree, f".PS_Channel ({self.name})")
         self.updating_name_flag = True
         parsed_context = parse_context(context)
         active_group = parsed_context.active_group
@@ -2103,7 +2364,7 @@ class Channel(BaseNestedListManager):
             as_tangent_normal: bool = False, # Bake as tangent normal
             margin: int = 8, # Margin
             margin_type: Literal['ADJACENT_FACES', 'EXTEND'] = "ADJACENT_FACES", # Margin type
-            disable_deform_modifiers: bool = False, # Disable deform modifiers
+            disable_deform_modifiers: bool = False # Disable deform modifiers for tangent normal baking
             ):
         """Bake the channel
 
@@ -2130,6 +2391,11 @@ class Channel(BaseNestedListManager):
             context.view_layer.objects.active = ps_context.ps_object
         
         ps_context = parse_context(context)
+        orig_use_alpha = None
+        orig_tangent_uv_map = None
+        orig_output_vector_space = None
+        orig_disable_output_transform = None
+
         if force_alpha:
             orig_use_alpha = bool(self.use_alpha)
             self.use_alpha = True
@@ -2144,20 +2410,6 @@ class Channel(BaseNestedListManager):
             self.disable_output_transform = True
         try:
             ps_objects = ps_context.ps_objects
-            
-            # Disable deform modifiers if requested
-            saved_modifier_states = []
-            if disable_deform_modifiers:
-                DEFORM_MODIFIER_TYPES = {
-                    'ARMATURE', 'CAST', 'CURVE', 'DISPLACE', 'HOOK', 'LAPLACIANDEFORM',
-                    'LATTICE', 'MESH_DEFORM', 'SHRINKWRAP', 'SIMPLE_DEFORM', 'SMOOTH',
-                    'CORRECTIVE_SMOOTH', 'LAPLACIANSMOOTH', 'SURFACE_DEFORM', 'WARP', 'WAVE'
-                }
-                for obj in ps_objects:
-                    for mod in obj.modifiers:
-                        if mod.type in DEFORM_MODIFIER_TYPES:
-                            saved_modifier_states.append((obj, mod.name, mod.show_render))
-                            mod.show_render = False
             
             material_output = get_material_output(node_tree)
             surface_socket = material_output.inputs['Surface']
@@ -2197,11 +2449,11 @@ class Channel(BaseNestedListManager):
             # Bake image
             connect_sockets(surface_socket, color_output)
             temp_alpha_image = bake_image.copy()
-            bake_image = ps_bake(context, ps_objects, mat, uv_layer, bake_image, use_gpu, margin=margin, margin_type=margin_type)
+            bake_image = ps_bake(context, ps_objects, mat, uv_layer, bake_image, use_gpu, margin=margin, margin_type=margin_type, disable_deform_modifiers=disable_deform_modifiers)
             
             temp_alpha_image.colorspace_settings.name = 'Non-Color'
             connect_sockets(surface_socket, alpha_output)
-            temp_alpha_image = ps_bake(context, ps_objects, mat, uv_layer, temp_alpha_image, use_gpu, margin=margin, margin_type=margin_type)
+            temp_alpha_image = ps_bake(context, ps_objects, mat, uv_layer, temp_alpha_image, use_gpu, margin=margin, margin_type=margin_type, disable_deform_modifiers=disable_deform_modifiers)
 
             if bake_image and temp_alpha_image:
                 # pixels_bake = np.empty(len(bake_image.pixels), dtype=np.float32)
@@ -2236,32 +2488,30 @@ class Channel(BaseNestedListManager):
             if from_socket:
                 connect_sockets(surface_socket, from_socket)
             
-            if force_alpha:
+            if force_alpha and orig_use_alpha is not None:
                 self.use_alpha = orig_use_alpha
                 
             if as_tangent_normal:
-                self.tangent_uv_map = orig_tangent_uv_map
-                self.output_vector_space = orig_output_vector_space
+                if orig_tangent_uv_map is not None:
+                    self.tangent_uv_map = orig_tangent_uv_map
+                if orig_output_vector_space is not None:
+                    self.output_vector_space = orig_output_vector_space
             else:
-                self.disable_output_transform = orig_disable_output_transform
-            
-            # Restore deform modifiers
-            for obj, mod_name, orig_show_render in saved_modifier_states:
-                if mod_name in obj.modifiers:
-                    obj.modifiers[mod_name].show_render = orig_show_render
+                if orig_disable_output_transform is not None:
+                    self.disable_output_transform = orig_disable_output_transform
         except Exception as e:
             print(f"Error baking channel: {e}")
             try:
-                self.use_alpha = orig_use_alpha
-                self.tangent_uv_map = orig_tangent_uv_map
-                self.output_vector_space = orig_output_vector_space
-                self.disable_output_transform = orig_disable_output_transform
+                if orig_use_alpha is not None:
+                    self.use_alpha = orig_use_alpha
+                if orig_tangent_uv_map is not None:
+                    self.tangent_uv_map = orig_tangent_uv_map
+                if orig_output_vector_space is not None:
+                    self.output_vector_space = orig_output_vector_space
+                if orig_disable_output_transform is not None:
+                    self.disable_output_transform = orig_disable_output_transform
             except Exception as e:
                 print(f"Error restoring channel settings: {e}")
-            # Restore deform modifiers on error
-            for obj, mod_name, orig_show_render in saved_modifier_states:
-                if mod_name in obj.modifiers:
-                    obj.modifiers[mod_name].show_render = orig_show_render
         
     @property
     def item_type(self):
@@ -2553,9 +2803,10 @@ class Group(PropertyGroup):
                         mat = material
                         break
         if mat:
-            node_tree.name = f"PS {self.name} ({mat.name})"
+            new_name = self.name if self.name == mat.name else f"{self.name} ({mat.name})"
         else:
-            node_tree.name = f"PS {self.name} (None)"
+            new_name = self.name
+        _safe_set_id_name(node_tree, new_name)
         # node_tree.name = f"Paint System ({self.name})"
         if not isinstance(node_tree, bpy.types.NodeTree):
             return
@@ -2590,12 +2841,15 @@ class Group(PropertyGroup):
             if channel.use_alpha:
                 node_builder.link(channel_name, "group_output", "Alpha", c_alpha_name)
         node_builder.compile()
+
+    def update_group_name(self, context):
+        self.update_node_tree(context)
     
     name: StringProperty(
         name="Name",
         description="Group name",
         default="New Group",
-        update=update_node_tree
+        update=update_group_name
     )
     channels: CollectionProperty(
         type=Channel,
@@ -2692,7 +2946,7 @@ class Group(PropertyGroup):
                         # Disable alpha
                         channel.use_alpha = False
                 if add_layers:
-                    channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+                    channel.create_layer(context, layer_name=f'{mat.name}_Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
                 return channel
             case "METALLIC":
                 channel = self.create_channel(context, channel_name='Metallic', channel_type='FLOAT', use_alpha=False, use_max_min=True, color_space='NONCOLOR')
@@ -2720,8 +2974,8 @@ class Group(PropertyGroup):
                         connect_sockets(node_group.outputs['Normal'], normal_socket)
                 if add_layers:
                     if not socket_transferred:
-                        channel.create_layer(context, layer_name='Normal', layer_type='GEOMETRY', geometry_type='OBJECT_NORMAL', normalize_normal=True)
-                    channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+                        channel.create_layer(context, layer_name=f'{mat.name}_Normal', layer_type='GEOMETRY', geometry_type='OBJECT_NORMAL', normalize_normal=True)
+                    channel.create_layer(context, layer_name=f'{mat.name}_Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
             case _:
                 raise ValueError(f"Invalid template: {template}")
     
@@ -2760,11 +3014,90 @@ class TempMaterial(PropertyGroup):
         default=False
     )
 
+
+class UVEditCreatedUV(PropertyGroup):
+    object_name: StringProperty(
+        name="Object Name",
+        description="Object name for created UV"
+    )
+    uv_name: StringProperty(
+        name="UV Name",
+        description="Created UV map name"
+    )
+
+
+class UVEditPreviousUV(PropertyGroup):
+    object_name: StringProperty(
+        name="Object Name",
+        description="Object name for stored UV"
+    )
+    active_uv: StringProperty(
+        name="Active UV",
+        description="Previously active UV name"
+    )
+    render_uv: StringProperty(
+        name="Render UV",
+        description="Previously render UV name"
+    )
+    clone_uv: StringProperty(
+        name="Clone UV",
+        description="Previously clone UV name"
+    )
+
+
+class UVEditMaterialOverride(PropertyGroup):
+    object_name: StringProperty(
+        name="Object Name",
+        description="Object name for material override"
+    )
+    slot_index: IntProperty(
+        name="Slot Index",
+        description="Material slot index",
+        default=0
+    )
+    material_name: StringProperty(
+        name="Material Name",
+        description="Original material name"
+    )
+
 class PaintSystemGlobalData(PropertyGroup):
     """Scene-level global state for the Paint System (stored on ``Scene.ps_scene_data``).
     
     Holds the clipboard, colour history palette, HSV brush state, and legacy layer data.
     """
+
+    def update_uv_checker(self, context):
+        max_attempts = 8
+
+        def _refresh_checker():
+            try:
+                from ..operators.uv_edit_operators import _update_checker_preview
+                active_context = bpy.context if getattr(bpy.context, "screen", None) else context
+                if not active_context:
+                    return False
+                _update_checker_preview(active_context)
+                wm = getattr(bpy.context, "window_manager", None)
+                if wm and getattr(wm, "windows", None):
+                    for window in wm.windows:
+                        for area in window.screen.areas:
+                            area.tag_redraw()
+                return True
+            except Exception:
+                return False
+
+        if not _refresh_checker():
+            try:
+                attempts = {"count": 0}
+
+                def _retry_refresh():
+                    attempts["count"] += 1
+                    if _refresh_checker() or attempts["count"] >= max_attempts:
+                        return None
+                    return 0.05
+
+                bpy.app.timers.register(_retry_refresh, first_interval=0.01)
+            except Exception:
+                pass
     
     def get_brush_color(self, context):
         settings = context.tool_settings.image_paint
@@ -2882,6 +3215,295 @@ class PaintSystemGlobalData(PropertyGroup):
         description="Collection of materials in the temporary collection",
         options={'SKIP_SAVE'}
     )
+
+    uv_edit_enabled: BoolProperty(
+        name="UV Edit Enabled",
+        description="Enable UV edit mode",
+        default=False
+    )
+    uv_edit_source_uv: StringProperty(
+        name="Active UV",
+        description="Active UV map name for UV edit workflow",
+        default=""
+    )
+    uv_edit_target_uv: StringProperty(
+        name="Target UV",
+        description="Target UV map name for UV edit workflow",
+        default=""
+    )
+    uv_edit_target_mode: EnumProperty(
+        items=[
+            ('EXISTING', "Use Existing UV", "Use an existing UV map"),
+            ('NEW', "Create New UV", "Create a new UV map"),
+        ],
+        default='EXISTING'
+    )
+    uv_edit_new_uv_method: EnumProperty(
+        items=[
+            ('COPY', "Base on Current UV", "Copy the current UV map"),
+            ('UNWRAP_ANGLE', "Unwrap (Angle Based)", "Angle based unwrap"),
+            ('UNWRAP_CONFORMAL', "Unwrap (Conformal)", "Conformal unwrap"),
+            ('MIN_STRETCH', "Minimize Stretch", "Minimize stretch unwrap"),
+            ('LIGHTMAP', "Lightmap Pack", "Lightmap pack unwrap"),
+            ('SMART', "Smart UV Project", "Smart UV project unwrap"),
+        ],
+        default='COPY'
+    )
+    uv_edit_smart_angle_limit: FloatProperty(
+        name="Angle Limit",
+        description="Smart UV Project angle limit",
+        default=math.radians(66.0),
+        subtype='ANGLE'
+    )
+    uv_edit_smart_island_margin: FloatProperty(
+        name="Island Margin",
+        description="Smart UV Project island margin",
+        default=0.02,
+        subtype='FACTOR'
+    )
+    uv_edit_smart_area_weight: FloatProperty(
+        name="Area Weight",
+        description="Smart UV Project area weight",
+        default=0.0,
+        subtype='FACTOR'
+    )
+    uv_edit_smart_correct_aspect: BoolProperty(
+        name="Correct Aspect",
+        description="Correct aspect for Smart UV Project",
+        default=True
+    )
+    uv_edit_smart_scale_to_bounds: BoolProperty(
+        name="Scale to Bounds",
+        description="Scale islands to bounds",
+        default=False
+    )
+    uv_edit_smart_margin_method: EnumProperty(
+        items=[
+            ('SCALED', "Scaled", "Scale margins based on island size"),
+            ('ADD', "Add", "Add margin without scaling"),
+        ],
+        default='SCALED'
+    )
+    uv_edit_smart_rotate_method: EnumProperty(
+        items=[
+            ('AXIS_ALIGNED', "Axis-aligned (Vertical)", "Align islands to vertical axis"),
+            ('ANY', "Any", "Allow any rotation"),
+        ],
+        default='AXIS_ALIGNED'
+    )
+    uv_edit_unwrap_fill_holes: BoolProperty(
+        name="Fill Holes",
+        description="Fill holes when unwrapping",
+        default=True
+    )
+    uv_edit_unwrap_correct_aspect: BoolProperty(
+        name="Correct Aspect",
+        description="Correct aspect when unwrapping",
+        default=True
+    )
+    uv_edit_unwrap_use_subsurf: BoolProperty(
+        name="Use Subsurf",
+        description="Use subdivision surfaces for unwrapping",
+        default=False
+    )
+    uv_edit_unwrap_margin: FloatProperty(
+        name="Margin",
+        description="Unwrap margin",
+        default=0.005,
+        subtype='FACTOR'
+    )
+    uv_edit_min_stretch_blend: FloatProperty(
+        name="Blend",
+        description="Minimize stretch blend",
+        default=0.0,
+        subtype='FACTOR'
+    )
+    uv_edit_min_stretch_iterations: IntProperty(
+        name="Iterations",
+        description="Minimize stretch iterations",
+        default=5,
+        min=1,
+        max=50
+    )
+    uv_edit_lightmap_quality: IntProperty(
+        name="Quality",
+        description="Lightmap pack quality",
+        default=12,
+        min=1,
+        max=48
+    )
+    uv_edit_lightmap_margin: FloatProperty(
+        name="Margin",
+        description="Lightmap pack margin",
+        default=0.03,
+        subtype='FACTOR'
+    )
+    uv_edit_lightmap_pack_in_one: BoolProperty(
+        name="Pack In One",
+        description="Pack all faces into one UV map",
+        default=True
+    )
+    uv_edit_keep_old_uv: BoolProperty(
+        name="Keep Old UV",
+        description="Keep the original UV map after applying",
+        default=True
+    )
+    uv_edit_override_existing_images: BoolProperty(
+        name="Override Existing Images",
+        description="Reuse current images and only update UVs",
+        default=False
+    )
+    uv_edit_udim_policy: EnumProperty(
+        items=[
+            ('AUTO', "Auto UDIM", "Auto-generate UDIM tiles based on UVs"),
+            ('SINGLE', "Single Tile", "Use a single tile only"),
+        ],
+        default='AUTO'
+    )
+    uv_edit_channel_scope: EnumProperty(
+        items=[
+            ('ALL', "All Channels", "Bake all channels"),
+            ('ACTIVE', "Active Channel", "Bake only the active channel"),
+            ('EXCLUDE', "Exclude Channels", "Bake all except excluded channels"),
+        ],
+        default='ALL'
+    )
+    uv_edit_exclude_channels: StringProperty(
+        name="Exclude Channels",
+        description="Comma-separated channel names to exclude",
+        default=""
+    )
+    uv_edit_alpha_mode: EnumProperty(
+        items=[
+            ('PRESERVE', "Preserve Alpha", "Preserve alpha from bake"),
+            ('OPAQUE', "Force Opaque", "Force alpha to 1.0"),
+            ('PREMULTIPLY', "Premultiply", "Premultiply RGB by alpha"),
+        ],
+        default='PRESERVE'
+    )
+    uv_edit_bake_margin: IntProperty(
+        name="Margin",
+        description="Bake margin",
+        default=8,
+        min=0,
+        max=100
+    )
+    uv_edit_bake_margin_type: EnumProperty(
+        items=[
+            ('ADJACENT_FACES', "Adjacent Faces", "Adjacent Faces"),
+            ('EXTEND', "Extend", "Extend"),
+        ],
+        default='ADJACENT_FACES'
+    )
+    uv_edit_keep_ps_prefix_uvs: BoolProperty(
+        name="Keep PS_ UVs",
+        description="Keep UVs with PS_ prefix when clearing",
+        default=True
+    )
+    uv_edit_inherit_image_sizes: BoolProperty(
+        name="Inherit Sizes",
+        description="Use each layer's original image size when creating new images",
+        default=True
+    )
+    uv_edit_image_resolution: EnumProperty(
+        items=[
+            ('1024', "1024", "1024x1024"),
+            ('2048', "2048", "2048x2048"),
+            ('4096', "4096", "4096x4096"),
+            ('8192', "8192", "8192x8192"),
+            ('CUSTOM', "Custom", "Custom Resolution"),
+        ],
+        default='2048'
+    )
+    uv_edit_image_width: IntProperty(
+        name="Width",
+        default=2048,
+        min=1,
+        subtype='PIXEL'
+    )
+    uv_edit_image_height: IntProperty(
+        name="Height",
+        default=2048,
+        min=1,
+        subtype='PIXEL'
+    )
+    uv_edit_use_udim_tiles: BoolProperty(
+        name="Use UDIM Tiles",
+        description="Use UDIM tiles for new baked images",
+        default=False
+    )
+    uv_edit_use_float: BoolProperty(
+        name="Use Float",
+        description="Use float for new baked images",
+        default=False
+    )
+    uv_edit_checker_enabled: BoolProperty(
+        name="UV Checker Enabled",
+        description="Enable UV checker preview",
+        default=True,
+        update=update_uv_checker
+    )
+    uv_edit_checker_viewport_enabled: BoolProperty(
+        name="UV Checker Viewport Enabled",
+        description="Enable UV checker on objects in the viewport",
+        default=True,
+        update=update_uv_checker
+    )
+    uv_edit_checker_type: EnumProperty(
+        items=[
+            ('UV', "UV Grid", "UV grid checker"),
+            ('COLOR', "Color Grid", "Color grid checker"),
+        ],
+        default='UV',
+        update=update_uv_checker
+    )
+    uv_edit_checker_resolution: EnumProperty(
+        items=[
+            ('256', "256", "256x256"),
+            ('512', "512", "512x512"),
+            ('1024', "1024", "1024x1024"),
+            ('2048', "2048", "2048x2048"),
+            ('4096', "4096", "4096x4096"),
+            ('8192', "8192", "8192x8192"),
+        ],
+        default='1024',
+        update=update_uv_checker
+    )
+    uv_edit_previous_image: StringProperty(
+        name="Previous Image",
+        description="Image name to restore after UV edit",
+        default="",
+        options={'SKIP_SAVE'}
+    )
+    uv_edit_created_uvs: CollectionProperty(
+        type=UVEditCreatedUV,
+        name="Created UVs",
+        description="UV maps created during UV edit",
+        options={'SKIP_SAVE'}
+    )
+    uv_edit_previous_uvs: CollectionProperty(
+        type=UVEditPreviousUV,
+        name="Previous UVs",
+        description="Stored UVs before checker toggle",
+        options={'SKIP_SAVE'}
+    )
+    uv_edit_material_overrides: CollectionProperty(
+        type=UVEditMaterialOverride,
+        name="Material Overrides",
+        description="Stored material overrides for UV checker",
+        options={'SKIP_SAVE'}
+    )
+    uv_edit_apply_in_progress: BoolProperty(
+        name="UV Edit Apply In Progress",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    uv_edit_source_material_name: StringProperty(
+        name="Source Material",
+        description="Original material used for UV edit",
+        default="",
+        options={'SKIP_SAVE'}
+    )
     
     def add_layer_to_clipboard(self, layer: "Layer"):
         ps_ctx = parse_context(bpy.context)
@@ -2908,6 +3530,11 @@ class MaterialData(PropertyGroup):
         description="Collection of groups in the Paint System"
     )
     active_index: IntProperty(name="Active Group Index")
+    last_material_name: StringProperty(
+        name="Last Material Name",
+        description="Tracks the last known material name for syncing",
+        default=""
+    )
     use_alpha: BoolProperty(
         name="Use Alpha",
         description="Use alpha channel in the Paint System",
@@ -2917,6 +3544,30 @@ class MaterialData(PropertyGroup):
         name="Preview Channel",
         description="Preview the channel",
         default=False
+    )
+    preview_mask: BoolProperty(
+        name="Preview Mask",
+        description="Preview the active layer mask",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    preview_mask_original_node_name: StringProperty(
+        name="Mask Preview Original Node",
+        description="Stored source node for restoring mask preview",
+        default="",
+        options={'SKIP_SAVE'}
+    )
+    preview_mask_original_socket_name: StringProperty(
+        name="Mask Preview Original Socket",
+        description="Stored source socket for restoring mask preview",
+        default="",
+        options={'SKIP_SAVE'}
+    )
+    preview_mask_original_view_transform: StringProperty(
+        name="Mask Preview Original View Transform",
+        description="Stored view transform for restoring mask preview",
+        default="",
+        options={'SKIP_SAVE'}
     )
     original_node_name: StringProperty(
         name="Original Node Name",
@@ -2979,17 +3630,145 @@ class Filter(PropertyGroup):
     )
 
 def iter_all_layers() -> Generator[tuple[Material, Group, Channel, Layer], None, None]:
-    """Yield (material, group, channel, layer) for every layer across all materials.
-    
-    This is the canonical way to iterate over all Paint System layers and avoids
-    duplicating the four-level nested loop throughout the codebase.
-    """
+    """Yield (material, group, channel, layer) for every layer across all materials."""
     for material in bpy.data.materials:
         if hasattr(material, 'ps_mat_data'):
             for group in material.ps_mat_data.groups:
                 for channel in group.channels:
                     for layer in channel.layers:
                         yield material, group, channel, layer
+
+
+def find_material_for_layer(layer: "Layer") -> Material | None:
+    target_layer = layer.get_layer_data() if hasattr(layer, "get_layer_data") else layer
+    if not target_layer:
+        return None
+    target_uid = getattr(target_layer, "uid", None)
+    if not target_uid:
+        return None
+    for material in bpy.data.materials:
+        if hasattr(material, 'ps_mat_data') and material.ps_mat_data:
+            for group in material.ps_mat_data.groups:
+                for channel in group.channels:
+                    for item in channel.layers:
+                        item_layer = item.get_layer_data() if hasattr(item, "get_layer_data") else item
+                        if item_layer and getattr(item_layer, "uid", None) == target_uid:
+                            return material
+    return None
+
+
+def get_layer_suffix(layer_name: str, old_material_name: str | None = None) -> str:
+    if old_material_name and layer_name == old_material_name:
+        return ""
+    if old_material_name and layer_name.startswith(f"{old_material_name}_"):
+        return layer_name.split("_", 1)[1]
+    if "_" in layer_name:
+        return layer_name.split("_", 1)[1]
+    return layer_name
+
+
+def ensure_layer_name_prefix(layer_name: str, material_name: str, old_material_name: str | None = None) -> str:
+    if layer_name == material_name:
+        return layer_name
+    if layer_name.startswith(f"{material_name}_"):
+        return layer_name
+    suffix = get_layer_suffix(layer_name, old_material_name)
+    if not suffix:
+        return material_name
+    return f"{material_name}_{suffix}"
+
+
+def _replace_prefix(name: str, old_prefix: str, new_prefix: str) -> str | None:
+    if not name or not old_prefix or not new_prefix:
+        return None
+    if name == old_prefix:
+        return new_prefix
+    if name.startswith(f"{old_prefix}_"):
+        return f"{new_prefix}_{name[len(old_prefix) + 1:]}"
+    return None
+
+
+def ensure_group_name_prefix(group_name: str, material_name: str, old_material_name: str | None = None) -> str:
+    if group_name == material_name:
+        return group_name
+    return material_name
+
+
+def _set_layer_name(layer: "Layer", new_name: str, context: Context):
+    if not layer or not new_name:
+        return
+    if layer.name == new_name:
+        return
+    previous_flag = getattr(layer, "updating_name_flag", False)
+    layer.updating_name_flag = True
+    layer.name = new_name
+    layer.layer_name = new_name
+    layer.updating_name_flag = previous_flag
+    layer.update_node_tree(context)
+
+
+def update_material_name(material: Material, context: Context = None, force: bool = False):
+    context = context or bpy.context
+    if not material or not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
+        return
+    prefs = get_preferences(context)
+    if not force and not is_auto_name_sync_enabled(context):
+        material.ps_mat_data.last_material_name = material.name
+        return
+
+    ps_mat_data = material.ps_mat_data
+    old_name = ps_mat_data.last_material_name or material.name
+    new_name = material.name
+
+    # Update group names to follow material naming
+    group_old_names: dict[int, str] = {}
+    group_new_names: dict[int, str] = {}
+    for group_idx, group in enumerate(ps_mat_data.groups):
+        group_old_names[group_idx] = group.name
+        base_name = ensure_group_name_prefix(group.name, new_name, old_name)
+        reserved = [g.name for g in ps_mat_data.groups if g != group]
+        reserved.extend(group_new_names.values())
+        unique_name = get_next_unique_name(base_name, reserved)
+        group_new_names[group_idx] = unique_name
+        if group.name != unique_name:
+            group.name = unique_name
+
+    # Update layer names (all types) and image datablocks
+    for group_idx, group in enumerate(ps_mat_data.groups):
+        for channel in group.channels:
+            bake_image = channel.bake_image
+            if bake_image:
+                old_group_name = group_old_names.get(group_idx, group.name)
+                new_group_name = group_new_names.get(group_idx, group.name)
+                new_bake_name = _replace_prefix(bake_image.name, old_group_name, new_group_name)
+                if not new_bake_name:
+                    new_bake_name = _replace_prefix(bake_image.name, old_name, new_name)
+                if not new_bake_name:
+                    new_bake_name = _replace_prefix(bake_image.name, f"PS_{old_name}", f"PS_{new_name}")
+                if new_bake_name and bake_image.name != new_bake_name:
+                    _safe_set_id_name(bake_image, new_bake_name)
+            for layer in channel.layers:
+                if layer.is_linked:
+                    continue
+                layer_data = layer.get_layer_data()
+                if not layer_data:
+                    continue
+                new_layer_name = ensure_layer_name_prefix(layer_data.name, new_name, old_name)
+                _set_layer_name(layer_data, new_layer_name, context)
+                if layer_data.image and layer_data.image.name != layer_data.name:
+                    _safe_set_id_name(layer_data.image, layer_data.name)
+
+    ps_mat_data.last_material_name = new_name
+
+
+def sync_names(context: Context, material: Material | None = None, force: bool = False):
+    context = context or bpy.context
+    if material:
+        update_material_name(material, context, force=force)
+        return
+    ps_ctx = parse_context(context)
+    if ps_ctx.active_material:
+        update_material_name(ps_ctx.active_material, context, force=force)
 
 
 def get_all_layers() -> list[Layer]:
@@ -3284,6 +4063,9 @@ classes = (
     Group,
     ClipboardLayer,
     TempMaterial,
+    UVEditCreatedUV,
+    UVEditPreviousUV,
+    UVEditMaterialOverride,
     PaintSystemGlobalData,
     MaterialData,
     LegacyPaintSystemLayer,
@@ -3291,26 +4073,59 @@ classes = (
     LegacyPaintSystemGroups,
     )
 
-_register, _unregister = register_classes_factory(classes)
+def _get_registered_class_by_name(class_name: str):
+    cls = getattr(bpy.types, class_name, None)
+    if cls is not None and hasattr(cls, "bl_rna"):
+        return cls
+    return None
+
+
+def _safe_unregister_class(cls) -> None:
+    try:
+        bpy.utils.unregister_class(cls)
+    except Exception:
+        pass
+
 
 def register():
     """Register the Paint System data module."""
-    _register()
+    for cls in classes:
+        registered_cls = _get_registered_class_by_name(cls.__name__)
+        if registered_cls is not None:
+            _safe_unregister_class(registered_cls)
+        bpy.utils.register_class(cls)
+
+    if hasattr(bpy.types.Scene, "ps_scene_data"):
+        del bpy.types.Scene.ps_scene_data
     bpy.types.Scene.ps_scene_data = PointerProperty(
         type=PaintSystemGlobalData,
         name="Paint System Data",
         description="Data for the Paint System"
     )
+
+    if hasattr(bpy.types.Material, "ps_mat_data"):
+        del bpy.types.Material.ps_mat_data
     bpy.types.Material.ps_mat_data = PointerProperty(
         type=MaterialData,
         name="Paint System Material Data",
         description="Material Data for the Paint System"
     )
+
+    if hasattr(bpy.types.Material, "paint_system"):
+        del bpy.types.Material.paint_system
     bpy.types.Material.paint_system = PointerProperty(type=LegacyPaintSystemGroups)
-    
+
+
 def unregister():
     """Unregister the Paint System data module."""
-    del bpy.types.Material.paint_system
-    del bpy.types.Material.ps_mat_data
-    del bpy.types.Scene.ps_scene_data
-    _unregister()
+    if hasattr(bpy.types.Material, "paint_system"):
+        del bpy.types.Material.paint_system
+    if hasattr(bpy.types.Material, "ps_mat_data"):
+        del bpy.types.Material.ps_mat_data
+    if hasattr(bpy.types.Scene, "ps_scene_data"):
+        del bpy.types.Scene.ps_scene_data
+
+    for cls in reversed(classes):
+        registered_cls = _get_registered_class_by_name(cls.__name__)
+        if registered_cls is not None:
+            _safe_unregister_class(registered_cls)
