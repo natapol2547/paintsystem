@@ -90,6 +90,13 @@ class PaintSystemPreferences(AddonPreferences):
         default=False
     )
 
+    automatic_name_syncing: BoolProperty(
+        name="Automatic Name Syncing",
+        description="Automatically sync material, group, layer, and image names",
+        default=True
+    )
+
+
     # RMB popover options
     show_hsv_sliders_rmb: BoolProperty(
         name="Show Hue/Saturation/Value sliders (RMB)",
@@ -184,6 +191,7 @@ class PaintSystemPreferences(AddonPreferences):
         layout.prop(self, "show_opacity_in_layer_list", text="Show Opacity in Layer List")
         layout.prop(self, "use_legacy_ui", text="Use Legacy UI")
         layout.prop(self, "use_panel_quick_access", text="Use Panel Quick Access")
+        layout.prop(self, "automatic_name_syncing", text="Automatic Name Syncing")
         # layout.prop(self, "name_layers_group",
         #             text="Name Layers According to Group Name")
 

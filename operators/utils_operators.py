@@ -6,7 +6,7 @@ from bpy.types import Operator
 from bpy.utils import register_classes_factory
 from bpy_extras.node_utils import connect_sockets
 
-from ..paintsystem.data import update_active_image
+from ..paintsystem.data import update_active_image, sync_names
 
 # ---
 from ..preferences import addon_package
@@ -208,6 +208,26 @@ class PAINTSYSTEM_OT_OpenPaintSystemPreferences(Operator):
         show_expanded = bl_info["show_expanded"]
         if not show_expanded:
             bpy.ops.preferences.addon_expand(module=addon_package())
+        return {'FINISHED'}
+
+
+class PAINTSYSTEM_OT_SyncNames(PSContextMixin, Operator):
+    bl_idname = "paint_system.sync_names"
+    bl_label = "Sync Names"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Synchronize material, group, layer, and image names"
+
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_material is not None
+
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        if not ps_ctx.active_material:
+            self.report({'WARNING'}, "No active material to sync")
+            return {'CANCELLED'}
+        sync_names(context, material=ps_ctx.active_material, force=True)
         return {'FINISHED'}
 
 
@@ -539,6 +559,7 @@ classes = (
     PAINTSYSTEM_OT_ToggleBrushEraseAlpha,
     PAINTSYSTEM_OT_ColorSample,
     PAINTSYSTEM_OT_OpenPaintSystemPreferences,
+    PAINTSYSTEM_OT_SyncNames,
     PAINTSYSTEM_OT_FlipNormals,
     PAINTSYSTEM_OT_RecalculateNormals,
     PAINTSYSTEM_OT_AddCameraPlane,
