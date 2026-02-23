@@ -25,7 +25,7 @@ from . import keymaps as keymaps
 
 bl_info = {
     "name": "Paint System",
-    "author": "Tawan Sunflower, @blastframe",
+    "author": "Tawan Sunflower, PinkNinjaa, @blastframe",
     "description": "",
     "blender": (4, 2, 0),
     "version": (2, 1, 8),
