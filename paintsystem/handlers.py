@@ -13,6 +13,50 @@ import uuid
 _COLOR_HISTORY_PALETTE_NAME = "Paint System History"
 
 
+def _strip_numeric_suffix(name: str) -> str:
+    if "." in name:
+        base, suffix = name.rsplit(".", 1)
+        if suffix.isdigit():
+            return base
+    return name
+
+
+def _infer_previous_material_name(material: bpy.types.Material) -> str:
+    if not material or not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
+        return ""
+    if not material.ps_mat_data.groups:
+        return ""
+    for group in material.ps_mat_data.groups:
+        group_name = _strip_numeric_suffix(group.name)
+        if group_name.startswith("PS_"):
+            inferred = group_name[3:]
+            if inferred:
+                return inferred
+        elif group_name:
+            return group_name
+    return ""
+
+
+def _sync_material_name_if_needed(material: bpy.types.Material):
+    if not isinstance(material, bpy.types.Material):
+        return
+    if not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
+        return
+
+    last_name = material.ps_mat_data.last_material_name
+    if last_name and last_name != material.name:
+        update_material_name(material, bpy.context)
+        return
+
+    if not last_name:
+        inferred_old = _infer_previous_material_name(material)
+        if inferred_old and inferred_old != material.name:
+            material.ps_mat_data.last_material_name = inferred_old
+            update_material_name(material, bpy.context)
+        else:
+            material.ps_mat_data.last_material_name = material.name
+
+
 def get_ps_scene_data(scene: bpy.types.Scene):
     if not hasattr(scene, 'ps_scene_data'):
         return None
@@ -227,30 +271,18 @@ def paint_system_object_update(scene: bpy.types.Scene, depsgraph: bpy.types.Deps
 def material_name_update_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph = None):
     if not depsgraph:
         return
-    if not depsgraph.id_type_updated('MATERIAL'):
-        return
     try:
+        handled_any = False
         for update in depsgraph.updates:
             material = update.id
-            if not isinstance(material, bpy.types.Material):
-                continue
-            if not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
-                continue
-            last_name = material.ps_mat_data.last_material_name
-            if last_name and last_name != material.name:
-                update_material_name(material, bpy.context)
-            elif not last_name:
-                inferred_old = ""
-                if material.ps_mat_data.groups:
-                    for group in material.ps_mat_data.groups:
-                        if group.name.startswith("PS_"):
-                            inferred_old = group.name[3:]
-                            break
-                if inferred_old and inferred_old != material.name:
-                    material.ps_mat_data.last_material_name = inferred_old
-                    update_material_name(material, bpy.context)
-                else:
-                    material.ps_mat_data.last_material_name = material.name
+            if isinstance(material, bpy.types.Material):
+                _sync_material_name_if_needed(material)
+                handled_any = True
+
+        # Fallback: some Blender versions/events don't always report MATERIAL updates.
+        if not handled_any:
+            for material in bpy.data.materials:
+                _sync_material_name_if_needed(material)
     except Exception:
         pass
 
@@ -278,13 +310,7 @@ def brush_color_callback(*args):
 def material_name_msgbus_callback(*args):
     try:
         for material in bpy.data.materials:
-            if not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
-                continue
-            last_name = material.ps_mat_data.last_material_name
-            if last_name and last_name != material.name:
-                update_material_name(material, bpy.context)
-            elif not last_name:
-                material.ps_mat_data.last_material_name = material.name
+            _sync_material_name_if_needed(material)
     except Exception:
         pass
 
