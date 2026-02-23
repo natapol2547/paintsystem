@@ -7,6 +7,7 @@ from bpy.props import (
 )
 from bpy.types import Operator, Context, NodeTree
 from bpy.utils import register_classes_factory
+from bpy_extras.node_utils import connect_sockets
 import math
 import mathutils
 
@@ -26,13 +27,14 @@ from ..paintsystem.data import (
     update_active_image,
 )
 from ..utils import get_next_unique_name
-from ..utils.nodes import get_nodetree_socket_enum
+from ..utils.nodes import get_nodetree_socket_enum, get_material_output
 from .common import (
     PSContextMixin,
     scale_content,
     get_icon_from_socket_type,
     PSUVOptionsMixin,
-    PSImageCreateMixin
+    PSImageCreateMixin,
+    DEFAULT_PS_UV_MAP_NAME,
     )
 from .operators_utils import redraw_panel, intern_enum_items
 from .layers_operators import PAINTSYSTEM_OT_NewImage
@@ -219,6 +221,7 @@ class PAINTSYSTEM_OT_DeleteLayerMask(PSContextMixin, Operator):
     def execute(self, context):
         ps_ctx = self.parse_context(context)
         active_layer = ps_ctx.active_layer
+        PAINTSYSTEM_OT_ToggleLayerMaskPreview.disable_preview(context, ps_ctx)
         lm = ListManager(active_layer, "layer_masks", active_layer, "active_layer_mask_index")
         lm.remove_active_item()
         if not active_layer.layer_masks:
@@ -309,8 +312,145 @@ class PAINTSYSTEM_OT_FinishEditLayerMask(PSContextMixin, Operator):
     def execute(self, context):
         ps_ctx = self.parse_context(context)
         active_layer = ps_ctx.active_layer
+        PAINTSYSTEM_OT_ToggleLayerMaskPreview.disable_preview(context, ps_ctx)
+        
+        # Switch canvas back to layer image, keep in PAINT_TEXTURE mode
         active_layer.edit_mask = False
         update_active_image(context=context)
+        return {'FINISHED'}
+
+
+class PAINTSYSTEM_OT_ToggleLayerMaskPreview(PSContextMixin, Operator):
+    """Toggle active mask preview similarly to channel isolate"""
+    bl_idname = "paint_system.toggle_layer_mask_preview"
+    bl_label = "Mask View"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Toggle active mask preview"
+
+    @staticmethod
+    def _get_or_create_preview_node(nodes, name: str, bl_idname: str):
+        node = nodes.get(name)
+        if node and node.bl_idname != bl_idname:
+            nodes.remove(node)
+            node = None
+        if node is None:
+            node = nodes.new(bl_idname)
+            node.name = name
+        node.hide = True
+        return node
+
+    @staticmethod
+    def _clear_preview_state(ps_mat_data):
+        ps_mat_data.preview_mask = False
+        ps_mat_data.preview_mask_original_node_name = ""
+        ps_mat_data.preview_mask_original_socket_name = ""
+        ps_mat_data.preview_mask_original_view_transform = ""
+
+    @classmethod
+    def disable_preview(cls, context, ps_ctx):
+        ps_mat_data = ps_ctx.ps_mat_data
+        mat = ps_ctx.active_material
+        if not ps_mat_data or not mat or not mat.node_tree:
+            return False
+        if not ps_mat_data.preview_mask:
+            return False
+
+        mat_output = get_material_output(mat.node_tree)
+        source_node = mat.node_tree.nodes.get(ps_mat_data.preview_mask_original_node_name)
+        source_socket = source_node.outputs.get(ps_mat_data.preview_mask_original_socket_name) if source_node else None
+        if source_socket:
+            connect_sockets(source_socket, mat_output.inputs[0])
+
+        if ps_mat_data.preview_mask_original_view_transform:
+            try:
+                context.scene.view_settings.view_transform = ps_mat_data.preview_mask_original_view_transform
+            except Exception:
+                pass
+
+        cls._clear_preview_state(ps_mat_data)
+        return True
+
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        active_layer = ps_ctx.active_layer
+        if not active_layer or not active_layer.edit_mask or not active_layer.layer_masks:
+            return False
+        active_index = active_layer.active_layer_mask_index
+        if active_index < 0 or active_index >= len(active_layer.layer_masks):
+            return False
+        layer_mask = active_layer.layer_masks[active_index]
+        return layer_mask.type == 'IMAGE' and layer_mask.mask_image is not None and ps_ctx.active_channel is not None
+
+    def execute(self, context):
+        ps_ctx = self.parse_context(context)
+        active_layer = ps_ctx.active_layer
+        ps_mat_data = ps_ctx.ps_mat_data
+        mat = ps_ctx.active_material
+
+        if not active_layer or not ps_mat_data or not mat or not mat.node_tree:
+            return {'CANCELLED'}
+
+        enabling_preview = not ps_mat_data.preview_mask
+        if enabling_preview:
+            active_index = active_layer.active_layer_mask_index
+            if active_index < 0 or active_index >= len(active_layer.layer_masks):
+                self.report({'ERROR'}, "No active mask")
+                return {'CANCELLED'}
+            active_mask = active_layer.layer_masks[active_index]
+            if active_mask.type != 'IMAGE' or not active_mask.mask_image:
+                self.report({'ERROR'}, "Active mask must be an image mask")
+                return {'CANCELLED'}
+
+            mat_output = get_material_output(mat.node_tree)
+            if not mat_output.inputs[0].links:
+                self.report({'ERROR'}, "No material output link to preview")
+                return {'CANCELLED'}
+
+            original_link = mat_output.inputs[0].links[0]
+            ps_mat_data.preview_mask_original_node_name = original_link.from_node.name
+            ps_mat_data.preview_mask_original_socket_name = original_link.from_socket.name
+            ps_mat_data.preview_mask_original_view_transform = str(context.scene.view_settings.view_transform)
+
+            nodes = mat.node_tree.nodes
+            links = mat.node_tree.links
+            tex_node = self._get_or_create_preview_node(nodes, "ps_mask_preview_image", "ShaderNodeTexImage")
+            emission_node = self._get_or_create_preview_node(nodes, "ps_mask_preview_emission", "ShaderNodeEmission")
+            uv_node = self._get_or_create_preview_node(nodes, "ps_mask_preview_uv", "ShaderNodeUVMap")
+            texcoord_node = self._get_or_create_preview_node(nodes, "ps_mask_preview_texcoord", "ShaderNodeTexCoord")
+            geometry_node = self._get_or_create_preview_node(nodes, "ps_mask_preview_geometry", "ShaderNodeNewGeometry")
+
+            tex_node.image = active_mask.mask_image
+            tex_node.interpolation = 'Closest'
+
+            coord_type = active_mask.coord_type
+            if coord_type == 'AUTO':
+                uv_node.uv_map = DEFAULT_PS_UV_MAP_NAME
+            elif coord_type == 'UV':
+                uv_node.uv_map = active_mask.mask_uv_map or active_layer.uv_map_name
+
+            if coord_type in {'AUTO', 'UV'}:
+                connect_sockets(uv_node.outputs['UV'], tex_node.inputs['Vector'])
+            elif coord_type == 'OBJECT':
+                connect_sockets(texcoord_node.outputs['Object'], tex_node.inputs['Vector'])
+            elif coord_type == 'GENERATED':
+                connect_sockets(texcoord_node.outputs['Generated'], tex_node.inputs['Vector'])
+            elif coord_type == 'POSITION':
+                connect_sockets(geometry_node.outputs['Position'], tex_node.inputs['Vector'])
+
+            connect_sockets(tex_node.outputs['Color'], emission_node.inputs['Color'])
+            connect_sockets(emission_node.outputs['Emission'], mat_output.inputs[0])
+
+            ps_mat_data.preview_mask = True
+            if context.space_data and context.space_data.shading.type not in {'RENDERED', 'MATERIAL'}:
+                context.space_data.shading.type = 'RENDERED'
+            try:
+                context.scene.view_settings.view_transform = "Standard"
+            except Exception:
+                pass
+        else:
+            self.disable_preview(context, ps_ctx)
+
         return {'FINISHED'}
 
 
@@ -320,6 +460,7 @@ classes = (
     PAINTSYSTEM_OT_DeleteLayerMask,
     PAINTSYSTEM_OT_EditLayerMask,
     PAINTSYSTEM_OT_FinishEditLayerMask,
+    PAINTSYSTEM_OT_ToggleLayerMaskPreview,
 )
 
 

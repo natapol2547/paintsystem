@@ -296,7 +296,8 @@ class MAT_PT_Layers(PSContextMixin, Panel):
             # Toggle paint mode (switch between object and texture paint mode)
             group_node = find_node(mat.node_tree, {
                                 'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree})
-            if not group_node:
+            is_mask_preview_active = bool(ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.preview_mask)
+            if not group_node and not is_mask_preview_active:
                 warning_box = box.box()
                 warning_box.alert = True
                 warning_col = warning_box.column(align=True)
@@ -603,6 +604,13 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
 
                 if mask_panel and active_layer.use_masks:
                     actions_row = mask_panel.row(align=True)
+                    if active_layer.edit_mask:
+                        actions_row.operator(
+                            "paint_system.toggle_layer_mask_preview",
+                            text="Mask View",
+                            icon='HIDE_OFF',
+                            depress=ps_ctx.ps_mat_data.preview_mask if ps_ctx.ps_mat_data else False,
+                        )
                     actions_row.operator("paint_system.delete_layer_mask", text="Delete Mask", icon='TRASH')
                     mask_box = mask_panel.box()
 

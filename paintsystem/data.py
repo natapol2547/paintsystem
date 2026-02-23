@@ -327,6 +327,16 @@ def update_active_image(self=None, context: bpy.types.Context = None):
             uv_layer = obj.data.uv_layers[DEFAULT_PS_UV_MAP_NAME]
             uv_layer.active = True
             uv_layer.active_render = True
+    
+    # Auto-enter PAINT_TEXTURE mode when entering mask edit
+    if active_layer.edit_mask and context.mode != 'PAINT_TEXTURE' and obj:
+        try:
+            # Make object active before setting mode
+            if context.view_layer:
+                context.view_layer.objects.active = obj
+            bpy.ops.object.mode_set(mode='PAINT_TEXTURE')
+        except Exception:
+            pass  # Silently fail if mode change not possible
 
 def update_active_layer(self, context):
     ps_ctx = parse_context(context)
@@ -3534,6 +3544,30 @@ class MaterialData(PropertyGroup):
         name="Preview Channel",
         description="Preview the channel",
         default=False
+    )
+    preview_mask: BoolProperty(
+        name="Preview Mask",
+        description="Preview the active layer mask",
+        default=False,
+        options={'SKIP_SAVE'}
+    )
+    preview_mask_original_node_name: StringProperty(
+        name="Mask Preview Original Node",
+        description="Stored source node for restoring mask preview",
+        default="",
+        options={'SKIP_SAVE'}
+    )
+    preview_mask_original_socket_name: StringProperty(
+        name="Mask Preview Original Socket",
+        description="Stored source socket for restoring mask preview",
+        default="",
+        options={'SKIP_SAVE'}
+    )
+    preview_mask_original_view_transform: StringProperty(
+        name="Mask Preview Original View Transform",
+        description="Stored view transform for restoring mask preview",
+        default="",
+        options={'SKIP_SAVE'}
     )
     original_node_name: StringProperty(
         name="Original Node Name",
