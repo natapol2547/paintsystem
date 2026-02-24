@@ -170,16 +170,14 @@ class MAT_PT_PaintSystemMaterialSettings(PSContextMixin, Panel):
         layout.prop(mat, "use_backface_culling", text="Backface Culling")
         if ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.groups:
             box = layout.box()
-            header_row = box.row(align=True)
-            header_row.label(text=f"Paint System Node Groups:", icon_value=get_icon("sunflower"))
-            header_row.separator()
-            header_row.operator("paint_system.sync_names", text="Sync", icon="FILE_REFRESH", emboss=True)
+            box.label(text=f"Paint System Node Groups:", icon_value=get_icon("sunflower"))
             row = box.row(align=True)
             scale_content(context, row, 1.3, 1.2)
             row.popover("MAT_PT_PaintSystemGroups", text="", icon="NODETREE")
             row.prop(ps_ctx.active_group, "name", text="")
             row.operator("paint_system.new_group", icon='ADD', text="")
             row.operator("wm.call_menu", text="", icon="REMOVE").name = "MAT_MT_DeleteGroupMenu"
+            row.operator("paint_system.sync_names", icon='FILE_REFRESH', text="")
 
 class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_PaintSystemMainPanel'
