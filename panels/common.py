@@ -502,7 +502,6 @@ def draw_layer_sidebar(col: bpy.types.UILayout, use_legacy_ui: bool):
                      icon_value=get_icon('folder'), text="")
     col.menu("MAT_MT_LayerMenu",
             text="", icon='DOWNARROW_HLT')
-    col.operator("paint_system.new_image_mask", text="", icon="MOD_MASK")
     if use_legacy_ui:
         col.separator()
     else:
