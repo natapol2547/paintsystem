@@ -177,7 +177,7 @@ class MAT_PT_PaintSystemMaterialSettings(PSContextMixin, Panel):
             row.prop(ps_ctx.active_group, "name", text="")
             row.operator("paint_system.new_group", icon='ADD', text="")
             row.operator("wm.call_menu", text="", icon="REMOVE").name = "MAT_MT_DeleteGroupMenu"
-            row.operator("paint_system.sync_names", icon='FILE_REFRESH', text="")
+            row.operator("paint_system.sync_names", icon='FILE_REFRESH', text="", emboss=True)
 
 class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_PaintSystemMainPanel'
