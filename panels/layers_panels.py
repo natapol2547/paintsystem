@@ -296,8 +296,7 @@ class MAT_PT_Layers(PSContextMixin, Panel):
             # Toggle paint mode (switch between object and texture paint mode)
             group_node = find_node(mat.node_tree, {
                                 'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree})
-            is_mask_preview_active = bool(ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.preview_mask)
-            if not group_node and not is_mask_preview_active:
+            if not group_node:
                 warning_box = box.box()
                 warning_box.alert = True
                 warning_col = warning_box.column(align=True)
@@ -363,6 +362,15 @@ def get_image(context) -> bpy.types.Image:
     elif ps_ctx.active_layer and ps_ctx.active_layer.image:
         image = ps_ctx.active_layer.image
     return image
+
+def get_active_mask(context):
+    ps_ctx = PSContextMixin.parse_context(context)
+    active_layer = ps_ctx.active_layer
+    if not active_layer or not active_layer.layer_masks:
+        return None
+    if 0 <= active_layer.active_layer_mask_index < len(active_layer.layer_masks):
+        return active_layer.layer_masks[active_layer.active_layer_mask_index]
+    return active_layer.layer_masks[0] if len(active_layer.layer_masks) > 0 else None
 
 class MAT_MT_ImageFilterMenu(PSContextMixin, Menu):
     bl_label = "Image Filter Menu"
@@ -603,22 +611,56 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     mask_header.operator("paint_system.edit_layer_mask", text="Edit Mask", icon='GREASEPENCIL')
 
                 if mask_panel and active_layer.use_masks:
-                    actions_row = mask_panel.row(align=True)
-                    if active_layer.edit_mask:
-                        actions_row.operator(
-                            "paint_system.toggle_layer_mask_preview",
-                            text="Mask View",
-                            icon='HIDE_OFF',
-                            depress=ps_ctx.ps_mat_data.preview_mask if ps_ctx.ps_mat_data else False,
-                        )
-                    actions_row.operator("paint_system.delete_layer_mask", text="Delete Mask", icon='TRASH')
-                    mask_box = mask_panel.box()
-
                     active_mask = None
                     if 0 <= active_layer.active_layer_mask_index < len(active_layer.layer_masks):
                         active_mask = active_layer.layer_masks[active_layer.active_layer_mask_index]
                     elif len(active_layer.layer_masks) > 0:
                         active_mask = active_layer.layer_masks[0]
+
+                    # Show clarification text when editing mask
+                    if active_layer.edit_mask:
+                        info_box = mask_panel.box()
+                        info_row = info_box.row()
+                        info_row.label(text="Only brightness values are used for masking", icon='INFO')
+
+                    actions_box = mask_panel.box()
+                    actions_row = actions_box.row(align=True)
+                    actions_row.scale_y = 1.5
+                    
+                    # All buttons equal width (1:1:1 ratio using splits)
+                    split = actions_row.split(factor=0.333, align=True)
+                    resize_col = split.column(align=True)
+                    split = split.split(factor=0.5, align=True)
+                    invert_col = split.column(align=True)
+                    delete_col = split.column(align=True)
+
+                    has_mask_image = bool(active_mask and active_mask.mask_image)
+                    if has_mask_image:
+                        resize_op = resize_col.operator("paint_system.resize_image", text="", icon='CON_SIZELIMIT')
+                        resize_op.image_name = active_mask.mask_image.name
+                        invert_op = invert_col.operator("paint_system.invert_colors", text="", icon='MOD_MASK')
+                        invert_op.image_name = active_mask.mask_image.name
+                    else:
+                        resize_col.operator("paint_system.resize_image", text="", icon='CON_SIZELIMIT', emboss=False).enabled = False
+                        invert_col.operator("paint_system.invert_colors", text="", icon='MOD_MASK', emboss=False).enabled = False
+
+                    delete_col.operator("paint_system.delete_layer_mask", text="", icon='TRASH')
+
+                    # Clear and Fill buttons
+                    state_row = actions_box.row(align=True)
+                    state_row.scale_y = 1.5
+                    split = state_row.split(factor=0.5, align=True)
+                    clear_col = split.column(align=True)
+                    fill_col = split.column(align=True)
+                    
+                    if has_mask_image:
+                        clear_col.operator("paint_system.clear_mask", text="", icon='RADIOBUT_ON')
+                        fill_col.operator("paint_system.fill_mask", text="", icon='RADIOBUT_OFF')
+                    else:
+                        clear_col.operator("paint_system.clear_mask", text="", icon='RADIOBUT_ON', emboss=False).enabled = False
+                        fill_col.operator("paint_system.fill_mask", text="", icon='RADIOBUT_OFF', emboss=False).enabled = False
+
+                    mask_box = mask_panel.box()
 
                     if active_mask:
                         mask_image_header, mask_image_panel = mask_box.panel("mask_image_settings_panel", default_closed=True)
@@ -626,17 +668,25 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                         if active_mask.mask_image:
                             image_row.prop(active_mask, "mask_image", text="")
                             image_row.operator("paint_system.export_image", text="", icon="EXPORT").image_name = active_mask.mask_image.name
-                            image_row.menu("MAT_MT_ImageMenu", text="", icon='COLLAPSEMENU')
+                            image_row.menu("MAT_MT_MaskImageMenu", text="", icon='COLLAPSEMENU')
                         else:
                             image_row.template_ID(active_mask, "mask_image", text="", new="image.new", open="image.open")
 
                         if mask_image_panel and active_mask.mask_image:
                             mask_image_node = None
-                            if active_layer.node_tree:
+                            if active_mask.node_tree:
+                                mask_image_node = active_mask.node_tree.nodes.get("source")
+                                if not mask_image_node:
+                                    mask_image_node = find_node(active_mask.node_tree, {
+                                        'bl_idname': 'ShaderNodeTexImage',
+                                        'image': active_mask.mask_image,
+                                    }, connected_to_output=False)
+                            if not mask_image_node and active_layer.node_tree:
+                                # Legacy fallback for older node layouts
                                 mask_image_node = find_node(active_layer.node_tree, {
                                     'bl_idname': 'ShaderNodeTexImage',
                                     'name': 'ps_active_mask_source',
-                                })
+                                }, connected_to_output=False)
                             if mask_image_node:
                                 img = active_mask.mask_image
                                 mask_settings_col = mask_image_panel.column()
@@ -974,8 +1024,29 @@ class MAT_MT_ImageMenu(PSContextMixin, Menu):
         layout = self.layout
         layout.operator("paint_system.resize_image",
                         icon="CON_SIZELIMIT")
+        layout.operator("paint_system.invert_colors",
+                        icon="MOD_MASK")
         layout.operator("paint_system.clear_image",
                         icon="X")
+
+class MAT_MT_MaskImageMenu(PSContextMixin, Menu):
+    bl_label = "Mask Image Menu"
+    bl_idname = "MAT_MT_MaskImageMenu"
+
+    @classmethod
+    def poll(cls, context):
+        active_mask = get_active_mask(context)
+        return bool(active_mask and active_mask.mask_image)
+
+    def draw(self, context):
+        layout = self.layout
+        active_mask = get_active_mask(context)
+        if not active_mask or not active_mask.mask_image:
+            return
+        resize_op = layout.operator("paint_system.resize_image", icon="CON_SIZELIMIT")
+        resize_op.image_name = active_mask.mask_image.name
+        invert_op = layout.operator("paint_system.invert_colors", icon="MOD_MASK")
+        invert_op.image_name = active_mask.mask_image.name
 
 class MAT_PT_ImageLayerSettings(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_ImageLayerSettings'
@@ -1271,6 +1342,7 @@ classes = (
     MAT_MT_PaintSystemMergeAndExport,
     MAT_PT_Layers,
     MAT_MT_ImageMenu,
+    MAT_MT_MaskImageMenu,
     MAT_PT_LayerSettings,
     MAT_PT_GreasePencilMaskSettings,
     MAT_PT_GreasePencilOnionSkinningSettings,
