@@ -135,6 +135,53 @@ class PSNodeTreeBuilder:
         # Compile mask builders first
         for mask_builder in self.mask_builders:
             mask_builder.compile(*args, **kwargs)
+        
+        # Link masks to alpha if any exist
+        if self.mask_builders and hasattr(self._layer, 'layer_masks') and self._layer.layer_masks:
+            for i, mask_obj in enumerate(self._layer.layer_masks):
+                if mask_obj.enabled and mask_obj.node_tree:
+                    # Add mask node group to the layer graph
+                    mask_node_name = f"mask_{mask_obj.uid}"
+                    self._builder.add_node(mask_node_name, "ShaderNodeGroup", {"node_tree": mask_obj.node_tree})
+                    
+                    # Create multiply node for blending
+                    multiply_node = f"mask_multiply_{mask_obj.uid}"
+                    blend_mode = getattr(mask_obj, 'blend_mode', 'MULTIPLY')
+                    
+                    if blend_mode == 'MULTIPLY':
+                        self._builder.add_node(multiply_node, "ShaderNodeMath", {"operation": "MULTIPLY"})
+                        # Link mask output to multiply input 0
+                        self._builder.link(mask_node_name, multiply_node, "Color", 0)
+                        # Link current alpha to multiply input 1
+                        if self._alpha_source_node:
+                            self._builder.link(self._alpha_source_node, multiply_node, self._alpha_source_socket, 1)
+                        else:
+                            # Default to 1.0
+                            self._builder.add_node(f"alpha_default_{i}", "ShaderNodeValue", default_outputs={0: 1.0})
+                            self._builder.link(f"alpha_default_{i}", multiply_node, "Value", 1)
+                    elif blend_mode == 'ADD':
+                        self._builder.add_node(multiply_node, "ShaderNodeMath", {"operation": "ADD"})
+                        self._builder.link(mask_node_name, multiply_node, "Color", 0)
+                        if self._alpha_source_node:
+                            self._builder.link(self._alpha_source_node, multiply_node, self._alpha_source_socket, 1)
+                        else:
+                            self._builder.add_node(f"alpha_default_{i}", "ShaderNodeValue", default_outputs={0: 1.0})
+                            self._builder.link(f"alpha_default_{i}", multiply_node, "Value", 1)
+                    elif blend_mode == 'SUBTRACT':
+                        self._builder.add_node(multiply_node, "ShaderNodeMath", {"operation": "SUBTRACT"})
+                        if self._alpha_source_node:
+                            self._builder.link(self._alpha_source_node, multiply_node, self._alpha_source_socket, 0)
+                        else:
+                            self._builder.add_node(f"alpha_default_{i}", "ShaderNodeValue", default_outputs={0: 1.0})
+                            self._builder.link(f"alpha_default_{i}", multiply_node, "Value", 0)
+                        self._builder.link(mask_node_name, multiply_node, "Color", 1)
+                    
+                    # Update alpha source to point to the mask multiply result
+                    self._alpha_source_node = multiply_node
+                    self._alpha_source_socket = "Value"
+            
+            # Re-link alpha with the updated source
+            self._update_mixing_graph_links()
             
         # Update mixing graph links before compiling to ensure modifiers are connected
         self._update_mixing_graph_links()
@@ -558,97 +605,26 @@ class PSNodeTreeBuilder:
 
     @classmethod
     def _create_mask_graph(cls, layer_mask: "LayerMask", context: Context):
+        """Create a mask graph for an IMAGE mask type only."""
         layer_pre_processing(layer_mask, context)
         
-        builder = cls(layer_mask, IMAGE_LAYER_VERSION, "source", "Color", as_subgraph=True, properties={"hide": True})
+        builder = cls(layer_mask, IMAGE_LAYER_VERSION, "source", "Color", as_subgraph=True)
         
-        match layer_mask.type:
-            case "IMAGE":
-                if layer_mask.mask_image:
-                    layer_mask.mask_image.name = layer_mask.name
-                img = layer_mask.mask_image
-                create_mask_mixing_graph(builder, layer_mask, "source", "Color")
-                builder.add_node("source", "ShaderNodeTexImage", {"image.force": img, "interpolation": "Closest", "name": "source"})
-                builder.create_coord_graph("source", "Vector")
-                return builder
-            
-            case "SOLID_COLOR":
-                create_mask_mixing_graph(builder, layer_mask, "source", "Color")
-                builder.add_node("source", "ShaderNodeRGB", {"name": "source"}, default_outputs={0: (1, 1, 1, 1)})
-                return builder
-                
-            case "ATTRIBUTE":
-                color_socket = parse_socket_name(layer_mask, "source", "Color")
-                create_mask_mixing_graph(builder, layer_mask, "source", "Color")
-                builder.add_node("source", "ShaderNodeAttribute", {"name": "source"})
-                return builder
-
-            case "GRADIENT":
-                gradient_type = layer_mask.gradient_type
-                empty_object = layer_mask.empty_object
-                create_mask_mixing_graph(builder, layer_mask, "source", "Color")
-                builder.add_node("source", "ShaderNodeValToRGB", {"name": "source"})
-                match gradient_type:
-                    case "LINEAR":
-                        builder.add_node("map_range", "ShaderNodeMapRange")
-                        builder.add_node("tex_coord", "ShaderNodeTexCoord", {"object": empty_object})
-                        builder.add_node("separate_xyz", "ShaderNodeSeparateXYZ")
-                        builder.link("tex_coord", "separate_xyz", "Object", "Vector")
-                        builder.link("separate_xyz", "map_range", "Z", "Value")
-                    case "RADIAL":
-                        builder.add_node("map_range", "ShaderNodeMapRange", default_values={1: 1, 2: 0})
-                        builder.add_node("tex_coord", "ShaderNodeTexCoord", {"object": empty_object})
-                        builder.add_node("vector_math", "ShaderNodeVectorMath", {"operation": "LENGTH"})
-                        builder.link("tex_coord", "vector_math", "Object", "Vector")
-                        builder.link("vector_math", "map_range", "Value", "Value")
-                    case "DISTANCE":
-                        builder.add_node("map_range", "ShaderNodeMapRange")
-                        builder.add_node("camera_data", "ShaderNodeCameraData")
-                        builder.link("camera_data", "map_range", "View Distance", "Value")
-                    case "GRADIENT_MAP":
-                        builder.add_node("map_range", "ShaderNodeMapRange")
-                        builder.link("group_input", "map_range", "Color", "Value")
-                    case _:
-                        raise ValueError(f"Invalid gradient type: {gradient_type}")
-                builder.link("map_range", "source", "Result", "Fac")
-                return builder
-
-            case "RANDOM":
-                create_mask_mixing_graph(builder, layer_mask, "hue_saturation_value", "Color")
-                builder.add_node("object_info", "ShaderNodeObjectInfo")
-                builder.add_node("white_noise", "ShaderNodeTexWhiteNoise", {"noise_dimensions": "1D"})
-                builder.add_node("add", "ShaderNodeMath", {"operation": "ADD"})
-                builder.add_node("add_2", "ShaderNodeMath", {"operation": "ADD"}, {1: 0})
-                builder.add_node("vector_math", "ShaderNodeVectorMath", {"operation": "MULTIPLY_ADD"}, default_values={1: (2, 2, 2), 2: (-1, -1, -1)})
-                builder.add_node("separate_xyz", "ShaderNodeSeparateXYZ")
-                builder.add_node("hue_multiply_add", "ShaderNodeMath", {"operation": "MULTIPLY_ADD"}, default_values={1: 1, 2: 0.5})
-                builder.add_node("saturation_multiply_add", "ShaderNodeMath", {"operation": "MULTIPLY_ADD"}, default_values={1: 1, 2: 1})
-                builder.add_node("value_multiply_add", "ShaderNodeMath", {"operation": "MULTIPLY_ADD"}, default_values={1: 1, 2: 1})
-                builder.add_node("hue_saturation_value", "ShaderNodeHueSaturation", default_values={"Color": (0.5, 0.25, 0.25, 1)})
-                builder.link("object_info", "add", "Material Index", 0)
-                builder.link("object_info", "add", "Random", 1)
-                builder.link("add", "add_2", "Value", 0)
-                builder.link("add_2", "white_noise", "Value", "W")
-                builder.link("white_noise", "vector_math", "Color", "Vector")
-                builder.link("vector_math", "separate_xyz", "Vector", "Vector")
-                builder.link("separate_xyz", "hue_multiply_add", "X", "Value")
-                builder.link("separate_xyz", "saturation_multiply_add", "Y", "Value")
-                builder.link("separate_xyz", "value_multiply_add", "Z", "Value")
-                builder.link("hue_multiply_add", "hue_saturation_value", "Value", "Hue")
-                builder.link("saturation_multiply_add", "hue_saturation_value", "Value", "Saturation")
-                builder.link("value_multiply_add", "hue_saturation_value", "Value", "Value")
-                return builder
-
-            case "TEXTURE":
-                color_socket = parse_socket_name(layer_mask, "source", "Color")
-                texture_type = get_texture_identifier(layer_mask.texture_type)
-                create_mask_mixing_graph(builder, layer_mask, "source", color_socket)
-                builder.add_node("source", texture_type, {"name": "source"})
-                builder.create_coord_graph('source', 'Vector')
-                return builder
-
-            case _:
-                raise ValueError(f"Invalid layer mask type: {layer_mask.type}")
+        # Only IMAGE masks are supported
+        if layer_mask.type != "IMAGE":
+            raise ValueError(f"Mask type '{layer_mask.type}' is not supported. Only IMAGE masks are currently implemented.")
+        
+        if layer_mask.mask_image:
+            layer_mask.mask_image.name = layer_mask.name
+        img = layer_mask.mask_image
+        create_mask_mixing_graph(builder, layer_mask, "source", "Color")
+        builder.add_node("source", "ShaderNodeTexImage", {"image.force": img, "interpolation": "Closest", "name": "source"})
+        builder.create_coord_graph("source", "Vector")
+        # Convert mask color to grayscale and output
+        builder.add_node("rgb_to_bw", "ShaderNodeRGBToBW")
+        builder.link("mix_rgb", "rgb_to_bw", "Result", "Color")
+        builder.link("rgb_to_bw", END, "Val", "Color")
+        return builder
 
 def get_layer_version_for_type(type: str) -> int:
     match type:

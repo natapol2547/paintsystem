@@ -607,7 +607,8 @@ class NodeTreeBuilder:
             if source == START:
                 # Find the START node
                 node, socket = self._get_socket_by_prefix(True, source_socket)
-                source = self.get_node_identifier(node)
+                if node is not None:
+                    source = self.get_node_identifier(node)
         else:
             raise ValueError(
                 "Source must be a NodeTreeBuilder instance or a string representing a node name.")
@@ -622,7 +623,8 @@ class NodeTreeBuilder:
             if target == END:
                 # Find the END node
                 node, socket = self._get_socket_by_prefix(False, target_socket)
-                target = self.get_node_identifier(node)
+                if node is not None:
+                    target = self.get_node_identifier(node)
         else:
             raise ValueError(
                 "Target must be a NodeTreeBuilder instance or a string representing a node name.")
@@ -674,7 +676,7 @@ class NodeTreeBuilder:
             if node.type != 'REROUTE':
                 continue
             socket = node.inputs[0] if is_input_socket else node.outputs[0]
-            identifier = node.get("identifier", None)
+            identifier = self.get_node_identifier(node)
             if identifier is not None and identifier.startswith(f"{prefix}{socket_name}"):
                 return node, socket
         return None, None
@@ -820,7 +822,10 @@ class NodeTreeBuilder:
             if is_source and identifier == START:
                 # Try to find node by prefix and create a reroute node if not found
                 # node, sock = self._get_socket_by_prefix(False, socket_name)
-                node = next((node for node in self.nodes.values() if node.get("identifier", None).startswith(f"{START}{socket}")), None)
+                node = next((
+                    node for node in self.nodes.values()
+                    if self.get_node_identifier(node).startswith(f"{START}{socket}")
+                ), None)
                 if not node:
                     node, sock = self._create_reroute_node(socket, False)
                 else:
@@ -829,7 +834,10 @@ class NodeTreeBuilder:
                 self.edges[edge_idx].source = node.name # Update edge source
             elif not is_source and identifier == END:
                 # Try to find node by prefix and create a reroute node if not found
-                node = next((node for node in self.nodes.values() if node.get("identifier", None).startswith(f"{END}{socket}")), None)
+                node = next((
+                    node for node in self.nodes.values()
+                    if self.get_node_identifier(node).startswith(f"{END}{socket}")
+                ), None)
                 if not node:
                     node, sock = self._create_reroute_node(socket, True)
                 else:

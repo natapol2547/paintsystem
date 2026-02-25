@@ -71,13 +71,6 @@ MASK_BLEND_MODE_ENUM = [
     ('MULTIPLY', "Multiply", "Multiply"),
 ]
 
-MASK_TYPE_ENUM = [
-    ('VALUE', "Value", "Value mask"),
-    ('IMAGE', "Image", "Image mask"),
-    ('ATTRIBUTE', "Attribute", "Attribute mask"),
-    ('TEXTURE', "Texture", "Texture mask"),
-]
-
 MASK_COORDINATE_TYPE_ENUM = [
     ('AUTO', "Auto UV", "Automatically create a new UV Map"),
     ('UV', "UV", "Open an existing UV Map"),
@@ -1801,6 +1794,9 @@ class Layer(BaseNestedListItem):
                 name=f"PS_Mask ({layer_mask_name})",
                 type='ShaderNodeTree'
             )
+            # Add interface sockets for mask output
+            if len(layer_mask.node_tree.interface.items_tree) == 0:
+                layer_mask.node_tree.interface.new_socket("Color", in_out="OUTPUT", socket_type="NodeSocketColor")
         for key, value in kwargs.items():
             setattr(layer_mask, key, value)
         if layer_mask.type != 'IMAGE':
@@ -3543,30 +3539,6 @@ class MaterialData(PropertyGroup):
         name="Preview Channel",
         description="Preview the channel",
         default=False
-    )
-    preview_mask: BoolProperty(
-        name="Preview Mask",
-        description="Preview the active layer mask",
-        default=False,
-        options={'SKIP_SAVE'}
-    )
-    preview_mask_original_node_name: StringProperty(
-        name="Mask Preview Original Node",
-        description="Stored source node for restoring mask preview",
-        default="",
-        options={'SKIP_SAVE'}
-    )
-    preview_mask_original_socket_name: StringProperty(
-        name="Mask Preview Original Socket",
-        description="Stored source socket for restoring mask preview",
-        default="",
-        options={'SKIP_SAVE'}
-    )
-    preview_mask_original_view_transform: StringProperty(
-        name="Mask Preview Original View Transform",
-        description="Stored view transform for restoring mask preview",
-        default="",
-        options={'SKIP_SAVE'}
     )
     original_node_name: StringProperty(
         name="Original Node Name",
