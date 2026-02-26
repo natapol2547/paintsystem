@@ -264,12 +264,23 @@ def update_brush_settings(self=None, context: bpy.types.Context = bpy.context):
         return
     ps_ctx = parse_context(context)
     active_layer = ps_ctx.active_layer
+    unlinked_layer = ps_ctx.unlinked_layer
     if not active_layer:
         return
     brush = context.tool_settings.image_paint.brush
     if not brush:
         return
     brush.use_alpha = not active_layer.lock_alpha
+    # Use unlinked_layer for mask checks (masks are per-material)
+    if unlinked_layer and unlinked_layer.edit_mask and unlinked_layer.use_masks and unlinked_layer.layer_masks:
+        color = getattr(brush, "color", None)
+        if color is not None:
+            gray = max(0.0, min(1.0, float((color[0] + color[1] + color[2]) / 3.0)))
+            brush.color = (gray, gray, gray)
+            inv = 1.0 - gray
+            brush.secondary_color = (inv, inv, inv)
+        if brush.blend == 'ERASE_ALPHA':
+            brush.blend = 'MIX'
 
 def update_active_image(self=None, context: bpy.types.Context = None):
     context = context or bpy.context
@@ -297,17 +308,40 @@ def update_active_image(self=None, context: bpy.types.Context = None):
         # Unable to paint
         return
 
+    # Use unlinked_layer for mask checks (masks are per-material)
+    unlinked_layer = ps_ctx.unlinked_layer
+
+    # Auto-enable mask edit for non-image layers with masks (no other way to paint them)
+    if (active_layer.type != 'IMAGE' and 
+        unlinked_layer and unlinked_layer.use_masks and 
+        unlinked_layer.layer_masks and 
+        not unlinked_layer.edit_mask):
+        unlinked_layer.edit_mask = True
+
     selected_image: Image = active_layer.image
     active_coord_type = active_layer.coord_type
     active_uv_map_name = active_layer.uv_map_name
-    if active_layer.edit_mask and active_layer.use_masks and active_layer.layer_masks:
-        active_mask_index = max(0, min(active_layer.active_layer_mask_index, len(active_layer.layer_masks) - 1))
-        active_mask = active_layer.layer_masks[active_mask_index]
+    if unlinked_layer and unlinked_layer.edit_mask and unlinked_layer.use_masks and unlinked_layer.layer_masks:
+        active_mask_index = max(0, min(unlinked_layer.active_layer_mask_index, len(unlinked_layer.layer_masks) - 1))
+        active_mask = unlinked_layer.layer_masks[active_mask_index]
         if active_mask.type == 'IMAGE' and active_mask.mask_image:
             selected_image = active_mask.mask_image
             active_coord_type = active_mask.coord_type
             active_uv_map_name = active_mask.mask_uv_map or active_layer.uv_map_name
 
+    # Auto-enter PAINT_TEXTURE mode when entering mask edit.
+    # Important: mode switch can reset canvas, so do it before assigning canvas.
+    if unlinked_layer and unlinked_layer.edit_mask and context.mode != 'PAINT_TEXTURE' and obj:
+        try:
+            if context.view_layer:
+                context.view_layer.objects.active = obj
+            bpy.ops.object.mode_set(mode='PAINT_TEXTURE')
+            image_paint = context.tool_settings.image_paint
+        except Exception:
+            pass
+
+    if image_paint.mode != 'IMAGE':
+        image_paint.mode = 'IMAGE'
     image_paint.canvas = selected_image
     if obj and getattr(obj, "data", None) and getattr(obj.data, "uv_layers", None):
         if active_coord_type == 'UV':
@@ -320,21 +354,17 @@ def update_active_image(self=None, context: bpy.types.Context = None):
             uv_layer.active = True
             uv_layer.active_render = True
     
-    # Auto-enter PAINT_TEXTURE mode when entering mask edit
-    if active_layer.edit_mask and context.mode != 'PAINT_TEXTURE' and obj:
-        try:
-            # Make object active before setting mode
-            if context.view_layer:
-                context.view_layer.objects.active = obj
-            bpy.ops.object.mode_set(mode='PAINT_TEXTURE')
-        except Exception:
-            pass  # Silently fail if mode change not possible
+    # Ensure mask target remains active after all updates
+    if unlinked_layer and unlinked_layer.edit_mask and image_paint.canvas != selected_image:
+        image_paint.canvas = selected_image
 
 def update_active_layer(self, context):
     ps_ctx = parse_context(context)
     active_layer = ps_ctx.active_layer
     if active_layer:
         active_layer.update_node_tree(context)
+        for channel in find_channels_containing_layer(active_layer):
+            channel.update_node_tree(context)
 
 def update_active_channel(self, context):
     ps_ctx = parse_context(context)
@@ -969,12 +999,46 @@ class Layer(BaseNestedListItem):
     def update_node_tree(self, context):
         if not self.auto_update_node_tree:
             return
+
+        layer_data = self.get_layer_data()
+        if not layer_data:
+            return
+
+        def ensure_layer_group_sockets(node_tree: NodeTree, layer_type: str):
+            expected_input = [
+                ExpectedSocket(name="Clip", socket_type="NodeSocketBool"),
+                ExpectedSocket(name="Color", socket_type="NodeSocketColor"),
+                ExpectedSocket(name="Alpha", socket_type="NodeSocketFloat"),
+                ExpectedSocket(name="Mask", socket_type="NodeSocketFloat"),
+            ]
+            if layer_type == "FOLDER":
+                expected_input.append(ExpectedSocket(name="Over Color", socket_type="NodeSocketColor"))
+                expected_input.append(ExpectedSocket(name="Over Alpha", socket_type="NodeSocketFloat"))
+            expected_output = [
+                ExpectedSocket(name="Color", socket_type="NodeSocketColor"),
+                ExpectedSocket(name="Alpha", socket_type="NodeSocketFloat"),
+            ]
+            ensure_sockets(node_tree, expected_input, "INPUT")
+            ensure_sockets(node_tree, expected_output, "OUTPUT")
+            for s in node_tree.interface.items_tree:
+                if getattr(s, 'item_type', '') == 'SOCKET' and getattr(s, 'in_out', '') == 'INPUT' and s.name == 'Mask':
+                    s.default_value = 1.0
+                    break
+
         # Ensure the paint system UV map even if it's linked
-        if self.get_layer_data().coord_type == 'AUTO':
+        if layer_data.coord_type == 'AUTO':
             ensure_paint_system_uv_map(context)
         
-        # If the layer is linked, do nothing
+        # If the layer is linked, only compile mask node trees (masks are per-material)
         if self.is_linked:
+            if layer_data.node_tree:
+                ensure_layer_group_sockets(layer_data.node_tree, layer_data.type)
+            if hasattr(self, 'layer_masks'):
+                for mask in self.layer_masks:
+                    if mask.node_tree:
+                        mask_builder = PSNodeTreeBuilder._create_mask_graph(mask, context)
+                        if mask_builder is not None:
+                            mask_builder.compile()
             return
         
         # Ensure a valid UUID
@@ -997,6 +1061,7 @@ class Layer(BaseNestedListItem):
                 ExpectedSocket(name="Clip", socket_type="NodeSocketBool"),
                 ExpectedSocket(name="Color", socket_type="NodeSocketColor"),
                 ExpectedSocket(name="Alpha", socket_type="NodeSocketFloat"),
+                ExpectedSocket(name="Mask", socket_type="NodeSocketFloat"),
             ]
             if self.type == "FOLDER":
                 expected_input.append(ExpectedSocket(name="Over Color", socket_type="NodeSocketColor"))
@@ -1007,6 +1072,11 @@ class Layer(BaseNestedListItem):
             ]
             ensure_sockets(node_tree, expected_input, "INPUT")
             ensure_sockets(node_tree, expected_output, "OUTPUT")
+            # Set Mask socket default to 1.0 (fully visible when no mask connected)
+            for s in node_tree.interface.items_tree:
+                if getattr(s, 'item_type', '') == 'SOCKET' and getattr(s, 'in_out', '') == 'INPUT' and s.name == 'Mask':
+                    s.default_value = 1.0
+                    break
         
         if self.layer_name and self.node_tree:
             _safe_set_id_name(self.node_tree, f"PS {self.layer_name} ({self.uid[:8]})")
@@ -1016,20 +1086,7 @@ class Layer(BaseNestedListItem):
             self.uid = str(uuid.uuid4())
         
         # Ensure sockets
-        expected_input = [
-            ExpectedSocket(name="Clip", socket_type="NodeSocketBool"),
-            ExpectedSocket(name="Color", socket_type="NodeSocketColor"),
-            ExpectedSocket(name="Alpha", socket_type="NodeSocketFloat"),
-        ]
-        if self.type == "FOLDER":
-            expected_input.append(ExpectedSocket(name="Over Color", socket_type="NodeSocketColor"))
-            expected_input.append(ExpectedSocket(name="Over Alpha", socket_type="NodeSocketFloat"))
-        expected_output = [
-            ExpectedSocket(name="Color", socket_type="NodeSocketColor"),
-            ExpectedSocket(name="Alpha", socket_type="NodeSocketFloat"),
-        ]
-        ensure_sockets(self.node_tree, expected_input, "INPUT")
-        ensure_sockets(self.node_tree, expected_output, "OUTPUT")
+        ensure_layer_group_sockets(self.node_tree, self.type)
         
         # Update node tree name
         if self.name:
@@ -1700,7 +1757,7 @@ class Layer(BaseNestedListItem):
     
     def copy_layer_data(self, layer: "Layer"):
         self.duplicate_layer_data(layer)
-        self.apply_properties(layer, self, ignore_props=["name", "uid", "node_tree", "image", "empty_object", "type", "id", "order", "parent_id", "layer_name"])
+        self.apply_properties(layer, self, ignore_props=["name", "uid", "node_tree", "image", "empty_object", "type", "id", "order", "parent_id", "layer_name", "layer_masks", "use_masks"])
     
     def get_layer_data(self) -> "Layer":
         if self.is_linked:
@@ -1783,6 +1840,7 @@ class Layer(BaseNestedListItem):
             print(f"Warning: Could not apply properties {failed_props} for {to_layer.name}")
 
     def create_layer_mask(self, context: Context, layer_mask_name: str, layer_mask_type: str, **kwargs):
+        self.use_masks = True
         layer_mask = self.layer_masks.add()
         layer_mask.name = layer_mask_name
         layer_mask.layer_name = layer_mask_name
@@ -1794,9 +1852,19 @@ class Layer(BaseNestedListItem):
                 name=f"PS_Mask ({layer_mask_name})",
                 type='ShaderNodeTree'
             )
-            # Add interface sockets for mask output
-            if len(layer_mask.node_tree.interface.items_tree) == 0:
+        # Ensure mask output sockets exist (Color for backward compatibility, Value for mask-alpha math)
+        try:
+            output_names = {
+                item.name
+                for item in layer_mask.node_tree.interface.items_tree
+                if getattr(item, "item_type", "") == "SOCKET" and getattr(item, "in_out", "") == "OUTPUT"
+            }
+            if "Color" not in output_names:
                 layer_mask.node_tree.interface.new_socket("Color", in_out="OUTPUT", socket_type="NodeSocketColor")
+            if "Value" not in output_names:
+                layer_mask.node_tree.interface.new_socket("Value", in_out="OUTPUT", socket_type="NodeSocketFloat")
+        except Exception:
+            pass
         for key, value in kwargs.items():
             setattr(layer_mask, key, value)
         if layer_mask.type != 'IMAGE':
@@ -1804,6 +1872,8 @@ class Layer(BaseNestedListItem):
         if layer_mask.uid and layer_mask.node_tree:
             _safe_set_id_name(layer_mask.node_tree, f"PS Mask {layer_mask_name} ({layer_mask.uid[:8]})")
         self.update_node_tree(context)
+        for channel in find_channels_containing_layer(self):
+            channel.update_node_tree(context)
         return layer_mask
     
     @property
@@ -2142,6 +2212,25 @@ class Channel(BaseNestedListManager):
                 layer = unlinked_layer.get_layer_data()
                 if layer is None or not layer.node_tree:
                     continue
+                expected_input = [
+                    ExpectedSocket(name="Clip", socket_type="NodeSocketBool"),
+                    ExpectedSocket(name="Color", socket_type="NodeSocketColor"),
+                    ExpectedSocket(name="Alpha", socket_type="NodeSocketFloat"),
+                    ExpectedSocket(name="Mask", socket_type="NodeSocketFloat"),
+                ]
+                if layer.type == "FOLDER":
+                    expected_input.append(ExpectedSocket(name="Over Color", socket_type="NodeSocketColor"))
+                    expected_input.append(ExpectedSocket(name="Over Alpha", socket_type="NodeSocketFloat"))
+                expected_output = [
+                    ExpectedSocket(name="Color", socket_type="NodeSocketColor"),
+                    ExpectedSocket(name="Alpha", socket_type="NodeSocketFloat"),
+                ]
+                ensure_sockets(layer.node_tree, expected_input, "INPUT")
+                ensure_sockets(layer.node_tree, expected_output, "OUTPUT")
+                for s in layer.node_tree.interface.items_tree:
+                    if getattr(s, 'item_type', '') == 'SOCKET' and getattr(s, 'in_out', '') == 'INPUT' and s.name == 'Mask':
+                        s.default_value = 1.0
+                        break
                 sample_id = unlinked_layer.parent_id
                 if unlinked_layer.parent_id != -1:
                     sample_id = self.get_parent_layer_id(unlinked_layer)
@@ -2150,11 +2239,65 @@ class Channel(BaseNestedListManager):
                 add_command = node_builder.add_node(
                     layer_identifier, "ShaderNodeGroup",
                     {"node_tree": layer.node_tree},
-                    {"Clip": layer.is_clip or layer.type == "ADJUSTMENT"},
+                    {"Clip": layer.is_clip or layer.type == "ADJUSTMENT", "Mask": 1.0},
                     force_properties=True,
                     force_default_values=True
                 )
                 previous_data.add_command = add_command
+                
+                # Apply masks at channel level (from unlinked_layer, not source layer)
+                # This allows linked layers to have their own independent masks per material
+                if hasattr(unlinked_layer, 'layer_masks') and unlinked_layer.layer_masks:
+                    enabled_masks = [
+                        m for m in unlinked_layer.layer_masks
+                        if getattr(m, 'enabled', False) and getattr(m, 'node_tree', None)
+                    ]
+                    if not enabled_masks:
+                        enabled_masks = [
+                            m for m in unlinked_layer.layer_masks
+                            if getattr(m, 'node_tree', None)
+                        ]
+                    if enabled_masks:
+                        mask_chain_node = None
+                        mask_chain_socket = None
+                        for mask_obj in enabled_masks:
+                            mask_node_name = f"mask_{unlinked_layer.uid}_{mask_obj.uid}"
+                            node_builder.add_node(mask_node_name, "ShaderNodeGroup", {"node_tree": mask_obj.node_tree})
+                            # Determine mask value output
+                            output_names = {
+                                item.name for item in mask_obj.node_tree.interface.items_tree
+                                if getattr(item, "item_type", "") == "SOCKET" and getattr(item, "in_out", "") == "OUTPUT"
+                            }
+                            mask_value_node = mask_node_name
+                            mask_value_socket = "Value"
+                            if "Value" not in output_names:
+                                mask_bw_node = f"mask_bw_{unlinked_layer.uid}_{mask_obj.uid}"
+                                node_builder.add_node(mask_bw_node, "ShaderNodeRGBToBW")
+                                node_builder.link(mask_node_name, mask_bw_node, "Color", "Color")
+                                mask_value_node = mask_bw_node
+                                mask_value_socket = "Val"
+                            
+                            blend_mode = getattr(mask_obj, 'blend_mode', 'MULTIPLY')
+                            if mask_chain_node is None:
+                                # First mask starts the chain
+                                mask_chain_node = mask_value_node
+                                mask_chain_socket = mask_value_socket
+                            else:
+                                # Chain with previous masks
+                                chain_node = f"mask_chain_{unlinked_layer.uid}_{mask_obj.uid}"
+                                op = blend_mode if blend_mode in ('MULTIPLY', 'ADD', 'SUBTRACT') else 'MULTIPLY'
+                                node_builder.add_node(chain_node, "ShaderNodeMath", {"operation": op})
+                                if blend_mode == 'SUBTRACT':
+                                    node_builder.link(mask_chain_node, chain_node, mask_chain_socket, 0)
+                                    node_builder.link(mask_value_node, chain_node, mask_value_socket, 1)
+                                else:
+                                    node_builder.link(mask_chain_node, chain_node, mask_chain_socket, 0)
+                                    node_builder.link(mask_value_node, chain_node, mask_value_socket, 1)
+                                mask_chain_node = chain_node
+                                mask_chain_socket = "Value"
+                    
+                        if mask_chain_node is not None:
+                            node_builder.link(mask_chain_node, layer_identifier, mask_chain_socket, "Mask")
                 if layer.is_clip and not previous_data.clip_mode:
                     previous_data.clip_mode = True
                     clip_nt = get_alpha_over_nodetree()

@@ -104,14 +104,15 @@ class MAT_PT_UL_LayerList(PSContextMixin, UIList):
             # Display and edit only the layer name without the prefix
             main_row.prop(linked_item, "display_name", text="", emboss=False)
 
-            if hasattr(linked_item, "layer_masks") and len(linked_item.layer_masks) > 0:
+            # Masks are per-material, so always use 'item' (the actual layer in this material) not 'linked_item' (source layer)
+            if hasattr(item, "layer_masks") and len(item.layer_masks) > 0:
                 mask_row = main_row.row(align=True)
                 mask_row.separator(factor=0.25)
                 mask_row.prop(
-                    linked_item,
+                    item,
                     "use_masks",
                     text="",
-                    icon=(icon_parser('MOD_MASK', 'MOD_MASK') if linked_item.use_masks else icon_parser('MOD_MASK_OFF', 'MOD_MASK')),
+                    icon=(icon_parser('MOD_MASK', 'MOD_MASK') if item.use_masks else icon_parser('MOD_MASK_OFF', 'MOD_MASK')),
                     emboss=True,
                 )
 
@@ -359,12 +360,13 @@ def get_image(context) -> bpy.types.Image:
 
 def get_active_mask(context):
     ps_ctx = PSContextMixin.parse_context(context)
-    active_layer = ps_ctx.active_layer
-    if not active_layer or not active_layer.layer_masks:
+    # Use unlinked_layer for mask access (masks are per-material)
+    unlinked_layer = ps_ctx.unlinked_layer
+    if not unlinked_layer or not unlinked_layer.layer_masks:
         return None
-    if 0 <= active_layer.active_layer_mask_index < len(active_layer.layer_masks):
-        return active_layer.layer_masks[active_layer.active_layer_mask_index]
-    return active_layer.layer_masks[0] if len(active_layer.layer_masks) > 0 else None
+    if 0 <= unlinked_layer.active_layer_mask_index < len(unlinked_layer.layer_masks):
+        return unlinked_layer.layer_masks[unlinked_layer.active_layer_mask_index]
+    return unlinked_layer.layer_masks[0] if len(unlinked_layer.layer_masks) > 0 else None
 
 class MAT_MT_ImageFilterMenu(PSContextMixin, Menu):
     bl_label = "Image Filter Menu"
@@ -439,9 +441,11 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
         if ps_ctx.ps_object.type == 'MESH' and layer and layer.layer_masks:
             if not is_layer_settings_open:
                 if layer.edit_mask:
-                    finish_row = layout.row(align=True)
-                    finish_row.alert = True
-                    finish_row.operator("paint_system.finish_edit_layer_mask", text="Finish Mask", icon='CHECKMARK')
+                    # Only show "Finish Mask" for image layers
+                    if layer.type == 'IMAGE':
+                        finish_row = layout.row(align=True)
+                        finish_row.alert = True
+                        finish_row.operator("paint_system.finish_edit_layer_mask", text="Finish Mask", icon='CHECKMARK')
                 else:
                     layout.operator("paint_system.edit_layer_mask", text="Edit Mask", icon='GREASEPENCIL')
 
@@ -484,7 +488,6 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                 # box.prop(active_layer, "use_onion_skinning", text="Use Onion Skinning")
             
         elif ps_ctx.ps_object.type == 'MESH':
-            layout.enabled = not ps_ctx.active_layer.lock_layer
             active_layer = ps_ctx.active_layer
             if not active_layer:
                 return
@@ -510,8 +513,12 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
             col = box.column()
             
             # Mask button at the top for all layer types
-            if not active_layer.layer_masks:
-                col.operator("paint_system.new_image_mask_auto", text="Mask", icon='ADD')
+            if not ps_ctx.unlinked_layer or not ps_ctx.unlinked_layer.layer_masks:
+                col.menu("MAT_MT_AddMaskStartMenu", text="Mask", icon='ADD')
+
+            content_col = col.column()
+            content_col.enabled = not active_layer.lock_layer
+            col = content_col
             
             match active_layer.type:
                 case 'IMAGE':
@@ -592,66 +599,51 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                     pass
             
             # Mask panel for all layer types
-            if active_layer.layer_masks:
-                mask_header, mask_panel = layout.panel("layer_mask_panel", default_closed=not active_layer.use_masks)
-                mask_header.prop(active_layer, "use_masks", text="")
+            # Use unlinked_layer instead of active_layer to show per-material masks (not source layer masks)
+            if ps_ctx.unlinked_layer and ps_ctx.unlinked_layer.layer_masks:
+                mask_header, mask_panel = layout.panel("layer_mask_panel", default_closed=not ps_ctx.unlinked_layer.use_masks)
+                mask_header.prop(ps_ctx.unlinked_layer, "use_masks", text="")
                 mask_header.label(text="Mask", icon='MOD_MASK')
-                if active_layer.edit_mask:
-                    finish_row = mask_header.row(align=True)
-                    finish_row.alert = True
-                    finish_row.operator("paint_system.finish_edit_layer_mask", text="Finish Edit", icon='CHECKMARK')
+                if ps_ctx.unlinked_layer.edit_mask:
+                    # Only show "Finish Edit" for image layers (non-image layers auto-edit masks)
+                    if ps_ctx.unlinked_layer.type == 'IMAGE':
+                        finish_row = mask_header.row(align=True)
+                        finish_row.alert = True
+                        finish_row.operator("paint_system.finish_edit_layer_mask", text="Finish Edit", icon='CHECKMARK')
                 else:
                     mask_header.operator("paint_system.edit_layer_mask", text="Edit Mask", icon='GREASEPENCIL')
+                mask_header.menu("MAT_MT_MaskActionsMenu", text="", icon='COLLAPSEMENU')
 
-                if mask_panel and active_layer.use_masks:
+                if mask_panel and ps_ctx.unlinked_layer.use_masks:
                     active_mask = None
-                    if 0 <= active_layer.active_layer_mask_index < len(active_layer.layer_masks):
-                        active_mask = active_layer.layer_masks[active_layer.active_layer_mask_index]
-                    elif len(active_layer.layer_masks) > 0:
-                        active_mask = active_layer.layer_masks[0]
+                    if 0 <= ps_ctx.unlinked_layer.active_layer_mask_index < len(ps_ctx.unlinked_layer.layer_masks):
+                        active_mask = ps_ctx.unlinked_layer.layer_masks[ps_ctx.unlinked_layer.active_layer_mask_index]
+                    elif len(ps_ctx.unlinked_layer.layer_masks) > 0:
+                        active_mask = ps_ctx.unlinked_layer.layer_masks[0]
 
-                    # Show clarification text when editing mask
-                    if active_layer.edit_mask:
+                    # Show alert when editing mask
+                    if ps_ctx.unlinked_layer.edit_mask:
                         info_box = mask_panel.box()
+                        info_box.alert = True
                         info_row = info_box.row()
-                        info_row.label(text="Only brightness values are used for masking", icon='INFO')
+                        info_row.label(text="Mask image is selected", icon='INFO')
 
                     actions_box = mask_panel.box()
                     actions_row = actions_box.row(align=True)
                     actions_row.scale_y = 1.5
-                    
-                    # All buttons equal width (1:1:1 ratio using splits)
-                    split = actions_row.split(factor=0.333, align=True)
+
+                    split = actions_row.split(factor=0.5, align=True)
                     resize_col = split.column(align=True)
-                    split = split.split(factor=0.5, align=True)
-                    invert_col = split.column(align=True)
                     delete_col = split.column(align=True)
 
                     has_mask_image = bool(active_mask and active_mask.mask_image)
                     if has_mask_image:
                         resize_op = resize_col.operator("paint_system.resize_image", text="", icon='CON_SIZELIMIT')
                         resize_op.image_name = active_mask.mask_image.name
-                        invert_op = invert_col.operator("paint_system.invert_colors", text="", icon='MOD_MASK')
-                        invert_op.image_name = active_mask.mask_image.name
                     else:
                         resize_col.operator("paint_system.resize_image", text="", icon='CON_SIZELIMIT', emboss=False).enabled = False
-                        invert_col.operator("paint_system.invert_colors", text="", icon='MOD_MASK', emboss=False).enabled = False
 
                     delete_col.operator("paint_system.delete_layer_mask", text="", icon='TRASH')
-
-                    # Clear and Fill buttons
-                    state_row = actions_box.row(align=True)
-                    state_row.scale_y = 1.5
-                    split = state_row.split(factor=0.5, align=True)
-                    clear_col = split.column(align=True)
-                    fill_col = split.column(align=True)
-                    
-                    if has_mask_image:
-                        clear_col.operator("paint_system.clear_mask", text="", icon='RADIOBUT_ON')
-                        fill_col.operator("paint_system.fill_mask", text="", icon='RADIOBUT_OFF')
-                    else:
-                        clear_col.operator("paint_system.clear_mask", text="", icon='RADIOBUT_ON', emboss=False).enabled = False
-                        fill_col.operator("paint_system.fill_mask", text="", icon='RADIOBUT_OFF', emboss=False).enabled = False
 
                     mask_box = mask_panel.box()
 
@@ -674,9 +666,9 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                                         'bl_idname': 'ShaderNodeTexImage',
                                         'image': active_mask.mask_image,
                                     }, connected_to_output=False)
-                            if not mask_image_node and active_layer.node_tree:
+                            if not mask_image_node and ps_ctx.unlinked_layer.node_tree:
                                 # Legacy fallback for older node layouts
-                                mask_image_node = find_node(active_layer.node_tree, {
+                                mask_image_node = find_node(ps_ctx.unlinked_layer.node_tree, {
                                     'bl_idname': 'ShaderNodeTexImage',
                                     'name': 'ps_active_mask_source',
                                 }, connected_to_output=False)
@@ -696,7 +688,7 @@ class MAT_PT_LayerSettings(PSContextMixin, Panel):
                                     mask_settings_col.prop(img, "alpha_mode", text="Alpha")
             
             # Draw ui for adjustable sockets
-            if active_layer.type == 'NODE_GROUP':
+            if ps_ctx.unlinked_layer and ps_ctx.unlinked_layer.type == 'NODE_GROUP':
                 header, panel = layout.panel("node_group_panel")
                 header.label(text="Sockets Settings:")
                 if panel:
@@ -1040,6 +1032,33 @@ class MAT_MT_MaskImageMenu(PSContextMixin, Menu):
         resize_op.image_name = active_mask.mask_image.name
         invert_op = layout.operator("paint_system.invert_colors", icon="MOD_MASK")
         invert_op.image_name = active_mask.mask_image.name
+        invert_op.force_opaque_alpha = True
+
+
+class MAT_MT_MaskActionsMenu(PSContextMixin, Menu):
+    bl_label = "Mask Actions"
+    bl_idname = "MAT_MT_MaskActionsMenu"
+
+    def draw(self, context):
+        layout = self.layout
+        active_mask = get_active_mask(context)
+        if not active_mask or not active_mask.mask_image:
+            layout.label(text="No mask image", icon='INFO')
+            return
+
+        invert_op = layout.operator("paint_system.invert_colors", text="Invert Mask", icon='MOD_MASK')
+        invert_op.image_name = active_mask.mask_image.name
+        invert_op.force_opaque_alpha = True
+        layout.separator()
+        
+        # Use custom mask preset icons if available
+        black_icon_id = get_icon('mask_black')
+        white_icon_id = get_icon('mask_white')
+        
+        layout.operator("paint_system.fill_mask", text="Reset to Hide All (Black)", 
+                       icon_value=black_icon_id if black_icon_id else 'RADIOBUT_OFF')
+        layout.operator("paint_system.clear_mask", text="Reset to Show All (White)", 
+                       icon_value=white_icon_id if white_icon_id else 'RADIOBUT_ON')
 
 class MAT_PT_ImageLayerSettings(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_ImageLayerSettings'
@@ -1182,21 +1201,21 @@ class MAT_MT_LayerMenu(PSContextMixin, Menu):
             icon="TRIA_DOWN_BAR"
         )
         
-        # Rename layer (edit suffix only)
-        layout.separator()
-        layout.operator(
-            "paint_system.rename_layer_suffix",
-            text="Rename Layer",
-            icon="FILE_TEXT"
-        )
+        # Rename layer (edit suffix only) - TODO: implement
+        # layout.separator()
+        # layout.operator(
+        #     "paint_system.rename_layer_suffix",
+        #     text="Rename Layer",
+        #     icon="FILE_TEXT"
+        # )
         
         # Divider before utility actions
-        layout.separator()
-        layout.operator(
-            "paint_system.sync_names",
-            text="Sync Names",
-            icon="FILE_REFRESH"
-        )
+        # layout.separator()
+        # layout.operator(
+        #     "paint_system.sync_names",
+        #     text="Sync Names",
+        #     icon="FILE_REFRESH"
+        # )
 
 
 class MAT_MT_AddImageLayerMenu(Menu):
@@ -1254,6 +1273,23 @@ class MAT_MT_AddGeometryLayerMenu(Menu):
         for idx, (node_type, name, description) in enumerate(GEOMETRY_TYPE_ENUM):
             layout.operator("paint_system.new_geometry_layer",
                 text=name, icon='MESH_DATA' if idx == 0 else 'NONE').geometry_type = node_type
+
+
+class MAT_MT_AddMaskStartMenu(Menu):
+    bl_label = "Mask Start"
+    bl_idname = "MAT_MT_AddMaskStartMenu"
+
+    def draw(self, context):
+        layout = self.layout
+        black_icon_id = get_icon('mask_black')
+        white_icon_id = get_icon('mask_white')
+        
+        op = layout.operator("paint_system.new_image_mask_auto", text="Hide All (Black Mask)", 
+                            icon_value=black_icon_id if black_icon_id else 'RADIOBUT_OFF')
+        op.mask_start_mode = 'TRANSPARENT'
+        op = layout.operator("paint_system.new_image_mask_auto", text="Show All (White Mask)", 
+                            icon_value=white_icon_id if white_icon_id else 'RADIOBUT_ON')
+        op.mask_start_mode = 'OPAQUE'
 
 class MAT_MT_AddLayerMenu(Menu):
     bl_label = "Add Layer"
@@ -1325,6 +1361,7 @@ class PAINTSYSTEM_UL_Actions(PSContextMixin, UIList):
 classes = (
     MAT_PT_UL_LayerList,
     MAT_MT_AddLayerMenu,
+    MAT_MT_AddMaskStartMenu,
     MAT_MT_AddImageLayerMenu,
     MAT_MT_AddGradientLayerMenu,
     MAT_MT_AddAdjustmentLayerMenu,
@@ -1336,6 +1373,7 @@ classes = (
     MAT_PT_Layers,
     MAT_MT_ImageMenu,
     MAT_MT_MaskImageMenu,
+    MAT_MT_MaskActionsMenu,
     MAT_PT_LayerSettings,
     MAT_PT_GreasePencilMaskSettings,
     MAT_PT_GreasePencilOnionSkinningSettings,

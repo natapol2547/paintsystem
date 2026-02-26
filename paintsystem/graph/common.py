@@ -111,7 +111,7 @@ def get_library_object(object_name: str, library_filename: str = LIBRARY_FILENAM
         data_to.objects = [object_name]
     return bpy.data.objects.get(object_name)
 
-def create_mixing_graph(builder: NodeTreeBuilder, layer: "Layer", color_node_name: str = None, color_socket: str = None, alpha_node_name: str = None, alpha_socket: str = None, as_subgraph: bool = False) -> NodeTreeBuilder:
+def create_mixing_graph(builder: NodeTreeBuilder, layer: "Layer", color_node_name: str = None, color_socket: str = None, alpha_node_name: str = None, alpha_socket: str = None, as_subgraph: bool = False, use_mask: bool = False) -> NodeTreeBuilder:
     blend_mode = get_layer_blend_type(layer) if layer is not None else "MIX"
     pre_mix = get_library_nodetree(".PS Pre Mix")
     post_mix = get_library_nodetree(".PS Post Mix")
@@ -131,11 +131,19 @@ def create_mixing_graph(builder: NodeTreeBuilder, layer: "Layer", color_node_nam
     builder.link(input_node_name, "pre_mix", "Color", "Color")
     builder.link(input_node_name, "pre_mix", "Alpha", "Alpha")
     builder.link("pre_mix", "mix_rgb", "Color", "A")
-    builder.link("pre_mix", "mix_rgb", "Over Alpha", "Factor")
+    if use_mask and not as_subgraph:
+        # Insert mask multiply: pre_mix.Over Alpha × group_input.Mask → mix_rgb.Factor & post_mix.Over Alpha
+        builder.add_node("mask_multiply", "ShaderNodeMath", {"operation": "MULTIPLY"})
+        builder.link("pre_mix", "mask_multiply", "Over Alpha", 0)
+        builder.link(input_node_name, "mask_multiply", "Mask", 1)
+        builder.link("mask_multiply", "mix_rgb", "Value", "Factor")
+        builder.link("mask_multiply", "post_mix", "Value", "Over Alpha")
+    else:
+        builder.link("pre_mix", "mix_rgb", "Over Alpha", "Factor")
+        builder.link("pre_mix", "post_mix", "Over Alpha", "Over Alpha")
     if color_node_name is not None and color_socket is not None:
         builder.link(color_node_name, "mix_rgb", color_socket, "B")
     builder.link("mix_rgb", "post_mix", "Result", "Color")
-    builder.link("pre_mix", "post_mix", "Over Alpha", "Over Alpha")
     builder.link(input_node_name, "post_mix", "Alpha", "Alpha")
     builder.link(input_node_name, "post_mix", "Clip", "Clip")
     builder.link("post_mix", output_node_name, "Color", "Color")

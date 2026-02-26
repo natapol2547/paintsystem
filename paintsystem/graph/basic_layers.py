@@ -6,7 +6,7 @@ import bpy
 from bpy.types import Context
 
 from .nodetree_builder import END
-from .common import create_mask_mixing_graph, create_mixing_graph, NodeTreeBuilder, create_coord_graph, get_library_nodetree, get_layer_blend_type, set_layer_blend_type, DEFAULT_PS_UV_MAP_NAME
+from .common import create_mixing_graph, NodeTreeBuilder, create_coord_graph, get_library_nodetree, get_layer_blend_type, set_layer_blend_type, DEFAULT_PS_UV_MAP_NAME
 
 if TYPE_CHECKING:
     from ..data import Layer, LayerMask
@@ -61,7 +61,8 @@ class PSNodeTreeBuilder:
             as_subgraph: Whether to create the graph as a subgraph
             **kwargs: Additional arguments passed to NodeTreeBuilder
         """
-        self._builder = NodeTreeBuilder(layer.node_tree, frame_name, version=version, verbose=True, **kwargs)
+        verbose = kwargs.pop("verbose", False)
+        self._builder = NodeTreeBuilder(layer.node_tree, frame_name, version=version, verbose=verbose, **kwargs)
         self._layer = layer
         
         self.mask_builders = []
@@ -87,6 +88,7 @@ class PSNodeTreeBuilder:
             None,  # Don't link alpha yet - will be done after modifiers
             None,
             as_subgraph=as_subgraph,
+            use_mask=True,
         )
         
         # Now link the sources (or final modifier outputs) to the mixing graph
@@ -132,56 +134,12 @@ class PSNodeTreeBuilder:
     
     def compile(self, *args, **kwargs):
         """Compile the graph, ensuring modifier chains are properly linked"""
-        # Compile mask builders first
+        # Compile mask builders first (builds each mask's own internal node tree)
         for mask_builder in self.mask_builders:
             mask_builder.compile(*args, **kwargs)
         
-        # Link masks to alpha if any exist
-        if self.mask_builders and hasattr(self._layer, 'layer_masks') and self._layer.layer_masks:
-            for i, mask_obj in enumerate(self._layer.layer_masks):
-                if mask_obj.enabled and mask_obj.node_tree:
-                    # Add mask node group to the layer graph
-                    mask_node_name = f"mask_{mask_obj.uid}"
-                    self._builder.add_node(mask_node_name, "ShaderNodeGroup", {"node_tree": mask_obj.node_tree})
-                    
-                    # Create multiply node for blending
-                    multiply_node = f"mask_multiply_{mask_obj.uid}"
-                    blend_mode = getattr(mask_obj, 'blend_mode', 'MULTIPLY')
-                    
-                    if blend_mode == 'MULTIPLY':
-                        self._builder.add_node(multiply_node, "ShaderNodeMath", {"operation": "MULTIPLY"})
-                        # Link mask output to multiply input 0
-                        self._builder.link(mask_node_name, multiply_node, "Color", 0)
-                        # Link current alpha to multiply input 1
-                        if self._alpha_source_node:
-                            self._builder.link(self._alpha_source_node, multiply_node, self._alpha_source_socket, 1)
-                        else:
-                            # Default to 1.0
-                            self._builder.add_node(f"alpha_default_{i}", "ShaderNodeValue", default_outputs={0: 1.0})
-                            self._builder.link(f"alpha_default_{i}", multiply_node, "Value", 1)
-                    elif blend_mode == 'ADD':
-                        self._builder.add_node(multiply_node, "ShaderNodeMath", {"operation": "ADD"})
-                        self._builder.link(mask_node_name, multiply_node, "Color", 0)
-                        if self._alpha_source_node:
-                            self._builder.link(self._alpha_source_node, multiply_node, self._alpha_source_socket, 1)
-                        else:
-                            self._builder.add_node(f"alpha_default_{i}", "ShaderNodeValue", default_outputs={0: 1.0})
-                            self._builder.link(f"alpha_default_{i}", multiply_node, "Value", 1)
-                    elif blend_mode == 'SUBTRACT':
-                        self._builder.add_node(multiply_node, "ShaderNodeMath", {"operation": "SUBTRACT"})
-                        if self._alpha_source_node:
-                            self._builder.link(self._alpha_source_node, multiply_node, self._alpha_source_socket, 0)
-                        else:
-                            self._builder.add_node(f"alpha_default_{i}", "ShaderNodeValue", default_outputs={0: 1.0})
-                            self._builder.link(f"alpha_default_{i}", multiply_node, "Value", 0)
-                        self._builder.link(mask_node_name, multiply_node, "Color", 1)
-                    
-                    # Update alpha source to point to the mask multiply result
-                    self._alpha_source_node = multiply_node
-                    self._alpha_source_socket = "Value"
-            
-            # Re-link alpha with the updated source
-            self._update_mixing_graph_links()
+        # Masks are now applied at the channel graph level via the "Mask" input socket,
+        # not inside the layer node tree. No mask nodes are added here.
             
         # Update mixing graph links before compiling to ensure modifiers are connected
         self._update_mixing_graph_links()
@@ -599,7 +557,9 @@ class PSNodeTreeBuilder:
             for mask in layer.layer_masks:
                 if not mask.uid:
                     mask.uid = str(uuid.uuid4())
-                builder.mask_builders.append(cls._create_mask_graph(mask, context).builder)
+                mask_builder = cls._create_mask_graph(mask, context)
+                if mask_builder is not None:
+                    builder.mask_builders.append(mask_builder)
         
         return builder
 
@@ -607,8 +567,32 @@ class PSNodeTreeBuilder:
     def _create_mask_graph(cls, layer_mask: "LayerMask", context: Context):
         """Create a mask graph for an IMAGE mask type only."""
         layer_pre_processing(layer_mask, context)
-        
-        builder = cls(layer_mask, IMAGE_LAYER_VERSION, "source", "Color", as_subgraph=True)
+
+        if not getattr(layer_mask, "node_tree", None):
+            mask_name = getattr(layer_mask, "layer_name", "Mask") or "Mask"
+            layer_mask.node_tree = bpy.data.node_groups.new(
+                name=f"PS_Mask ({mask_name})",
+                type='ShaderNodeTree'
+            )
+        try:
+            output_names = {
+                item.name
+                for item in layer_mask.node_tree.interface.items_tree
+                if getattr(item, "item_type", "") == "SOCKET" and getattr(item, "in_out", "") == "OUTPUT"
+            }
+            if "Color" not in output_names:
+                layer_mask.node_tree.interface.new_socket("Color", in_out="OUTPUT", socket_type="NodeSocketColor")
+            if "Value" not in output_names:
+                layer_mask.node_tree.interface.new_socket("Value", in_out="OUTPUT", socket_type="NodeSocketFloat")
+        except Exception:
+            pass
+
+        if not getattr(layer_mask, "node_tree", None):
+            return None
+
+        builder = NodeTreeBuilder(layer_mask.node_tree, frame_name="Mask", version=IMAGE_LAYER_VERSION)
+        builder.add_node("group_input", "NodeGroupInput")
+        builder.add_node("group_output", "NodeGroupOutput")
         
         # Only IMAGE masks are supported
         if layer_mask.type != "IMAGE":
@@ -617,13 +601,16 @@ class PSNodeTreeBuilder:
         if layer_mask.mask_image:
             layer_mask.mask_image.name = layer_mask.name
         img = layer_mask.mask_image
-        create_mask_mixing_graph(builder, layer_mask, "source", "Color")
         builder.add_node("source", "ShaderNodeTexImage", {"image.force": img, "interpolation": "Closest", "name": "source"})
-        builder.create_coord_graph("source", "Vector")
-        # Convert mask color to grayscale and output
+
+        coord_type = getattr(layer_mask, "coord_type", "UV")
+        uv_map_name = getattr(layer_mask, "mask_uv_map", "")
+        create_coord_graph(builder, layer_mask, coord_type, uv_map_name, "source", "Vector")
+
         builder.add_node("rgb_to_bw", "ShaderNodeRGBToBW")
-        builder.link("mix_rgb", "rgb_to_bw", "Result", "Color")
-        builder.link("rgb_to_bw", END, "Val", "Color")
+        builder.link("source", "rgb_to_bw", "Color", "Color")
+        builder.link("source", "group_output", "Color", "Color")
+        builder.link("rgb_to_bw", "group_output", "Val", "Value")
         return builder
 
 def get_layer_version_for_type(type: str) -> int:

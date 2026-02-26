@@ -867,6 +867,11 @@ class PAINTSYSTEM_OT_PasteLayer(PSContextMixin, Operator):
                 continue
             if self.linked:
                 new_layer = ps_ctx.active_channel.create_layer(context, layer.layer_name, "BLANK" if layer.type != "FOLDER" else "FOLDER", insert_at="CURSOR" if idx == 0 else "AFTER", linked_layer_uid=clipboard_layer.uid, linked_material=clipboard_layer.material)
+                # Masks are per-material and should not be copied to linked layers
+                # Explicitly clear any masks that may have been created
+                new_layer.layer_masks.clear()
+                new_layer.use_masks = False
+                new_layer.edit_mask = False
             else:
                 new_layer = ps_ctx.active_channel.create_layer(context, layer.layer_name, layer.type, insert_at="CURSOR" if idx == 0 else "AFTER")
                 new_layer.copy_layer_data(layer)

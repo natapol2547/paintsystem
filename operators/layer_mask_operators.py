@@ -10,8 +10,10 @@ from bpy.utils import register_classes_factory
 from bpy_extras.node_utils import connect_sockets
 import math
 import mathutils
+import numpy as np
 
 from ..paintsystem.list_manager import ListManager
+from ..paintsystem.image import blender_image_to_numpy, set_image_pixels
 
 from ..paintsystem.data import (
     ACTION_BIND_ENUM,
@@ -49,13 +51,36 @@ class PAINTSYSTEM_OT_NewImageMask(PAINTSYSTEM_OT_NewImage):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        active_layer = ps_ctx.active_layer
-        return active_layer is not None and len(active_layer.layer_masks) == 0
+        # Use unlinked_layer for mask checks (masks are per-material)
+        unlinked_layer = ps_ctx.unlinked_layer
+        if unlinked_layer is None:
+            return False
+        valid_masks = [m for m in unlinked_layer.layer_masks if getattr(m, "type", "") == 'IMAGE' and getattr(m, "mask_image", None)]
+        return len(valid_masks) == 0
+
+    @classmethod
+    def description(cls, context, properties):
+        mode = getattr(properties, "mask_start_mode", None)
+        if mode == 'TRANSPARENT':
+            return "Starts fully hidden. Paint white to reveal parts."
+        if mode == 'OPAQUE':
+            return "Starts fully visible. Paint black to hide parts."
+        return cls.bl_description
 
     multiple_objects: BoolProperty(
         name="Multiple Objects",
         description="Run the operator on multiple objects",
         default=False,
+    )
+
+    mask_start_mode: EnumProperty(
+        name="Mask Start",
+        description="Choose how the mask starts: hidden or visible.",
+        items=[
+            ('TRANSPARENT', "Hide All (Black Mask)", "Starts fully hidden. Paint white to reveal parts."),
+            ('OPAQUE', "Show All (White Mask)", "Starts fully visible. Paint black to hide parts."),
+        ],
+        default='TRANSPARENT',
     )
 
     @staticmethod
@@ -110,10 +135,11 @@ class PAINTSYSTEM_OT_NewImageMask(PAINTSYSTEM_OT_NewImage):
     @classmethod
     def build_mask_name(cls, context) -> str:
         ps_ctx = cls.parse_context(context)
-        active_layer = ps_ctx.active_layer
-        if not active_layer:
+        # Use unlinked_layer for mask names (masks are per-material)
+        unlinked_layer = ps_ctx.unlinked_layer
+        if not unlinked_layer:
             return "Mask"
-        return get_next_unique_name("Mask", [layer_mask.layer_name for layer_mask in active_layer.layer_masks])
+        return get_next_unique_name("Mask", [layer_mask.layer_name for layer_mask in unlinked_layer.layer_masks])
 
     def get_coord_type(self, context):
         PSUVOptionsMixin.get_coord_type(self, context)
@@ -127,18 +153,23 @@ class PAINTSYSTEM_OT_NewImageMask(PAINTSYSTEM_OT_NewImage):
             img.colorspace_settings.name = 'Non-Color'
         except Exception:
             pass
-        if fill_white:
-            try:
-                img.generated_color = (1.0, 1.0, 1.0, 1.0)
-            except Exception:
-                pass
-            try:
-                pixel_count = len(img.pixels)
-                if pixel_count:
+        
+        try:
+            pixel_count = len(img.pixels)
+            if pixel_count:
+                if fill_white:
+                    # Fill with white (show all)
+                    img.generated_color = (1.0, 1.0, 1.0, 1.0)
                     img.pixels.foreach_set(array('f', [1.0]) * pixel_count)
-                    img.update()
-            except Exception:
-                pass
+                else:
+                    # Fill with black (hide all)
+                    img.generated_color = (0.0, 0.0, 0.0, 1.0)
+                    pixels = array('f', [0.0, 0.0, 0.0, 1.0] * (pixel_count // 4))
+                    img.pixels.foreach_set(pixels)
+                img.update()
+        except Exception:
+            pass
+        
         save_image(img)
 
     def invoke(self, context, event):
@@ -166,12 +197,22 @@ class PAINTSYSTEM_OT_NewImageMask(PAINTSYSTEM_OT_NewImage):
         self.store_coord_type(context)
         ps_ctx = self.parse_context(context)
         active_layer = ps_ctx.active_layer
-        if active_layer and len(active_layer.layer_masks) > 0:
+        # Use unlinked_layer for mask operations (masks are per-material)
+        unlinked_layer = ps_ctx.unlinked_layer
+
+        valid_masks = [m for m in unlinked_layer.layer_masks if getattr(m, "type", "") == 'IMAGE' and getattr(m, "mask_image", None)] if unlinked_layer else []
+        if unlinked_layer and valid_masks:
             self.report({'WARNING'}, "Only one mask is supported per layer")
             return {'CANCELLED'}
+
+        if unlinked_layer and len(unlinked_layer.layer_masks) > 0 and not valid_masks:
+            for index in reversed(range(len(unlinked_layer.layer_masks))):
+                unlinked_layer.layer_masks.remove(index)
+            unlinked_layer.active_layer_mask_index = 0
+
         if self.image_add_type == 'NEW':
             img = self.create_image(context)
-            self._configure_mask_image(img, fill_white=True)
+            self._configure_mask_image(img, fill_white=self.mask_start_mode == 'OPAQUE')
         elif self.image_add_type == 'IMPORT':
             img = bpy.data.images.load(self.filepath, check_existing=True)
             if not img:
@@ -189,9 +230,9 @@ class PAINTSYSTEM_OT_NewImageMask(PAINTSYSTEM_OT_NewImage):
                 self.report({'ERROR'}, "Image not found")
                 return False
             self._configure_mask_image(img)
-        active_layer.use_masks = True
+        unlinked_layer.use_masks = True
         mask_name = self.build_mask_name(context)
-        ps_ctx.active_layer.create_layer_mask(
+        unlinked_layer.create_layer_mask(
             context,
             mask_name,
             'IMAGE',
@@ -200,11 +241,24 @@ class PAINTSYSTEM_OT_NewImageMask(PAINTSYSTEM_OT_NewImage):
             mask_uv_map=self.uv_map_name,
             enabled=True,
         )
-        active_layer.active_layer_mask_index = max(0, len(active_layer.layer_masks) - 1)
-        active_layer.edit_mask = True
+        unlinked_layer.active_layer_mask_index = max(0, len(unlinked_layer.layer_masks) - 1)
+        unlinked_layer.edit_mask = True
+
+        brush = getattr(context.tool_settings.image_paint, "brush", None) if context.tool_settings and context.tool_settings.image_paint else None
+        if brush:
+            paint_value = 1.0 if self.mask_start_mode == 'TRANSPARENT' else 0.0
+            brush.color = (paint_value, paint_value, paint_value)
+            erase_value = 1.0 - paint_value
+            brush.secondary_color = (erase_value, erase_value, erase_value)
+
         update_active_image(context=context)
         
         return {'FINISHED'}
+
+    def draw(self, context):
+        super().draw(context)
+        if self.image_add_type == 'NEW':
+            self.layout.prop(self, "mask_start_mode", expand=True)
 
 
 class PAINTSYSTEM_OT_DeleteLayerMask(PSContextMixin, Operator):
@@ -217,24 +271,25 @@ class PAINTSYSTEM_OT_DeleteLayerMask(PSContextMixin, Operator):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        return ps_ctx.active_layer and ps_ctx.active_layer.use_masks
+        unlinked_layer = ps_ctx.unlinked_layer
+        return unlinked_layer and unlinked_layer.use_masks
     
     def execute(self, context):
         ps_ctx = self.parse_context(context)
-        active_layer = ps_ctx.active_layer
-        if not active_layer or not active_layer.layer_masks:
+        unlinked_layer = ps_ctx.unlinked_layer
+        if not unlinked_layer or not unlinked_layer.layer_masks:
             self.report({'WARNING'}, "No mask to delete")
             return {'CANCELLED'}
 
-        if active_layer.active_layer_mask_index < 0 or active_layer.active_layer_mask_index >= len(active_layer.layer_masks):
-            active_layer.active_layer_mask_index = max(0, min(active_layer.active_layer_mask_index, len(active_layer.layer_masks) - 1))
+        if unlinked_layer.active_layer_mask_index < 0 or unlinked_layer.active_layer_mask_index >= len(unlinked_layer.layer_masks):
+            unlinked_layer.active_layer_mask_index = max(0, min(unlinked_layer.active_layer_mask_index, len(unlinked_layer.layer_masks) - 1))
 
-        lm = ListManager(active_layer, "layer_masks", active_layer, "active_layer_mask_index")
+        lm = ListManager(unlinked_layer, "layer_masks", unlinked_layer, "active_layer_mask_index")
         lm.remove_active_item()
-        if not active_layer.layer_masks:
-            active_layer.use_masks = False
-            active_layer.edit_mask = False
-        active_layer.update_node_tree(context)
+        if not unlinked_layer.layer_masks:
+            unlinked_layer.use_masks = False
+            unlinked_layer.edit_mask = False
+        unlinked_layer.update_node_tree(context)
         update_active_image(context=context)
         return {'FINISHED'}
 
@@ -277,28 +332,28 @@ class PAINTSYSTEM_OT_EditLayerMask(PSContextMixin, Operator):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        active_layer = ps_ctx.active_layer
-        if not active_layer or not active_layer.layer_masks:
+        unlinked_layer = ps_ctx.unlinked_layer
+        if not unlinked_layer or not unlinked_layer.layer_masks:
             return False
-        active_index = active_layer.active_layer_mask_index
-        if active_index < 0 or active_index >= len(active_layer.layer_masks):
+        active_index = unlinked_layer.active_layer_mask_index
+        if active_index < 0 or active_index >= len(unlinked_layer.layer_masks):
             return False
-        layer_mask = active_layer.layer_masks[active_index]
+        layer_mask = unlinked_layer.layer_masks[active_index]
         return layer_mask.type == 'IMAGE' and layer_mask.mask_image is not None
 
     def execute(self, context):
         ps_ctx = self.parse_context(context)
-        active_layer = ps_ctx.active_layer
-        active_index = active_layer.active_layer_mask_index
-        if active_index < 0 or active_index >= len(active_layer.layer_masks):
+        unlinked_layer = ps_ctx.unlinked_layer
+        active_index = unlinked_layer.active_layer_mask_index
+        if active_index < 0 or active_index >= len(unlinked_layer.layer_masks):
             self.report({'ERROR'}, "No active mask")
             return {'CANCELLED'}
-        layer_mask = active_layer.layer_masks[active_index]
+        layer_mask = unlinked_layer.layer_masks[active_index]
         if layer_mask.type != 'IMAGE' or not layer_mask.mask_image:
             self.report({'ERROR'}, "Active mask must be an image mask")
             return {'CANCELLED'}
-        active_layer.use_masks = True
-        active_layer.edit_mask = True
+        unlinked_layer.use_masks = True
+        unlinked_layer.edit_mask = True
         update_active_image(context=context)
         
         return {'FINISHED'}
@@ -314,15 +369,15 @@ class PAINTSYSTEM_OT_FinishEditLayerMask(PSContextMixin, Operator):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        active_layer = ps_ctx.active_layer
-        return active_layer is not None and active_layer.edit_mask
+        unlinked_layer = ps_ctx.unlinked_layer
+        return unlinked_layer is not None and unlinked_layer.edit_mask
 
     def execute(self, context):
         ps_ctx = self.parse_context(context)
-        active_layer = ps_ctx.active_layer
+        unlinked_layer = ps_ctx.unlinked_layer
         
         # Switch canvas back to layer image, keep in PAINT_TEXTURE mode
-        active_layer.edit_mask = False
+        unlinked_layer.edit_mask = False
         update_active_image(context=context)
         return {'FINISHED'}
 
@@ -337,43 +392,42 @@ class PAINTSYSTEM_OT_ClearMask(PSContextMixin, Operator):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        active_layer = ps_ctx.active_layer
-        if not active_layer or not active_layer.layer_masks:
+        unlinked_layer = ps_ctx.unlinked_layer
+        if not unlinked_layer or not unlinked_layer.layer_masks:
             return False
-        active_index = active_layer.active_layer_mask_index
-        if active_index < 0 or active_index >= len(active_layer.layer_masks):
+        active_index = unlinked_layer.active_layer_mask_index
+        if active_index < 0 or active_index >= len(unlinked_layer.layer_masks):
             return False
-        layer_mask = active_layer.layer_masks[active_index]
+        layer_mask = unlinked_layer.layer_masks[active_index]
         return layer_mask.type == 'IMAGE' and layer_mask.mask_image is not None
 
     def execute(self, context):
         ps_ctx = self.parse_context(context)
-        active_layer = ps_ctx.active_layer
-        active_index = active_layer.active_layer_mask_index
+        unlinked_layer = ps_ctx.unlinked_layer
+        active_index = unlinked_layer.active_layer_mask_index
         
-        if active_index < 0 or active_index >= len(active_layer.layer_masks):
+        if active_index < 0 or active_index >= len(unlinked_layer.layer_masks):
             self.report({'ERROR'}, "No active mask")
             return {'CANCELLED'}
         
-        layer_mask = active_layer.layer_masks[active_index]
+        layer_mask = unlinked_layer.layer_masks[active_index]
         if not layer_mask.mask_image:
             self.report({'ERROR'}, "Mask has no image")
             return {'CANCELLED'}
         
         img = layer_mask.mask_image
         try:
-            # Fill with white (1.0, 1.0, 1.0) RGB, keep alpha at 1.0
-            pixel_count = len(img.pixels)
-            if pixel_count:
-                # Each pixel has 4 values (R, G, B, A), set RGB while preserving alpha
-                pixels = list(img.pixels[:])
-                for i in range(0, pixel_count, 4):
-                    pixels[i] = 1.0    # R
-                    pixels[i+1] = 1.0  # G
-                    pixels[i+2] = 1.0  # B
-                    # Keep i+3 (alpha) unchanged
-                img.pixels[:] = pixels
-                img.update()
+            image_tiles = blender_image_to_numpy(img)
+            if image_tiles is None:
+                self.report({'ERROR'}, "Failed to read mask image pixels")
+                return {'CANCELLED'}
+
+            for tile_number, tile_pixels in image_tiles.tiles.items():
+                white_tile = np.ones_like(tile_pixels, dtype=np.float32)
+                white_tile[..., 3] = 1.0
+                image_tiles.tiles[tile_number] = white_tile
+
+            set_image_pixels(img, image_tiles)
             save_image(img)
             self.report({'INFO'}, "Mask cleared to white")
         except Exception as e:
@@ -393,43 +447,42 @@ class PAINTSYSTEM_OT_FillMask(PSContextMixin, Operator):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        active_layer = ps_ctx.active_layer
-        if not active_layer or not active_layer.layer_masks:
+        unlinked_layer = ps_ctx.unlinked_layer
+        if not unlinked_layer or not unlinked_layer.layer_masks:
             return False
-        active_index = active_layer.active_layer_mask_index
-        if active_index < 0 or active_index >= len(active_layer.layer_masks):
+        active_index = unlinked_layer.active_layer_mask_index
+        if active_index < 0 or active_index >= len(unlinked_layer.layer_masks):
             return False
-        layer_mask = active_layer.layer_masks[active_index]
+        layer_mask = unlinked_layer.layer_masks[active_index]
         return layer_mask.type == 'IMAGE' and layer_mask.mask_image is not None
 
     def execute(self, context):
         ps_ctx = self.parse_context(context)
-        active_layer = ps_ctx.active_layer
-        active_index = active_layer.active_layer_mask_index
+        unlinked_layer = ps_ctx.unlinked_layer
+        active_index = unlinked_layer.active_layer_mask_index
         
-        if active_index < 0 or active_index >= len(active_layer.layer_masks):
+        if active_index < 0 or active_index >= len(unlinked_layer.layer_masks):
             self.report({'ERROR'}, "No active mask")
             return {'CANCELLED'}
         
-        layer_mask = active_layer.layer_masks[active_index]
+        layer_mask = unlinked_layer.layer_masks[active_index]
         if not layer_mask.mask_image:
             self.report({'ERROR'}, "Mask has no image")
             return {'CANCELLED'}
         
         img = layer_mask.mask_image
         try:
-            # Fill with black (0.0, 0.0, 0.0) RGB, keep alpha at 1.0
-            pixel_count = len(img.pixels)
-            if pixel_count:
-                # Each pixel has 4 values (R, G, B, A), set RGB while preserving alpha
-                pixels = list(img.pixels[:])
-                for i in range(0, pixel_count, 4):
-                    pixels[i] = 0.0    # R
-                    pixels[i+1] = 0.0  # G
-                    pixels[i+2] = 0.0  # B
-                    # Keep i+3 (alpha) unchanged
-                img.pixels[:] = pixels
-                img.update()
+            image_tiles = blender_image_to_numpy(img)
+            if image_tiles is None:
+                self.report({'ERROR'}, "Failed to read mask image pixels")
+                return {'CANCELLED'}
+
+            for tile_number, tile_pixels in image_tiles.tiles.items():
+                black_tile = np.zeros_like(tile_pixels, dtype=np.float32)
+                black_tile[..., 3] = 1.0
+                image_tiles.tiles[tile_number] = black_tile
+
+            set_image_pixels(img, image_tiles)
             save_image(img)
             self.report({'INFO'}, "Mask filled to black")
         except Exception as e:
@@ -449,42 +502,4 @@ classes = (
     PAINTSYSTEM_OT_FillMask,
 )
 
-
-def _get_registered_class(cls):
-    class_name = getattr(cls, "__name__", None)
-    if class_name:
-        registered = getattr(bpy.types, class_name, None)
-        if registered is not None:
-            return registered
-    bl_idname = getattr(cls, "bl_idname", None)
-    if bl_idname:
-        parts = bl_idname.split(".", 1)
-        if len(parts) == 2:
-            rna_name = f"{parts[0].upper()}_OT_{parts[1]}"
-            return getattr(bpy.types, rna_name, None)
-    return None
-
-
-def _safe_unregister_class(cls):
-    if cls is None:
-        return
-    try:
-        bpy.utils.unregister_class(cls)
-    except Exception:
-        pass
-
-def register():
-    for cls in classes:
-        _safe_unregister_class(_get_registered_class(cls))
-        _safe_unregister_class(cls)
-    for cls in classes:
-        try:
-            bpy.utils.register_class(cls)
-        except ValueError as e:
-            if "already registered" not in str(e):
-                raise
-
-def unregister():
-    for cls in reversed(classes):
-        _safe_unregister_class(_get_registered_class(cls))
-        _safe_unregister_class(cls)
+register, unregister = register_classes_factory(classes)
