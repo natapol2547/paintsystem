@@ -122,7 +122,7 @@ class PAINTSYSTEM_OT_IsolateChannel(PSContextMixin, Operator):
         return {'FINISHED'}
 
 
-class PAINTSYSTEM_OT_ToggleBrushEraseAlpha(Operator):
+class PAINTSYSTEM_OT_ToggleBrushEraseAlpha(PSContextMixin, Operator):
     bl_idname = "paint_system.toggle_brush_erase_alpha"
     bl_label = "Toggle Brush Erase Alpha"
     bl_options = {'REGISTER', 'UNDO'}
@@ -134,10 +134,32 @@ class PAINTSYSTEM_OT_ToggleBrushEraseAlpha(Operator):
 
     def execute(self, context):
         tool_settings = UnifiedPaintPanel.paint_settings(context)
-
+        
         if tool_settings is not None:
             brush = tool_settings.brush
             if brush is not None:
+                # Try to get active layer context
+                try:
+                    ps_ctx = self.parse_context(context)
+                    active_layer = ps_ctx.active_layer
+                    unlinked_layer = ps_ctx.unlinked_layer
+                except Exception:
+                    active_layer = None
+                    unlinked_layer = None
+                
+                # During mask edit, toggle between white and black
+                # Use unlinked_layer for mask checks (masks are per-material)
+                if unlinked_layer and unlinked_layer.edit_mask and unlinked_layer.use_masks and unlinked_layer.layer_masks:
+                    color = tuple(brush.color)
+                    gray = max(0.0, min(1.0, float((color[0] + color[1] + color[2]) / 3.0)))
+                    # Swap to opposite extreme (white ↔ black)
+                    new_gray = 0.0 if gray > 0.5 else 1.0
+                    brush.color = (new_gray, new_gray, new_gray)
+                    brush.secondary_color = (1.0 - new_gray, 1.0 - new_gray, 1.0 - new_gray)
+                    brush.blend = 'MIX'
+                    return {'FINISHED'}
+                
+                # Normal mode: toggle ERASE_ALPHA / MIX
                 if brush.blend == 'ERASE_ALPHA':
                     brush.blend = 'MIX'  # Switch back to normal blending
                 else:

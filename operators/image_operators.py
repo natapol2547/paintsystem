@@ -25,31 +25,31 @@ class PAINTSYSTEM_OT_InvertColors(PSImageFilterMixin, Operator):
     bl_idname = "paint_system.invert_colors"
     bl_label = "Invert Colors"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Invert the colors of the active image"
+    bl_description = "Invert the image values"
 
-    invert_r: BoolProperty(default=True)
-    invert_g: BoolProperty(default=True)
-    invert_b: BoolProperty(default=True)
-    invert_a: BoolProperty(default=False)
+    force_opaque_alpha: BoolProperty(
+        name="Force Opaque Alpha",
+        description="Force alpha to 1.0 while inverting",
+        default=False,
+        options={'SKIP_SAVE'},
+    )
 
     def execute(self, context):
         image = self.get_image(context)
         if not image:
             return {'CANCELLED'}
-        with bpy.context.temp_override(**{'edit_image': image}):
-            bpy.ops.image.invert('INVOKE_DEFAULT', invert_r=self.invert_r,
-                                 invert_g=self.invert_g, invert_b=self.invert_b, invert_a=self.invert_a)
+        image_tiles = blender_image_to_numpy(image)
+        if image_tiles is None:
+            self.report({'ERROR'}, "Failed to read image pixels")
+            return {'CANCELLED'}
+        for tile_number, tile_pixels in image_tiles.tiles.items():
+            tile_pixels[..., :3] = 1.0 - tile_pixels[..., :3]
+            if self.force_opaque_alpha:
+                tile_pixels[..., 3] = 1.0
+            image_tiles.tiles[tile_number] = tile_pixels
+        set_image_pixels(image, image_tiles)
+        image.update_tag()
         return {'FINISHED'}
-
-    def invoke(self, context, event):
-        return context.window_manager.invoke_props_dialog(self, width=200)
-
-    def draw(self, context):
-        layout = self.layout
-        layout.prop(self, "invert_r", text="Red")
-        layout.prop(self, "invert_g", text="Green")
-        layout.prop(self, "invert_b", text="Blue")
-        layout.prop(self, "invert_a", text="Alpha")
 
 
 class PAINTSYSTEM_OT_ResizeImage(PSImageFilterMixin, Operator):

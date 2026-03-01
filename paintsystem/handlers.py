@@ -1,6 +1,6 @@
 import bpy
 
-from .versioning import get_layer_parent_map, migrate_global_layer_data, migrate_blend_mode, migrate_source_node, migrate_socket_names, update_layer_name, update_layer_version, update_library_nodetree_version
+from .versioning import get_layer_parent_map, migrate_global_layer_data, migrate_blend_mode, migrate_source_node, migrate_socket_names, migrate_texture_masks_to_image, migrate_mask_node_trees, update_layer_name, update_layer_version, update_library_nodetree_version
 from .version_check import get_latest_version
 from .context import parse_context
 from .data import sort_actions, get_all_layers, is_valid_uuidv4, iter_all_layers
@@ -89,6 +89,8 @@ def load_paint_system_data():
     migrate_blend_mode(layer_parent_map)
     migrate_source_node(layer_parent_map)
     migrate_socket_names(layer_parent_map)
+    migrate_texture_masks_to_image(layer_parent_map)
+    migrate_mask_node_trees(layer_parent_map)
     update_layer_version(layer_parent_map)
     update_layer_name(layer_parent_map)
     update_library_nodetree_version()

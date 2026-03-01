@@ -98,6 +98,52 @@ def migrate_socket_names(layer_parent_map: dict[Layer, LayerParent]):
             layer.auto_update_node_tree = True
             layer.update_node_tree(bpy.context)
 
+def migrate_texture_masks_to_image(layer_parent_map: dict[Layer, LayerParent]):
+    for layer, layer_parent in layer_parent_map.items():
+        if not hasattr(layer, "layer_masks"):
+            continue
+        has_migrated_mask = False
+        for layer_mask in layer.layer_masks:
+            if layer_mask.type == 'TEXTURE':
+                print(
+                    f"Migrating texture mask {layer_mask.name} on layer {layer.name} to image mask"
+                )
+                layer_mask.type = 'IMAGE'
+                has_migrated_mask = True
+        if has_migrated_mask:
+            layer.update_node_tree(bpy.context)
+
+def migrate_mask_node_trees(layer_parent_map: dict[Layer, LayerParent]):
+    for layer, _layer_parent in layer_parent_map.items():
+        if not hasattr(layer, "layer_masks"):
+            continue
+        has_changes = False
+        for layer_mask in layer.layer_masks:
+            if not getattr(layer_mask, "uid", ""):
+                continue
+            if not getattr(layer_mask, "node_tree", None):
+                layer_mask.node_tree = bpy.data.node_groups.new(
+                    name=f"PS_Mask ({getattr(layer_mask, 'layer_name', 'Mask')})",
+                    type='ShaderNodeTree'
+                )
+                has_changes = True
+            try:
+                output_names = {
+                    item.name
+                    for item in layer_mask.node_tree.interface.items_tree
+                    if getattr(item, "item_type", "") == "SOCKET" and getattr(item, "in_out", "") == "OUTPUT"
+                }
+                if "Color" not in output_names:
+                    layer_mask.node_tree.interface.new_socket("Color", in_out="OUTPUT", socket_type="NodeSocketColor")
+                    has_changes = True
+                if "Value" not in output_names:
+                    layer_mask.node_tree.interface.new_socket("Value", in_out="OUTPUT", socket_type="NodeSocketFloat")
+                    has_changes = True
+            except Exception:
+                pass
+        if has_changes:
+            layer.update_node_tree(bpy.context)
+
 def update_layer_version(layer_parent_map: dict[Layer, LayerParent]):
     for layer, layer_parent in layer_parent_map.items():
         # Updating layer to the target version
