@@ -84,7 +84,7 @@ class MAT_PT_UL_LayerList(PSContextMixin, UIList):
             row.enabled = linked_item.opacity > 0 and linked_item.enabled
             draw_layer_icon(linked_item, row)
             main_row.separator()
-            main_row.prop(linked_item, "name", text="", emboss=False)
+            main_row.prop(linked_item, "display_name", text="", emboss=False)
 
             row = main_row.row(align=True)
             row.alignment = 'RIGHT'

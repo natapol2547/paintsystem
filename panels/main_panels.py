@@ -185,6 +185,7 @@ class MAT_PT_PaintSystemMaterialSettings(PSContextMixin, Panel):
             row.prop(ps_ctx.active_group, "name", text="")
             row.operator("paint_system.new_group", icon='ADD', text="")
             row.operator("wm.call_menu", text="", icon="REMOVE").name = "MAT_MT_DeleteGroupMenu"
+            row.operator("paint_system.sync_names", icon='FILE_REFRESH', text="", emboss=True)
 
 class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
     bl_idname = 'MAT_PT_PaintSystemMainPanel'
@@ -197,10 +198,8 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
         layout = self.layout
         ps_ctx = self.parse_context(context)
         row = layout.row(align=True)
-        if ps_ctx.ps_mat_data is None:
-            return
-        groups = ps_ctx.ps_mat_data.groups
-        if ps_ctx.ps_mat_data and groups:
+        if ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.groups:
+            groups = ps_ctx.ps_mat_data.groups
             if len(groups) > 1:
                 row.popover("MAT_PT_PaintSystemGroups", text="", icon="NODETREE")
             row.operator("paint_system.new_group", icon='ADD', text="")
