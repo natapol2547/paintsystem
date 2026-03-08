@@ -316,6 +316,9 @@ class PSImageFilterMixin:
             if not image:
                 self.report({'ERROR'}, "Layer Does not have an image")
                 return None
+        if image and image.is_dirty:
+            save_image(image)
+            # image.reload()
         return image
 
 def wait_for_redraw() -> None:
