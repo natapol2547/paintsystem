@@ -89,6 +89,25 @@ def migrate_blend_mode(layer_parent_map: dict[LegacyLayer, LayerParent]):
             logger.debug(f"Layer {layer.name} has blend mode {blend_mode} but {layer.blend_mode} is set")
             layer.blend_mode = blend_mode
 
+    seen_trees = set()
+    for _mat, _grp, _ch, layer in iter_all_layers():
+        if not hasattr(layer, 'layer_tree') or not layer.layer_tree:
+            continue
+        tree_name = layer.layer_tree.name
+        if tree_name in seen_trees:
+            continue
+        seen_trees.add(tree_name)
+        ld = layer.layer_tree.ps_layer_data
+        if not ld:
+            continue
+        mix_node = ld.mix_node
+        if not mix_node:
+            continue
+        blend_mode = str(mix_node.blend_type)
+        if blend_mode != ld.blend_mode and ld.blend_mode != "PASSTHROUGH":
+            logger.debug(f"V3 layer {layer.name} has mix node blend {blend_mode} but PSLayerData has {ld.blend_mode}")
+            ld.blend_mode = blend_mode
+
 def migrate_source_node(layer_parent_map: dict[LegacyLayer, LayerParent]):
     for layer, layer_parent in layer_parent_map.items():
         # Update every source node to have label 'source'

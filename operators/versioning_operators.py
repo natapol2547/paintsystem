@@ -362,10 +362,6 @@ class PAINTSYSTEM_OT_MigrateV2ToV3(PSContextMixin, Operator):
                 for group in mat.ps_mat_data.groups:
                     for channel in group.channels:
                         for legacy_layer in channel.layers:
-                            layer_data = legacy_layer.get_layer_data()
-                            if layer_data is None:
-                                continue
-
                             if legacy_layer.is_linked:
                                 share_key = (
                                     legacy_layer.linked_material.name if legacy_layer.linked_material else "",
@@ -377,10 +373,22 @@ class PAINTSYSTEM_OT_MigrateV2ToV3(PSContextMixin, Operator):
                             if share_key in linked_tree_map:
                                 target_tree = linked_tree_map[share_key]
                             else:
+                                layer_data = legacy_layer.get_layer_data()
+                                if layer_data is None:
+                                    logger.warning(f"Skipping layer {legacy_layer.name}: could not resolve source data")
+                                    continue
                                 target_tree = layer_data.node_tree
-                                if target_tree:
-                                    migrate_legacy_layer_to_ps_layer_data(layer_data, target_tree)
-                                    linked_tree_map[share_key] = target_tree
+                                if not target_tree:
+                                    target_tree = bpy.data.node_groups.new(
+                                        name=f"PS_Layer ({layer_data.name})",
+                                        type='ShaderNodeTree'
+                                    )
+                                migrate_legacy_layer_to_ps_layer_data(layer_data, target_tree)
+                                try:
+                                    target_tree.ps_layer_data.blend_mode = legacy_layer.blend_mode
+                                except Exception:
+                                    pass
+                                linked_tree_map[share_key] = target_tree
 
                             new_layer = channel.v3_layers.add()
                             new_layer.id = legacy_layer.id
@@ -393,14 +401,11 @@ class PAINTSYSTEM_OT_MigrateV2ToV3(PSContextMixin, Operator):
                             new_layer.auto_update_node_tree = False
                             new_layer.enabled = legacy_layer.enabled
                             new_layer.is_clip = legacy_layer.is_clip
-                            try:
-                                new_layer.blend_mode = legacy_layer.blend_mode
-                            except Exception:
-                                pass
                             new_layer.lock_layer = legacy_layer.lock_layer
                             new_layer.lock_alpha = legacy_layer.lock_alpha
                             new_layer.is_expanded = legacy_layer.is_expanded
                             new_layer.auto_update_node_tree = True
+                            new_layer.update_node_tree(context)
 
                         max_id = max((l.id for l in channel.v3_layers), default=0)
                         channel.next_id = max(channel.next_id, max_id + 1)

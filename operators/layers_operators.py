@@ -866,11 +866,13 @@ class PAINTSYSTEM_OT_PasteLayer(PSContextMixin, Operator):
             source_type = layer.layer_type if hasattr(layer, 'layer_type') else layer.type
             if self.linked:
                 if ps_ctx.active_channel.is_v3:
+                    source_tree = getattr(layer, 'layer_tree', None) or getattr(layer, 'node_tree', None)
                     new_layer = ps_ctx.active_channel.create_layer(context, layer.layer_name, source_type, insert_at="CURSOR" if idx == 0 else "AFTER")
-                    if hasattr(layer, 'layer_tree') and layer.layer_tree:
-                        new_layer.layer_tree = layer.layer_tree
-                    elif hasattr(layer, 'node_tree') and layer.node_tree:
-                        new_layer.layer_tree = layer.node_tree
+                    if source_tree:
+                        orphaned_tree = new_layer.layer_tree
+                        new_layer.layer_tree = source_tree
+                        if orphaned_tree and orphaned_tree != source_tree:
+                            bpy.data.node_groups.remove(orphaned_tree)
                 else:
                     new_layer = ps_ctx.active_channel.create_layer(context, layer.layer_name, "BLANK" if source_type != "FOLDER" else "FOLDER", insert_at="CURSOR" if idx == 0 else "AFTER", linked_layer_uid=clipboard_layer.uid, linked_material=clipboard_layer.material)
             else:
@@ -878,7 +880,8 @@ class PAINTSYSTEM_OT_PasteLayer(PSContextMixin, Operator):
                 new_layer.copy_layer_data(layer)
             new_layer_id_map[layer.id] = new_layer
             if layer.parent_id != -1:
-                new_layer.parent_id = new_layer_id_map[layer.parent_id].id
+                if layer.parent_id in new_layer_id_map:
+                    new_layer.parent_id = new_layer_id_map[layer.parent_id].id
             else:
                 new_layer.parent_id = base_parent_id
             new_layer.update_node_tree(context)

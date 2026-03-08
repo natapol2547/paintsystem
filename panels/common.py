@@ -319,6 +319,7 @@ def layer_settings_ui(layout: bpy.types.UILayout, context: bpy.types.Context):
     if not active_layer or not active_layer.node_tree:
         return
     color_mix_node = active_layer.mix_node
+    layer_data = ps_ctx.active_layer_data if ps_ctx.active_layer_data else active_layer
     
     if ps_ctx.ps_settings.use_legacy_ui:
         col = layout.column(align=True)
@@ -338,7 +339,7 @@ def layer_settings_ui(layout: bpy.types.UILayout, context: bpy.types.Context):
                 text="", icon=icon_parser('VIEW_LOCKED', 'LOCKED'))
         blend_type_row = row.row(align=True)
         blend_type_row.enabled = not active_layer.lock_layer
-        blend_type_row.prop(active_layer, "blend_mode", text="")
+        blend_type_row.prop(layer_data, "blend_mode", text="")
         row = col.row(align=True)
         scale_content(context, row, scale_x=1.2, scale_y=1.5)
         row.enabled = not active_layer.lock_layer
@@ -368,7 +369,7 @@ def layer_settings_ui(layout: bpy.types.UILayout, context: bpy.types.Context):
                 text="", icon=icon_parser('VIEW_LOCKED', 'LOCKED'))
         blend_type_row = main_row.row(align=True)
         blend_type_row.enabled = not active_layer.lock_layer
-        blend_type_row.prop(active_layer, "blend_mode", text="")
+        blend_type_row.prop(layer_data, "blend_mode", text="")
         opacity_row = split.row(align=True)
         opacity_row.enabled = not active_layer.lock_layer
         if not use_wide_ui:

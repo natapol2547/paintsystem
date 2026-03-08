@@ -1071,6 +1071,33 @@ class PSLayerData(PropertyGroup):
         update=update_type
     )
     
+    def _update_blend_mode(self, context):
+        if not self.auto_update_node_tree:
+            return
+        self.update_node_tree(context)
+        node_tree = self.id_data
+        for material in bpy.data.materials:
+            if not hasattr(material, 'ps_mat_data'):
+                continue
+            for group in material.ps_mat_data.groups:
+                for channel in group.channels:
+                    if not hasattr(channel, 'v3_layers'):
+                        continue
+                    for layer in channel.v3_layers:
+                        if layer.layer_tree == node_tree:
+                            channel.update_node_tree(context)
+                            break
+
+    def _get_blend_mode_items(self, context: Context) -> list[tuple[str, str, str]]:
+        return BLEND_MODE_ENUM if self.type == "FOLDER" else [bm for bm in BLEND_MODE_ENUM if bm is None or bm[0] != "PASSTHROUGH"]
+
+    blend_mode: EnumProperty(
+        items=_get_blend_mode_items,
+        name="Blend Mode",
+        description="Blend mode",
+        update=_update_blend_mode
+    )
+
     edit_external_mode: EnumProperty(
         items=EDIT_EXTERNAL_MODE_ENUM,
         name="Edit External Mode",
@@ -1252,7 +1279,7 @@ class PSLayerData(PropertyGroup):
         self.empty_object = empty_object
         return empty_object
     
-    def get_layer_warnings(self, context: Context, blend_mode: str = "MIX") -> List[str]:
+    def get_layer_warnings(self, context: Context) -> List[str]:
         ps_ctx = parse_context(context)
         active_channel = ps_ctx.active_channel
         if not active_channel:
@@ -1267,7 +1294,7 @@ class PSLayerData(PropertyGroup):
             return []
         below_layer, next_index = active_channel.get_next_sibling_item(flattened, current_flat_index)
         warnings = []
-        actual_blend = "MIX" if blend_mode == "PASSTHROUGH" else blend_mode
+        actual_blend = "MIX" if self.blend_mode == "PASSTHROUGH" else self.blend_mode
         if not below_layer or active_channel.get_parent_layer_id(below_layer, ignore_passthrough=True) != active_channel.get_parent_layer_id(layer_instance, ignore_passthrough=True):
             if actual_blend != 'MIX':
                 warnings.append("Blend mode is not MIX. Use Folder with Passthrough blend mode or move the layer")
@@ -1277,9 +1304,9 @@ class PSLayerData(PropertyGroup):
     
     @property
     def modifies_color_data(self) -> bool:
-        return self.type == "ATTRIBUTE" or (self.type == "GRADIENT" and self.gradient_type == "GRADIENT_MAP")
+        return self.type == "ATTRIBUTE" or (self.type == "GRADIENT" and self.gradient_type == "GRADIENT_MAP") or self.blend_mode != "MIX"
     
-    def update_node_tree(self, context, blend_mode="MIX", enabled=True):
+    def update_node_tree(self, context, enabled=True):
         if not self.auto_update_node_tree:
             return
         node_tree = self.id_data
@@ -1293,6 +1320,7 @@ class PSLayerData(PropertyGroup):
         if self.type == "BLANK":
             return
         
+        blend_mode = self.blend_mode
         if blend_mode == "PASSTHROUGH" and self.type != "FOLDER":
             blend_mode = "MIX"
         
@@ -1430,23 +1458,17 @@ class Layer(BaseNestedListItem):
         update=_update_enabled
     )
     
-    def update_blend_mode(self, context: Context):
-        self.update_node_tree(context)
-        for channel in find_channels_containing_v3_layer(self):
-            channel.update_node_tree(context)
-    
-    def get_blend_mode_items(self, context: Context) -> list[tuple[str, str, str]]:
+    @property
+    def blend_mode(self):
         ld = self.layer_data
-        is_folder = ld.type == "FOLDER" if ld else self.type == "FOLDER"
-        return BLEND_MODE_ENUM if is_folder else [bm for bm in BLEND_MODE_ENUM if bm is None or bm[0] != "PASSTHROUGH"]
-    
-    blend_mode: EnumProperty(
-        items=get_blend_mode_items,
-        name="Blend Mode",
-        description="Blend mode",
-        update=update_blend_mode
-    )
-    
+        return ld.blend_mode if ld else "MIX"
+
+    @blend_mode.setter
+    def blend_mode(self, value):
+        ld = self.layer_data
+        if ld:
+            ld.blend_mode = value
+
     lock_layer: BoolProperty(
         name="Lock Layer",
         description="Lock the layer",
@@ -1531,7 +1553,7 @@ class Layer(BaseNestedListItem):
         ld = self.layer_data
         if not ld:
             return
-        ld.update_node_tree(context, blend_mode=self.blend_mode, enabled=self.enabled)
+        ld.update_node_tree(context, enabled=self.enabled)
     
     def duplicate_layer_data(self, source_layer: "Layer"):
         self.uid = str(uuid.uuid4())
@@ -1551,7 +1573,6 @@ class Layer(BaseNestedListItem):
         self.duplicate_layer_data(source_layer)
         self.enabled = source_layer.enabled
         self.is_clip = source_layer.is_clip
-        self.blend_mode = source_layer.blend_mode
         self.lock_layer = source_layer.lock_layer
         self.lock_alpha = source_layer.lock_alpha
         self.is_expanded = source_layer.is_expanded
@@ -1573,14 +1594,14 @@ class Layer(BaseNestedListItem):
         ld = self.layer_data
         if not ld:
             return []
-        return ld.get_layer_warnings(context, blend_mode=self.blend_mode)
+        return ld.get_layer_warnings(context)
     
     @property
     def modifies_color_data(self) -> bool:
         ld = self.layer_data
         if not ld:
             return False
-        return ld.modifies_color_data or self.blend_mode != "MIX"
+        return ld.modifies_color_data
     
     @property
     def uses_coord_type(self) -> bool:
@@ -2564,7 +2585,7 @@ class LegacyLayer(BaseNestedListItem):
         """Alias for self.type, matching v3 Layer.layer_type."""
         return self.type
 
-def get_layer_by_uid(material: Material, uid: str) -> LegacyLayer | None:
+def get_layer_by_uid(material: Material, uid: str) -> 'LegacyLayer | Layer | None':
     uid_to_layer = _get_material_layer_uid_map(material)
     layer = uid_to_layer.get(uid)
     if not layer:
@@ -2572,27 +2593,30 @@ def get_layer_by_uid(material: Material, uid: str) -> LegacyLayer | None:
     return layer
 
 # Module-level cache for material layer UID maps
-_material_uid_cache: Dict[Material, Dict[str, 'LegacyLayer']] = {}
+_material_uid_cache: Dict[Material, Dict[str, 'LegacyLayer | Layer']] = {}
 
-def _get_material_layer_uid_map(material: Material, force_refresh: bool = False) -> Dict[str, 'LegacyLayer']:
+def _get_material_layer_uid_map(material: Material, force_refresh: bool = False) -> Dict[str, 'LegacyLayer | Layer']:
     """Get a UID to Layer mapping for a material. Uses caching for performance."""
     if not material or not material.ps_mat_data:
         return {}
     
-    # Check if cache is valid (simple version check using material name as key)
     cache_key = material
     if cache_key in _material_uid_cache and not force_refresh:
         return _material_uid_cache[cache_key]
     
-    # Build the UID map
     uid_map = {}
+    is_v3 = material.ps_mat_data.data_version >= 3
     for group in material.ps_mat_data.groups:
         for channel in group.channels:
-            for layer in channel.layers:
-                if layer.uid:
-                    uid_map[layer.uid] = layer
+            if is_v3 and hasattr(channel, 'v3_layers') and len(channel.v3_layers) > 0:
+                for layer in channel.v3_layers:
+                    if layer.uid:
+                        uid_map[layer.uid] = layer
+            else:
+                for layer in channel.layers:
+                    if layer.uid:
+                        uid_map[layer.uid] = layer
     
-    # Cache it
     _material_uid_cache[cache_key] = uid_map
     return uid_map
 
@@ -2869,7 +2893,7 @@ class Channel(BaseNestedListManager):
                     layer_node_tree = unlinked_layer.layer_tree
                     layer_is_clip = unlinked_layer.is_clip
                     layer_type = layer_data.type
-                    layer_blend_mode = unlinked_layer.blend_mode
+                    layer_blend_mode = layer_data.blend_mode
                     layer_id = unlinked_layer.id
                 else:
                     layer = unlinked_layer.get_layer_data()
@@ -3979,7 +4003,12 @@ class PaintSystemGlobalData(PropertyGroup):
     def add_layer_to_clipboard(self, layer):
         ps_ctx = parse_context(bpy.context)
         clipboard_layer = self.clipboard_layers.add()
-        if hasattr(layer, 'is_linked') and layer.is_linked:
+        if hasattr(layer, 'layer_tree'):
+            # V3 Layer: linking is implicit via shared NodeTree, no
+            # linked_layer_uid / linked_material attributes exist.
+            clipboard_layer.uid = layer.uid
+            clipboard_layer.material = ps_ctx.active_material
+        elif hasattr(layer, 'is_linked') and layer.is_linked:
             clipboard_layer.uid = layer.linked_layer_uid
             clipboard_layer.material = layer.linked_material
         else:
