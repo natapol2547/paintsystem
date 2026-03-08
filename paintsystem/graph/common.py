@@ -18,6 +18,7 @@ DEFAULT_PS_UV_MAP_NAME = "PS_UVMap"
 LIBRARY_NODE_TREE_VERSIONS = {
     ".PS Projection": 1,
     ".PS Tangent Normal": 2,
+    ".PS Post Mix": 1,
 }
 
 def get_layer_blend_type(layer) -> str:
@@ -112,11 +113,11 @@ def get_library_object(object_name: str, library_filename: str = LIBRARY_FILENAM
         data_to.objects = [object_name]
     return bpy.data.objects.get(object_name)
 
-def create_mixing_graph(builder: NodeTreeBuilder, layer: "LayerLike", color_node_name: str = None, color_socket: str = None, alpha_node_name: str = None, alpha_socket: str = None, blend_mode: str = None, enabled: bool = True) -> NodeTreeBuilder:
+def create_mixing_graph(builder: NodeTreeBuilder, layer: "LayerLike"|None, color_node_name: str = None, color_socket: str = None, alpha_node_name: str = None, alpha_socket: str = None, blend_mode: str = None, enabled: bool = True) -> NodeTreeBuilder:
     if blend_mode is None:
         blend_mode = get_layer_blend_type(layer) if layer is not None else "MIX"
     actual_blend_mode = "MIX" if blend_mode == "PASSTHROUGH" else blend_mode
-    use_pd_over = actual_blend_mode not in ["MIX", "PASSTHROUGH"]
+    use_pd_over = actual_blend_mode not in ["MIX", "PASSTHROUGH"] and not layer.is_clip if layer else False
     pre_mix = get_library_nodetree(".PS Pre Mix")
     post_mix = get_library_nodetree(".PS Post Mix")
     if use_pd_over:
