@@ -477,7 +477,7 @@ class NODE_PT_PaintSystemShaderEditor(PSContextMixin, Panel):
         row.label(text=linked_layer.name)
         
         # Select node button - only for non-folder layers with node trees
-        if linked_layer.type != 'FOLDER' and linked_layer.node_tree and ps_ctx.active_material:
+        if linked_layer.layer_type != 'FOLDER' and linked_layer.node_tree and ps_ctx.active_material:
             nt = linked_layer.node_tree
             nodetree_operator(row, nt)
             op = row.operator("paint_system.inspect_layer_node_tree", text="", icon='NODETREE')

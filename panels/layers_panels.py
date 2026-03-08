@@ -171,13 +171,14 @@ class MAT_MT_PaintSystemMergeAndExport(PSContextMixin, Menu):
 def draw_layer_settings(layout, context):
     ps_ctx = PSContextMixin.parse_context(context)
     active_layer = ps_ctx.active_layer
+    layer_data = ps_ctx.active_layer_data if ps_ctx.active_layer_data else active_layer
     layout.enabled = not active_layer.lock_layer
     if ps_ctx.ps_settings.use_legacy_ui:
         box = layout.box()
         layer_settings_ui(box, context)
     else:
         box = None
-    match active_layer.type:
+    match active_layer.layer_type:
         case 'IMAGE':
             pass
             # box = get_settings_box(layout, ps_ctx.ps_settings.use_legacy_ui, box)
@@ -213,15 +214,15 @@ def draw_layer_settings(layout, context):
                     col.prop(socket, "default_value",
                             text=socket.name)
         case 'GRADIENT':
-            if active_layer.gradient_type in ('LINEAR', 'RADIAL', 'FAKE_LIGHT'):
+            if layer_data.gradient_type in ('LINEAR', 'RADIAL', 'FAKE_LIGHT'):
                 box = get_settings_box(layout, ps_ctx.ps_settings.use_legacy_ui, box)
                 col = box.column()
                 col.use_property_split = True
                 col.use_property_decorate = False
-                if active_layer.empty_object and active_layer.empty_object.name in context.view_layer.objects:
+                if layer_data.empty_object and layer_data.empty_object.name in context.view_layer.objects:
                     empty_col = col.column(align=True)
-                    empty_col.operator("paint_system.select_empty", text="Select Gradient Empty" if active_layer.gradient_type != 'FAKE_LIGHT' else "Select Light Empty", icon='OBJECT_ORIGIN')
-                    empty_col.prop(active_layer, "empty_object", text="")
+                    empty_col.operator("paint_system.select_empty", text="Select Gradient Empty" if layer_data.gradient_type != 'FAKE_LIGHT' else "Select Light Empty", icon='OBJECT_ORIGIN')
+                    empty_col.prop(layer_data, "empty_object", text="")
                 else:
                     err_box = col.box()
                     err_box.alert = True
@@ -262,7 +263,7 @@ def draw_layer_settings(layout, context):
         case 'GEOMETRY':
             box = get_settings_box(layout, ps_ctx.ps_settings.use_legacy_ui, box)
             col = box.column()
-            geometry_type = active_layer.geometry_type
+            geometry_type = layer_data.geometry_type
             if geometry_type == 'VECTOR_TRANSFORM':
                 geometry_node = active_layer.source_node
                 if geometry_node:
@@ -275,12 +276,12 @@ def draw_layer_settings(layout, context):
                 col.label(text="Material Settings:", icon='MESH_DATA')
                 col.prop(mat, "use_backface_culling", text="Backface Culling", icon='CHECKBOX_HLT' if mat.use_backface_culling else 'CHECKBOX_DEHLT')
             elif geometry_type in ['WORLD_NORMAL', 'WORLD_TRUE_NORMAL', 'OBJECT_NORMAL']:
-                col.prop(active_layer, "normalize_normal", text="Normalize Normal", icon='MESH_DATA')
+                col.prop(layer_data, "normalize_normal", text="Normalize Normal", icon='MESH_DATA')
         case _:
             pass
     
     # Draw ui for adjustable sockets
-    if active_layer.type == 'NODE_GROUP':
+    if active_layer.layer_type == 'NODE_GROUP':
         header, panel = layout.panel("node_group_panel")
         header.label(text="Sockets Settings:")
         if panel:
@@ -291,7 +292,7 @@ def draw_layer_settings(layout, context):
     
     # Collapsed panels
     # Image Settings
-    if active_layer.type == 'IMAGE':
+    if active_layer.layer_type == 'IMAGE':
         header, panel = layout.panel("image_settings_panel", default_closed=True)
         header.label(text="Image", icon_value=get_icon('image'))
         if panel:
@@ -299,34 +300,34 @@ def draw_layer_settings(layout, context):
             col = box.column()
             row = col.row(align=True)
             scale_content(context, row, 1.1, 1.1)
-            if not active_layer.external_image:
+            if not layer_data.external_image:
                 icon_value = get_image_editor_icon(context.preferences.filepaths.image_editor) or get_icon('image')
                 row.operator("paint_system.quick_edit", text="Edit in Image Editor", icon_value=icon_value)
             else:
-                if active_layer.edit_external_mode == 'IMAGE_EDIT':
+                if layer_data.edit_external_mode == 'IMAGE_EDIT':
                     row.operator("paint_system.quick_edit", text="Open Image", icon_value=get_image_editor_icon(context.preferences.filepaths.image_editor))
                     row.operator("paint_system.reload_image", text="Reload Image", icon="FILE_REFRESH")
-                elif active_layer.edit_external_mode == 'VIEW_CAPTURE':
+                elif layer_data.edit_external_mode == 'VIEW_CAPTURE':
                     row.operator("paint_system.project_apply", text="Apply Edit")
             row.operator("paint_system.toggle_image_editor", text="", depress=is_editor_open(context, 'IMAGE_EDITOR'), icon="BLENDER")
             line_separator(col)
             image_node = active_layer.source_node
-            panel = image_node_settings(col, image_node, active_layer, "image", simple_ui=True)
+            panel = image_node_settings(col, image_node, layer_data, "image", simple_ui=True)
             if panel:
                 line_separator(col)
             draw_input_sockets(col, context, only_output=True)
             row = col.row(align=True)
             row.label(icon="BLANK1")
-            row.prop(active_layer, "correct_image_aspect", text="Correct Aspect", toggle=1, icon='CHECKBOX_HLT' if active_layer.correct_image_aspect else 'CHECKBOX_DEHLT')
+            row.prop(layer_data, "correct_image_aspect", text="Correct Aspect", toggle=1, icon='CHECKBOX_HLT' if layer_data.correct_image_aspect else 'CHECKBOX_DEHLT')
         row = header.row()
         row.alignment = 'LEFT'
         row.operator("wm.call_menu", text="Filters").name = "MAT_MT_ImageFilterMenu"
-    if active_layer.type == 'GRADIENT':
+    if active_layer.layer_type == 'GRADIENT':
         gradient_node = active_layer.source_node
         map_range_node = active_layer.find_node("map_range")
         if gradient_node and map_range_node:
             header, panel = layout.panel("gradient_node_settings_panel", default_closed=True)
-            header.label(text="Gradient" if active_layer.gradient_type != 'FAKE_LIGHT' else "Light Gradient", icon='COLOR')
+            header.label(text="Gradient" if layer_data.gradient_type != 'FAKE_LIGHT' else "Light Gradient", icon='COLOR')
             if panel:
                 box = panel.box()
                 box.template_node_inputs(gradient_node)
@@ -340,7 +341,7 @@ def draw_layer_settings(layout, context):
                         panel.prop(map_range_node.inputs[5], "default_value", text="Steps")
                     panel.prop(map_range_node.inputs[1], "default_value", text="Start Distance")
                     panel.prop(map_range_node.inputs[2], "default_value", text="End Distance")
-    if active_layer.type == 'TEXTURE':
+    if active_layer.layer_type == 'TEXTURE':
         header, panel = layout.panel("texture_node_settings_panel", default_closed=True)
         header.label(text="Texture", icon='TEXTURE')
         if panel:
@@ -349,12 +350,12 @@ def draw_layer_settings(layout, context):
             col.use_property_decorate = False
             col.use_property_split = True
             draw_input_sockets(col, context, only_output=True)
-            col.prop(active_layer, "texture_type", text="Texture Type")
+            col.prop(layer_data, "texture_type", text="Texture Type")
             texture_node = active_layer.source_node
             if texture_node:
                 col.use_property_split = False
                 col.template_node_inputs(texture_node)
-    if active_layer.type == 'ATTRIBUTE':
+    if active_layer.layer_type == 'ATTRIBUTE':
         header, panel = layout.panel("attribute_node_settings_panel", default_closed=True)
         header.label(text="Attribute", icon='MESH_DATA')
         if panel:
@@ -366,35 +367,35 @@ def draw_layer_settings(layout, context):
                 col.label(text="Attribute Settings:", icon='MESH_DATA')
                 col.template_node_inputs(attribute_node)
     # Transform Settings
-    if active_layer.type in ('IMAGE', 'TEXTURE'):
+    if active_layer.layer_type in ('IMAGE', 'TEXTURE'):
         header, transform_panel = layout.panel("layer_transform_settings_panel", default_closed=True)
         header.label(text="Transform", icon_value=get_icon('transform'))
         row = header.row(align=True)
-        row.prop(active_layer, "coord_type", text="")
-        if ps_ctx.active_layer.type == "IMAGE" and ps_ctx.active_layer.image:
+        row.prop(layer_data, "coord_type", text="")
+        if active_layer.layer_type == "IMAGE" and active_layer.image:
             row.operator("paint_system.transfer_image_layer_uv", text="", icon='UV_DATA')
         if transform_panel:
             transform_panel.use_property_split = True
             transform_panel.use_property_decorate = False
             box = transform_panel.box()
-            if active_layer.coord_type not in {'AUTO', 'OBJECT', 'CAMERA', 'WINDOW', 'REFLECTION', 'POSITION', 'GENERATED'}:
+            if layer_data.coord_type not in {'AUTO', 'OBJECT', 'CAMERA', 'WINDOW', 'REFLECTION', 'POSITION', 'GENERATED'}:
                 col = box.column()
-                if active_layer.coord_type == 'UV':
-                    col.prop_search(active_layer, "uv_map_name", text="UV Map",
+                if layer_data.coord_type == 'UV':
+                    col.prop_search(layer_data, "uv_map_name", text="UV Map",
                                         search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
-                elif active_layer.coord_type == 'DECAL':
+                elif layer_data.coord_type == 'DECAL':
                     col.use_property_split = False
                     empty_col = col.column(align=True)
-                    empty_col.prop(active_layer, "empty_object", text="")
+                    empty_col.prop(layer_data, "empty_object", text="")
                     empty_col.operator("paint_system.select_empty", text="Select Empty", icon='OBJECT_ORIGIN')
                     split = col.split(factor=0.35, align=True)
-                    split.prop(active_layer, "use_decal_depth_clip", text="Clip", toggle=1, icon='CHECKBOX_HLT' if active_layer.use_decal_depth_clip else 'CHECKBOX_DEHLT')
+                    split.prop(layer_data, "use_decal_depth_clip", text="Clip", toggle=1, icon='CHECKBOX_HLT' if layer_data.use_decal_depth_clip else 'CHECKBOX_DEHLT')
                     decal_clip = active_layer.find_node("decal_depth_clip")
                     if decal_clip:
                         decal_clip_col = split.column(align=True)
-                        decal_clip_col.enabled = active_layer.use_decal_depth_clip
+                        decal_clip_col.enabled = layer_data.use_decal_depth_clip
                         decal_clip_col.prop(decal_clip.inputs[2], "default_value", text="Depth")
-                elif active_layer.coord_type == 'PROJECT':
+                elif layer_data.coord_type == 'PROJECT':
                     proj_col = col.column(align=True)
                     proj_col.scale_y = 2
                     proj_col.operator("paint_system.projection_view_reset", text="View Current Projection", icon='CAMERA_DATA')
@@ -402,16 +403,16 @@ def draw_layer_settings(layout, context):
                     proj_node = active_layer.find_node("proj_node")
                     if proj_node:
                         col.prop(proj_node.inputs["Scale"], "default_value", text="Scale")
-                        col.prop(active_layer, "projection_space", text="Space")
+                        col.prop(layer_data, "projection_space", text="Space")
                         col.use_property_split = False
                         header, panel = col.panel("proj_node_panel", default_closed=True)
                         header.prop(proj_node.inputs["Enable"], "default_value", text="Normal Falloff")
                         if panel:
                             panel.prop(proj_node.inputs["Falloff"], "default_value", text="Degree")
-                elif active_layer.coord_type == 'PARALLAX':
-                    col.prop(active_layer, "parallax_space", text="Space", expand=True)
-                    if active_layer.parallax_space == 'UV':
-                        col.prop_search(active_layer, "parallax_uv_map_name", text="UV Map",
+                elif layer_data.coord_type == 'PARALLAX':
+                    col.prop(layer_data, "parallax_space", text="Space", expand=True)
+                    if layer_data.parallax_space == 'UV':
+                        col.prop_search(layer_data, "parallax_uv_map_name", text="UV Map",
                                         search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
                     parallax_node = active_layer.find_node("parallax")
                     if parallax_node:
@@ -426,25 +427,25 @@ def draw_layer_settings(layout, context):
                     col = panel.column()
                     col.template_node_inputs(mapping_node)
         elif ps_ctx.ps_settings.use_panel_quick_access:
-            if active_layer.coord_type == 'UV':
+            if layer_data.coord_type == 'UV':
                 row = layout.row(align=True)
                 row.label(icon="BLANK1")
-                row.prop_search(active_layer, "uv_map_name", text="UV Map",
+                row.prop_search(layer_data, "uv_map_name", text="UV Map",
                                     search_data=ps_ctx.ps_object.data, search_property="uv_layers", icon='GROUP_UVS')
-            elif active_layer.coord_type == 'DECAL':
+            elif layer_data.coord_type == 'DECAL':
                 row = layout.row(align=True)
                 row.label(icon="BLANK1")
                 row.operator("paint_system.select_empty", text="Select Empty", icon='OBJECT_ORIGIN')
-            elif active_layer.coord_type == 'PROJECT':
+            elif layer_data.coord_type == 'PROJECT':
                 row = layout.row(align=True)
                 row.label(icon="BLANK1")
                 row.operator("paint_system.projection_view_reset", text="View Current Projection", icon='CAMERA_DATA')
                 row.operator("paint_system.set_projection_view", text="", icon='FILE_REFRESH')
-            elif active_layer.coord_type == 'PARALLAX':
+            elif layer_data.coord_type == 'PARALLAX':
                 split = layout.split(factor=0.35, align=True)
                 row = split.row(align=True)
                 row.label(icon="BLANK1")
-                row.prop(active_layer, "parallax_space", text="")
+                row.prop(layer_data, "parallax_space", text="")
                 parallax_node = active_layer.find_node("parallax")
                 if parallax_node:
                     split.prop(parallax_node.inputs["Depth"], "default_value", text="Depth")
@@ -455,7 +456,7 @@ def draw_layer_settings(layout, context):
         panel.use_property_split = True
         panel.alignment = 'LEFT'
         panel.use_property_decorate = False
-        if ps_ctx.ps_settings.show_tooltips and not active_layer.actions:
+        if ps_ctx.ps_settings.show_tooltips and not layer_data.actions:
             box = panel.box()
             col = box.column(align=True)
             col.label(text="Actions can control layer visibility", icon='INFO')
@@ -463,14 +464,14 @@ def draw_layer_settings(layout, context):
         panel.label(text="Action Order:")
         row = panel.row()
         actions_col = row.column()
-        actions_col.template_list("PAINTSYSTEM_UL_Actions", "", active_layer,
-                        "actions", active_layer, "active_action_index", rows=5)
+        actions_col.template_list("PAINTSYSTEM_UL_Actions", "", layer_data,
+                        "actions", layer_data, "active_action_index", rows=5)
         col = row.column(align=True)
         col.operator("paint_system.add_action", icon="ADD", text="")
         col.operator("paint_system.delete_action", icon="REMOVE", text="")
-        if not active_layer.actions:
+        if not layer_data.actions:
             return
-        active_action = active_layer.actions[active_layer.active_action_index]
+        active_action = layer_data.actions[layer_data.active_action_index]
         if not active_action:
             return
         actions_col.separator()
@@ -607,7 +608,8 @@ class MAT_PT_Layers(PSContextMixin, Panel):
             # contains_mat_setup = any([node.type == 'GROUP' and node.node_tree ==
             #                           active_channel.node_tree for node in mat.node_tree.nodes])
 
-            layers = active_channel.layers
+            layers = active_channel.active_layers
+            layers_prop_name = "v3_layers" if active_channel.is_v3 else "layers"
 
             # Toggle paint mode (switch between object and texture paint mode)
             group_node = find_node(mat.node_tree, {
@@ -635,7 +637,7 @@ class MAT_PT_Layers(PSContextMixin, Panel):
             layers_col = row.column()
             scale_content(context, row, scale_x=1, scale_y=1.5)
             layers_col.template_list(
-                "MAT_PT_UL_LayerList", "", active_channel, "layers", active_channel, "active_index",
+                "MAT_PT_UL_LayerList", "", active_channel, layers_prop_name, active_channel, "active_index",
                 rows=min(max(6, len(layers)), 7)
             )
 
@@ -720,7 +722,7 @@ class MAT_MT_LayerMenu(PSContextMixin, Menu):
         layout = self.layout
 
         special_actions = False
-        if ps_ctx.active_layer and ps_ctx.active_layer.type not in ('IMAGE', 'ADJUSTMENT'):
+        if ps_ctx.active_layer and ps_ctx.active_layer.layer_type not in ('IMAGE', 'ADJUSTMENT'):
             special_actions = True
             layout.operator(
                 "paint_system.convert_to_image_layer",

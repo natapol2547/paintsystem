@@ -4,7 +4,7 @@ from bpy.types import Material
 from .graph.common import LIBRARY_NODE_TREE_VERSIONS, get_library_nodetree
 from .graph.basic_layers import get_layer_version_for_type
 from .graph.nodetree_builder import get_nodetree_version
-from .data import get_legacy_global_layer, iter_all_layers, LegacyLayer, Group, Channel
+from .data import get_legacy_global_layer, iter_all_layers, LegacyLayer, Layer, Group, Channel
 from typing import TypedDict
 from ..utils.logging import get_logger
 
@@ -16,11 +16,32 @@ class LayerParent(TypedDict):
     channel: Channel
 
 def get_layer_parent_map() -> dict[LegacyLayer, LayerParent]:
-    """Build a mapping from every layer to its parent material, group, and channel."""
-    return {
-        layer: LayerParent(mat=mat, group=group, channel=channel)
-        for mat, group, channel, layer in iter_all_layers()
-    }
+    """Build a mapping from every v2 legacy layer to its parent material, group, and channel.
+    
+    V3 layers are skipped since they use a different data structure.
+    """
+    result = {}
+    for mat, group, channel, layer in iter_all_layers():
+        if isinstance(layer, LegacyLayer) or (hasattr(layer, 'get_layer_data') and not hasattr(layer, 'layer_tree')):
+            result[layer] = LayerParent(mat=mat, group=group, channel=channel)
+    return result
+
+
+def update_v3_layer_version():
+    """Update v3 layer NodeTrees to the target version if needed."""
+    for mat, group, channel, layer in iter_all_layers():
+        if not hasattr(layer, 'layer_tree') or not layer.layer_tree:
+            continue
+        ld = layer.layer_tree.ps_layer_data
+        if not ld:
+            continue
+        target_version = get_layer_version_for_type(ld.type)
+        if get_nodetree_version(layer.layer_tree) != target_version:
+            logger.info(f"Updating v3 layer {layer.name} to version {target_version}")
+            try:
+                layer.update_node_tree(bpy.context)
+            except Exception as e:
+                logger.error(f"Error updating v3 layer {layer.name}: {e}")
 
 def migrate_global_layer_data(layer_parent_map: dict[LegacyLayer, LayerParent]):
     seen_global_layers_map = {}

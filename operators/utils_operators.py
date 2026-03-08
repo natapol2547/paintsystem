@@ -348,7 +348,7 @@ class PAINTSYSTEM_OT_DuplicatePaintSystemData(PSContextMixin, MultiMaterialOpera
             for channel in group.channels:
                 node_tree = bpy.data.node_groups.new(name=f"PS_Channel ({channel.name})", type='ShaderNodeTree')
                 channel.node_tree = node_tree
-                for layer in channel.layers:
+                for layer in channel.active_layers:
                     if layer.is_linked:
                         continue
                     layer.duplicate_layer_data(layer)

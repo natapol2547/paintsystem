@@ -77,7 +77,7 @@ class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSImageCreateMixin, MultiMaterialO
         """Get the next image name from the active channel"""
         ps_ctx = self.parse_context(context)
         if ps_ctx.active_channel:
-            return get_next_unique_name("Image", [layer.name for layer in ps_ctx.active_channel.layers])
+            return get_next_unique_name("Image", [layer.name for layer in ps_ctx.active_channel.active_layers])
 
     def process_material(self, context):
         self.store_coord_type(context)
@@ -331,8 +331,8 @@ class PAINTSYSTEM_OT_FixMissingGradientEmpty(PSContextMixin, Operator):
     
     def execute(self, context):
         ps_ctx = self.parse_context(context)
-        for layer in ps_ctx.active_channel.layers:
-            if layer.type == 'GRADIENT':
+        for layer in ps_ctx.active_channel.active_layers:
+            if layer.layer_type == 'GRADIENT':
                 layer.update_node_tree(context)
         ps_ctx.active_layer.update_node_tree(context)
         return {'FINISHED'}
@@ -855,7 +855,7 @@ class PAINTSYSTEM_OT_PasteLayer(PSContextMixin, Operator):
         clipboard_layers = bpy.context.scene.ps_scene_data.clipboard_layers
         new_layer_id_map = {}
         if active_layer:
-            is_folder = active_layer and active_layer.type == "FOLDER"
+            is_folder = active_layer.type == "FOLDER"
             base_parent_id = active_layer.id if is_folder else active_layer.parent_id
         else:
             base_parent_id = -1
@@ -863,10 +863,18 @@ class PAINTSYSTEM_OT_PasteLayer(PSContextMixin, Operator):
             layer = get_layer_by_uid(clipboard_layer.material, clipboard_layer.uid)
             if not layer:
                 continue
+            source_type = layer.layer_type if hasattr(layer, 'layer_type') else layer.type
             if self.linked:
-                new_layer = ps_ctx.active_channel.create_layer(context, layer.layer_name, "BLANK" if layer.type != "FOLDER" else "FOLDER", insert_at="CURSOR" if idx == 0 else "AFTER", linked_layer_uid=clipboard_layer.uid, linked_material=clipboard_layer.material)
+                if ps_ctx.active_channel.is_v3:
+                    new_layer = ps_ctx.active_channel.create_layer(context, layer.layer_name, source_type, insert_at="CURSOR" if idx == 0 else "AFTER")
+                    if hasattr(layer, 'layer_tree') and layer.layer_tree:
+                        new_layer.layer_tree = layer.layer_tree
+                    elif hasattr(layer, 'node_tree') and layer.node_tree:
+                        new_layer.layer_tree = layer.node_tree
+                else:
+                    new_layer = ps_ctx.active_channel.create_layer(context, layer.layer_name, "BLANK" if source_type != "FOLDER" else "FOLDER", insert_at="CURSOR" if idx == 0 else "AFTER", linked_layer_uid=clipboard_layer.uid, linked_material=clipboard_layer.material)
             else:
-                new_layer = ps_ctx.active_channel.create_layer(context, layer.layer_name, layer.type, insert_at="CURSOR" if idx == 0 else "AFTER")
+                new_layer = ps_ctx.active_channel.create_layer(context, layer.layer_name, source_type, insert_at="CURSOR" if idx == 0 else "AFTER")
                 new_layer.copy_layer_data(layer)
             new_layer_id_map[layer.id] = new_layer
             if layer.parent_id != -1:
@@ -1058,22 +1066,22 @@ class PAINTSYSTEM_OT_ProjectionViewReset(PSContextMixin, Operator):
     def execute(self, context):
         ps_ctx = self.parse_context(context)
         active_layer = ps_ctx.active_layer
+        layer_data = ps_ctx.active_layer_data if ps_ctx.active_layer_data else active_layer
         active_space = context.area.spaces.active
         if active_space.type == 'VIEW_3D':
             region_3d = active_space.region_3d
             if region_3d:
-                location = mathutils.Vector(active_layer.projection_position)
-                rotation = mathutils.Euler(active_layer.projection_rotation, 'XYZ')
+                location = mathutils.Vector(layer_data.projection_position)
+                rotation = mathutils.Euler(layer_data.projection_rotation, 'XYZ')
                 scale = mathutils.Vector((1.0, 1.0, 1.0))
                 match region_3d.view_perspective:
                     case 'PERSP':
                         view_matrix = mathutils.Matrix.LocRotScale(location, rotation, scale)
-                        if active_layer.projection_space == "OBJECT":
+                        if layer_data.projection_space == "OBJECT":
                             view_matrix = ps_ctx.ps_object.matrix_world @ view_matrix
                         view_matrix.invert()
                         region_3d.view_matrix = view_matrix
                     case "CAMERA":
-                        # Set active camera position and rotation 
                         active_camera = bpy.context.scene.camera
                         active_camera.location = location
                         active_camera.rotation_euler = rotation

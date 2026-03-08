@@ -5,7 +5,8 @@ import bpy
 from .common import create_mixing_graph, NodeTreeBuilder, create_coord_graph, get_library_nodetree, get_layer_blend_type, set_layer_blend_type, DEFAULT_PS_UV_MAP_NAME
 
 if TYPE_CHECKING:
-    from ..data import LegacyLayer
+    from ..data import LegacyLayer, PSLayerData
+    LayerLike = LegacyLayer | PSLayerData
 
 IMAGE_LAYER_VERSION = 5
 FOLDER_LAYER_VERSION = 3
@@ -33,29 +34,21 @@ class PSNodeTreeBuilder:
     
     def __init__(
         self,
-        layer: "LegacyLayer",
+        layer: "LayerLike",
         version: int,
         color_node_name: Optional[str] = None,
         color_socket: Optional[str] = None,
         alpha_node_name: Optional[str] = None,
         alpha_socket: Optional[str] = None,
+        blend_mode: str = None,
+        enabled: bool = True,
         **kwargs
     ):
-        """
-        Initialize PSNodeTreeBuilder with automatic mixing graph creation.
-        
-        Args:
-            layer: The layer object (must have a node_tree attribute)
-            version: Version number for the layer graph
-            color_node_name: Name of the node providing color (can be added later)
-            color_socket: Socket name/index on the color node
-            alpha_node_name: Name of the node providing alpha (can be added later)
-            alpha_socket: Socket name/index on the alpha node
-            **kwargs: Additional arguments passed to NodeTreeBuilder
-        """
         node_tree = layer.node_tree
         self._builder = NodeTreeBuilder(node_tree, "Layer", version=version, **kwargs)
         self._layer = layer
+        self._blend_mode = blend_mode
+        self._enabled = enabled
         
         # Store original source nodes for modifier chaining
         self._color_source_node = color_node_name
@@ -133,7 +126,9 @@ class PSNodeTreeBuilder:
             final_color_node,
             final_color_socket,
             final_alpha_node,
-            final_alpha_socket
+            final_alpha_socket,
+            blend_mode=self._blend_mode,
+            enabled=self._enabled
         )
             
     def create_coord_graph(self, node_name: str, socket_name: str) -> NodeTreeBuilder:
@@ -420,36 +415,35 @@ def parse_socket_name(layer: "LegacyLayer", socket_name: str, default_socket_nam
         return socket_name if socket_name != "_NONE_" else None
     return default_socket_name
 
-def create_image_graph(layer: "LegacyLayer"):
+def create_image_graph(layer: "LayerLike", blend_mode: str = None, enabled: bool = True):
     img = layer.image
-    # Create builder with mixing graph - alpha will be determined later
     color_socket = parse_socket_name(layer, layer.color_output_name, "Color")
     alpha_socket = parse_socket_name(layer, layer.alpha_output_name, "Alpha")
-    builder = PSNodeTreeBuilder(layer, IMAGE_LAYER_VERSION, "source", color_socket, "source", alpha_socket)
+    builder = PSNodeTreeBuilder(layer, IMAGE_LAYER_VERSION, "source", color_socket, "source", alpha_socket, blend_mode=blend_mode, enabled=enabled)
     builder.add_node("source", "ShaderNodeTexImage", {"image.force": img, "interpolation": "Closest", "name": "source"})
     builder.create_coord_graph("source", "Vector")
     return builder
 
-def create_folder_graph(layer: "LegacyLayer"):
-    builder = PSNodeTreeBuilder(layer, FOLDER_LAYER_VERSION, "group_input", "Over Color", "group_input", "Over Alpha")
+def create_folder_graph(layer: "LayerLike", blend_mode: str = None, enabled: bool = True):
+    builder = PSNodeTreeBuilder(layer, FOLDER_LAYER_VERSION, "group_input", "Over Color", "group_input", "Over Alpha", blend_mode=blend_mode, enabled=enabled)
     return builder
 
-def create_solid_graph(layer: "LegacyLayer"):
-    builder = PSNodeTreeBuilder(layer, SOLID_COLOR_LAYER_VERSION, "source", "Color")
+def create_solid_graph(layer: "LayerLike", blend_mode: str = None, enabled: bool = True):
+    builder = PSNodeTreeBuilder(layer, SOLID_COLOR_LAYER_VERSION, "source", "Color", blend_mode=blend_mode, enabled=enabled)
     builder.add_node("source", "ShaderNodeRGB", {"name": "source"}, default_outputs={0: (1, 1, 1, 1)})
     return builder
 
-def create_attribute_graph(layer: "LegacyLayer"):
+def create_attribute_graph(layer: "LayerLike", blend_mode: str = None, enabled: bool = True):
     color_socket = parse_socket_name(layer, layer.color_output_name, "Color")
     alpha_socket = parse_socket_name(layer, layer.alpha_output_name, "Alpha")
     if alpha_socket:
-        builder = PSNodeTreeBuilder(layer, ATTRIBUTE_LAYER_VERSION, "source", color_socket, "source", alpha_socket)
+        builder = PSNodeTreeBuilder(layer, ATTRIBUTE_LAYER_VERSION, "source", color_socket, "source", alpha_socket, blend_mode=blend_mode, enabled=enabled)
     else:
-        builder = PSNodeTreeBuilder(layer, ATTRIBUTE_LAYER_VERSION, "source", color_socket)
+        builder = PSNodeTreeBuilder(layer, ATTRIBUTE_LAYER_VERSION, "source", color_socket, blend_mode=blend_mode, enabled=enabled)
     builder.add_node("source", "ShaderNodeAttribute", {"name": "source"})
     return builder
 
-def create_adjustment_graph(layer: "LegacyLayer"):
+def create_adjustment_graph(layer: "LayerLike", blend_mode: str = None, enabled: bool = True):
     adjustment_type = get_adjustment_identifier(layer.adjustment_type)
     input_socket_name = "Color"
     output_socket_name = "Color"
@@ -459,7 +453,7 @@ def create_adjustment_graph(layer: "LegacyLayer"):
         case "ShaderNodeMapRange":
             input_socket_name = "Value"
             output_socket_name = "Result"
-    builder = PSNodeTreeBuilder(layer, ADJUSTMENT_LAYER_VERSION, "source", output_socket_name)
+    builder = PSNodeTreeBuilder(layer, ADJUSTMENT_LAYER_VERSION, "source", output_socket_name, blend_mode=blend_mode, enabled=enabled)
     builder.add_node("source", adjustment_type, {"name": "source"})
     match adjustment_type:
         case "ShaderNodeRGBToBW":
@@ -474,10 +468,10 @@ def create_adjustment_graph(layer: "LegacyLayer"):
     builder.link("group_input", "source", "Color", input_socket_name)
     return builder
 
-def create_gradient_graph(layer: "LegacyLayer"):
+def create_gradient_graph(layer: "LayerLike", blend_mode: str = None, enabled: bool = True):
     gradient_type = layer.gradient_type
     empty_object = layer.empty_object
-    builder = PSNodeTreeBuilder(layer, GRADIENT_LAYER_VERSION, "source", "Color", "source", "Alpha")
+    builder = PSNodeTreeBuilder(layer, GRADIENT_LAYER_VERSION, "source", "Color", "source", "Alpha", blend_mode=blend_mode, enabled=enabled)
     builder.add_node("source", "ShaderNodeValToRGB", {"name": "source"})
     match gradient_type:
         case "LINEAR":
@@ -516,8 +510,8 @@ def create_gradient_graph(layer: "LegacyLayer"):
     builder.link("map_range", "source", "Result", "Fac")
     return builder
 
-def create_random_graph(layer: "LegacyLayer"):
-    builder = PSNodeTreeBuilder(layer, RANDOM_LAYER_VERSION, "hue_saturation_value", "Color")
+def create_random_graph(layer: "LayerLike", blend_mode: str = None, enabled: bool = True):
+    builder = PSNodeTreeBuilder(layer, RANDOM_LAYER_VERSION, "hue_saturation_value", "Color", blend_mode=blend_mode, enabled=enabled)
     builder.add_node("object_info", "ShaderNodeObjectInfo")
     builder.add_node("white_noise", "ShaderNodeTexWhiteNoise", {"noise_dimensions": "1D"})
     builder.add_node("add", "ShaderNodeMath", {"operation": "ADD"})
@@ -542,16 +536,16 @@ def create_random_graph(layer: "LegacyLayer"):
     builder.link("value_multiply_add", "hue_saturation_value", "Value", "Value")
     return builder
 
-def create_custom_graph(layer: "LegacyLayer"):
+def create_custom_graph(layer: "LayerLike", blend_mode: str = None, enabled: bool = True):
     custom_node_tree = layer.custom_node_tree
     color_input = parse_socket_name(layer, layer.color_input_name, None)
     alpha_input = parse_socket_name(layer, layer.alpha_input_name, None)
     color_output = parse_socket_name(layer, layer.color_output_name, None)
     alpha_output = parse_socket_name(layer, layer.alpha_output_name, None)
     if alpha_output:
-        builder = PSNodeTreeBuilder(layer, CUSTOM_LAYER_VERSION, "source" if color_output else None, color_output, "source" if alpha_output else None, alpha_output)
+        builder = PSNodeTreeBuilder(layer, CUSTOM_LAYER_VERSION, "source" if color_output else None, color_output, "source" if alpha_output else None, alpha_output, blend_mode=blend_mode, enabled=enabled)
     else:
-        builder = PSNodeTreeBuilder(layer, CUSTOM_LAYER_VERSION, "source" if color_output else None, color_output)
+        builder = PSNodeTreeBuilder(layer, CUSTOM_LAYER_VERSION, "source" if color_output else None, color_output, blend_mode=blend_mode, enabled=enabled)
     builder.add_node("source", "ShaderNodeGroup", {"node_tree": custom_node_tree, "name": "source"})
     if color_input:
         builder.link("group_input", "source", "Color", color_input)
@@ -559,19 +553,19 @@ def create_custom_graph(layer: "LegacyLayer"):
         builder.link("group_input", "source", "Alpha", alpha_input)
     return builder
 
-def create_texture_graph(layer: "LegacyLayer"):
+def create_texture_graph(layer: "LayerLike", blend_mode: str = None, enabled: bool = True):
     color_socket = parse_socket_name(layer, layer.color_output_name, "Color")
     alpha_socket = parse_socket_name(layer, layer.alpha_output_name, None)
     texture_type = get_texture_identifier(layer.texture_type)
     if alpha_socket:
-        builder = PSNodeTreeBuilder(layer, TEXTURE_LAYER_VERSION, "source", color_socket, "source", alpha_socket)
+        builder = PSNodeTreeBuilder(layer, TEXTURE_LAYER_VERSION, "source", color_socket, "source", alpha_socket, blend_mode=blend_mode, enabled=enabled)
     else:
-        builder = PSNodeTreeBuilder(layer, TEXTURE_LAYER_VERSION, "source", color_socket)
+        builder = PSNodeTreeBuilder(layer, TEXTURE_LAYER_VERSION, "source", color_socket, blend_mode=blend_mode, enabled=enabled)
     builder.add_node("source", texture_type, {"name": "source"})
     builder.create_coord_graph('source', 'Vector')
     return builder
 
-def create_geometry_graph(layer: "LegacyLayer"):
+def create_geometry_graph(layer: "LayerLike", blend_mode: str = None, enabled: bool = True):
     node_map = {
         'WORLD_NORMAL': 'ShaderNodeNewGeometry',
         'WORLD_TRUE_NORMAL': 'ShaderNodeNewGeometry',
@@ -599,7 +593,7 @@ def create_geometry_graph(layer: "LegacyLayer"):
     else:
         color_node_name = "geometry"
         color_socket = output_name_map[geometry_type]
-    builder = PSNodeTreeBuilder(layer, GEOMETRY_LAYER_VERSION, color_node_name, color_socket)
+    builder = PSNodeTreeBuilder(layer, GEOMETRY_LAYER_VERSION, color_node_name, color_socket, blend_mode=blend_mode, enabled=enabled)
     if geometry_type == 'VECTOR_TRANSFORM':
         builder.link("group_input", "geometry", "Color", "Vector")
     if geometry_type in ['WORLD_NORMAL', 'WORLD_TRUE_NORMAL', 'OBJECT_NORMAL'] and normalize_normals:
@@ -624,29 +618,29 @@ def get_alpha_over_nodetree():
     builder.compile()
     return node_tree
 
-def create_layer_graph(layer: "LegacyLayer"):
+def create_layer_graph(layer: "LayerLike", blend_mode: str = None, enabled: bool = True):
     layer_graph = None
     match layer.type:
         case "IMAGE":
-            layer_graph = create_image_graph(layer)
+            layer_graph = create_image_graph(layer, blend_mode, enabled)
         case "FOLDER":
-            layer_graph = create_folder_graph(layer)
+            layer_graph = create_folder_graph(layer, blend_mode, enabled)
         case "SOLID_COLOR":
-            layer_graph = create_solid_graph(layer)
+            layer_graph = create_solid_graph(layer, blend_mode, enabled)
         case "ATTRIBUTE":
-            layer_graph = create_attribute_graph(layer)
+            layer_graph = create_attribute_graph(layer, blend_mode, enabled)
         case "ADJUSTMENT":
-            layer_graph = create_adjustment_graph(layer)
+            layer_graph = create_adjustment_graph(layer, blend_mode, enabled)
         case "GRADIENT":
-            layer_graph = create_gradient_graph(layer)
+            layer_graph = create_gradient_graph(layer, blend_mode, enabled)
         case "RANDOM":
-            layer_graph = create_random_graph(layer)
+            layer_graph = create_random_graph(layer, blend_mode, enabled)
         case "NODE_GROUP":
-            layer_graph = create_custom_graph(layer)
+            layer_graph = create_custom_graph(layer, blend_mode, enabled)
         case "TEXTURE":
-            layer_graph = create_texture_graph(layer)
+            layer_graph = create_texture_graph(layer, blend_mode, enabled)
         case "GEOMETRY":
-            layer_graph = create_geometry_graph(layer)
+            layer_graph = create_geometry_graph(layer, blend_mode, enabled)
     if not layer_graph:
         return None
     return layer_graph

@@ -241,6 +241,22 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
             
             return
         ps_ctx = self.parse_context(context)
+        if ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.data_version < 3 and ps_ctx.ps_mat_data.groups:
+            box = layout.box()
+            col = box.column()
+            warning_box = col.box()
+            col = warning_box.column()
+            col.alert = True
+            col.label(text="Paint System V2 Detected", icon="ERROR")
+            col.label(text="Please save before updating")
+            row = warning_box.row()
+            scale_content(context, row)
+            row.operator("wm.save_as_mainfile", text="Save As")
+            row = warning_box.row()
+            row.alert = True
+            scale_content(context, row)
+            row.operator("paint_system.migrate_v2_to_v3", text="Update to V3", icon="FILE_REFRESH")
+            return
         if is_online() and ps_ctx.ps_settings:
             # Trigger version check (non-blocking)
             get_latest_version()

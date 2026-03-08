@@ -330,7 +330,7 @@ def layer_settings_ui(layout: bpy.types.UILayout, context: bpy.types.Context):
         clip_row.enabled = not active_layer.lock_layer
         clip_row.prop(active_layer, "is_clip", text="",
                 icon="SELECT_INTERSECT")
-        if active_layer.type == 'IMAGE':
+        if active_layer.layer_type == 'IMAGE':
             clip_row.prop(active_layer, "lock_alpha",
                     text="", icon='TEXTURE')
         lock_row = row.row(align=True)
@@ -360,7 +360,7 @@ def layer_settings_ui(layout: bpy.types.UILayout, context: bpy.types.Context):
         clip_row.enabled = not active_layer.lock_layer
         clip_row.prop(active_layer, "is_clip", text="",
                 icon="SELECT_INTERSECT")
-        if active_layer.type == 'IMAGE':
+        if active_layer.layer_type == 'IMAGE':
             clip_row.prop(active_layer, "lock_alpha",
                     text="", icon='TEXTURE')
         lock_row = main_row.row(align=True)
@@ -429,25 +429,28 @@ def draw_socket_grid(layout: bpy.types.UILayout, layer, include_inputs: bool = T
     Args:
         layout: The UILayout to draw into.
         layer: The active layer whose socket properties are drawn.
+            For V3 Layer pass ``layer.layer_data`` (PSLayerData) so that
+            ``layout.prop`` can resolve the bpy property.
         include_inputs: Whether to also draw Color/Alpha Input rows.
     """
+    data = getattr(layer, 'layer_data', None) or layer
     output_box = layout.box()
     grid = output_box.grid_flow(columns=2, align=True, even_columns=True, row_major=True)
     grid_col = grid.column()
     grid_col.label(text="Color Output")
-    grid_col.prop(layer, "color_output_name", text="")
+    grid_col.prop(data, "color_output_name", text="")
     grid_col = grid.column()
     grid_col.label(text="Alpha Output")
-    grid_col.prop(layer, "alpha_output_name", text="")
+    grid_col.prop(data, "alpha_output_name", text="")
     if include_inputs:
         input_box = layout.box()
         grid = input_box.grid_flow(columns=2, align=True, even_columns=True, row_major=True)
         grid_col = grid.column()
         grid_col.label(text="Color Input")
-        grid_col.prop(layer, "color_input_name", text="")
+        grid_col.prop(data, "color_input_name", text="")
         grid_col = grid.column()
         grid_col.label(text="Alpha Input")
-        grid_col.prop(layer, "alpha_input_name", text="")
+        grid_col.prop(data, "alpha_input_name", text="")
 
 
 def ensure_invoke_context(layout: bpy.types.UILayout):
@@ -528,8 +531,8 @@ def draw_warning_box(layout: bpy.types.UILayout, lines):
     return warning_col
 
 
-def draw_layer_icon(layer: "LegacyLayer", layout: bpy.types.UILayout):
-    match layer.type:
+def draw_layer_icon(layer, layout: bpy.types.UILayout):
+    match layer.layer_type:
         case 'IMAGE':
             if not layer.image:
                 layout.label(icon_value=get_icon('image'))

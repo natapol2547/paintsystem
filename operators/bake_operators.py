@@ -548,7 +548,7 @@ class PAINTSYSTEM_OT_TransferImageLayerUV(BakeOperator):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        return ps_ctx.active_channel and ps_ctx.active_layer.type == 'IMAGE' and ps_ctx.active_layer.image
+        return ps_ctx.active_channel and ps_ctx.active_layer.layer_type == 'IMAGE' and ps_ctx.active_layer.image
     
     # def invoke(self, context, event):
     #     return context.window_manager.invoke_props_dialog(self)
@@ -578,7 +578,7 @@ class PAINTSYSTEM_OT_TransferImageLayerUV(BakeOperator):
         
         to_be_enabled_layers = []
         # Ensure all layers are disabled except the active layer
-        for layer in active_channel.layers:
+        for layer in active_channel.active_layers:
             if layer.enabled and layer != active_layer:
                 to_be_enabled_layers.append(layer)
                 layer.enabled = False
@@ -615,7 +615,7 @@ class PAINTSYSTEM_OT_ConvertToImageLayer(BakeOperator):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        return ps_ctx.active_layer and ps_ctx.active_layer.type != 'IMAGE'
+        return ps_ctx.active_layer and ps_ctx.active_layer.layer_type != 'IMAGE'
     
     def invoke(self, context, event):
         self.get_coord_type(context)
@@ -650,8 +650,8 @@ class PAINTSYSTEM_OT_ConvertToImageLayer(BakeOperator):
         
         to_be_enabled_layers = []
         # Ensure all layers are disabled except the active layer
-        for layer in active_channel.layers:
-            if layer.type != "FOLDER" and layer.enabled and layer != active_layer and layer not in children:
+        for layer in active_channel.active_layers:
+            if layer.layer_type != "FOLDER" and layer.enabled and layer != active_layer and layer not in children:
                 to_be_enabled_layers.append(layer)
                 layer.enabled = False
         original_blend_mode = get_layer_blend_type(active_layer)
@@ -666,7 +666,7 @@ class PAINTSYSTEM_OT_ConvertToImageLayer(BakeOperator):
         active_layer.coord_type = 'UV'
         active_layer.uv_map_name = self.uv_map_name
         active_layer.image = image
-        active_layer.type = 'IMAGE'
+        active_layer.layer_type = 'IMAGE'
         for layer in to_be_enabled_layers:
             layer.enabled = True
         active_channel.remove_children(active_layer.id)
@@ -678,15 +678,19 @@ class PAINTSYSTEM_OT_ConvertToImageLayer(BakeOperator):
         return {'FINISHED'}
 
 
-def apply_merged_image_to_layer(merged_layer: "LegacyLayer", image: Image, uv_map_name: str):
+def apply_merged_image_to_layer(merged_layer, image: Image, uv_map_name: str):
     merged_layer.name = merged_layer.name + " Merged"
-    merged_layer.type = "IMAGE"
+    merged_layer.layer_type = "IMAGE"
     merged_layer.coord_type = "UV"
     merged_layer.uv_map_name = uv_map_name
     merged_layer.image = image
-    merged_layer.linked_layer_uid = ""
-    merged_layer.linked_material = None
-    merged_layer.correct_image_aspect = False
+    if hasattr(merged_layer, 'linked_layer_uid'):
+        merged_layer.linked_layer_uid = ""
+    if hasattr(merged_layer, 'linked_material'):
+        merged_layer.linked_material = None
+    ld = merged_layer.layer_data if hasattr(merged_layer, 'layer_data') else merged_layer
+    if hasattr(ld, 'correct_image_aspect'):
+        ld.correct_image_aspect = False
 
 
 class PAINTSYSTEM_OT_MergeDown(BakeOperator):
@@ -714,8 +718,8 @@ class PAINTSYSTEM_OT_MergeDown(BakeOperator):
         return (
             active_layer
             and below_layer
-            and active_layer.type != "FOLDER"
-            and below_layer.type != "FOLDER"
+            and active_layer.layer_type != "FOLDER"
+            and below_layer.layer_type != "FOLDER"
             and active_layer.parent_id == below_layer.parent_id
             and active_layer.enabled
             and below_layer.enabled
@@ -732,7 +736,7 @@ class PAINTSYSTEM_OT_MergeDown(BakeOperator):
                     self.uv_map_name = DEFAULT_PS_UV_MAP_NAME
             else:
                 self.uv_map_name = DEFAULT_PS_UV_MAP_NAME if self.use_paint_system_uv else self.uv_map_name
-        if below_layer.type == "IMAGE":
+        if below_layer.layer_type == "IMAGE":
             self.image_resolution = "CUSTOM"
             self.image_width = below_layer.image.size[0]
             self.image_height = below_layer.image.size[1]
@@ -772,7 +776,7 @@ class PAINTSYSTEM_OT_MergeDown(BakeOperator):
         to_be_enabled_layers = []
         # Enable both active layer and below layer, disable all others
         for layer in active_channel.flattened_layers:
-            if layer.type != "FOLDER" and layer.enabled and layer != active_layer and layer != below_layer:
+            if layer.layer_type != "FOLDER" and layer.enabled and layer != active_layer and layer != below_layer:
                 to_be_enabled_layers.append(layer)
                 layer.enabled = False
         
@@ -836,8 +840,8 @@ class PAINTSYSTEM_OT_MergeUp(BakeOperator):
         return (
             active_layer
             and above_layer
-            and active_layer.type != "FOLDER"
-            and above_layer.type != "FOLDER"
+            and active_layer.layer_type != "FOLDER"
+            and above_layer.layer_type != "FOLDER"
             and active_layer.parent_id == above_layer.parent_id
             and active_layer.enabled
             and above_layer.enabled
@@ -848,14 +852,13 @@ class PAINTSYSTEM_OT_MergeUp(BakeOperator):
         self.get_coord_type(context)
         self.update_bake_multiple_objects(context)
         above_layer = self.get_above_layer(context)
-        # Choose UV based on the layer above
         if above_layer:
             if above_layer.uses_coord_type:
                 if getattr(above_layer, 'coord_type', 'UV') == 'AUTO':
                     self.uv_map_name = DEFAULT_PS_UV_MAP_NAME
             else:
                 self.uv_map_name = DEFAULT_PS_UV_MAP_NAME if self.use_paint_system_uv else self.uv_map_name
-        if above_layer.type == "IMAGE":
+        if above_layer.layer_type == "IMAGE":
             self.image_resolution = "CUSTOM"
             self.image_width = above_layer.image.size[0]
             self.image_height = above_layer.image.size[1]
@@ -893,7 +896,7 @@ class PAINTSYSTEM_OT_MergeUp(BakeOperator):
         to_be_enabled_layers = []
         # Enable both active layer and above layer, disable all others
         for layer in active_channel.flattened_layers:
-            if layer.type != "FOLDER" and layer.enabled and layer != active_layer and layer != above_layer:
+            if layer.layer_type != "FOLDER" and layer.enabled and layer != active_layer and layer != above_layer:
                 to_be_enabled_layers.append(layer)
                 layer.enabled = False
 
