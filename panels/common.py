@@ -329,7 +329,7 @@ def layer_settings_ui(layout: bpy.types.UILayout, context: bpy.types.Context):
         scale_content(context, row, 1.7, 1.5)
         clip_row = row.row(align=True)
         clip_row.enabled = not active_layer.lock_layer
-        clip_row.prop(active_layer, "is_clip", text="",
+        clip_row.prop(layer_data, "is_clip", text="",
                 icon="SELECT_INTERSECT")
         if active_layer.layer_type == 'IMAGE':
             clip_row.prop(active_layer, "lock_alpha",
@@ -359,7 +359,7 @@ def layer_settings_ui(layout: bpy.types.UILayout, context: bpy.types.Context):
         main_row = split.row(align=True)
         clip_row = main_row.row(align=True)
         clip_row.enabled = not active_layer.lock_layer
-        clip_row.prop(active_layer, "is_clip", text="",
+        clip_row.prop(layer_data, "is_clip", text="",
                 icon="SELECT_INTERSECT")
         if active_layer.layer_type == 'IMAGE':
             clip_row.prop(active_layer, "lock_alpha",

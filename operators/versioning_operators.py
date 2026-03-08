@@ -284,7 +284,7 @@ ASSET_PROPERTIES = [
     'normalize_normal', 'empty_object', 'projection_position',
     'projection_rotation', 'projection_fov', 'projection_space',
     'use_decal_depth_clip', 'parallax_space', 'parallax_uv_map_name',
-    'edit_external_mode', 'external_image',
+    'edit_external_mode', 'external_image', 'is_clip',
 ]
 
 
@@ -386,6 +386,7 @@ class PAINTSYSTEM_OT_MigrateV2ToV3(PSContextMixin, Operator):
                                 migrate_legacy_layer_to_ps_layer_data(layer_data, target_tree)
                                 try:
                                     target_tree.ps_layer_data.blend_mode = legacy_layer.blend_mode
+                                    target_tree.ps_layer_data.is_clip = legacy_layer.is_clip
                                 except Exception:
                                     pass
                                 linked_tree_map[share_key] = target_tree
@@ -400,7 +401,6 @@ class PAINTSYSTEM_OT_MigrateV2ToV3(PSContextMixin, Operator):
                             new_layer.layer_tree = target_tree
                             new_layer.auto_update_node_tree = False
                             new_layer.enabled = legacy_layer.enabled
-                            new_layer.is_clip = legacy_layer.is_clip
                             new_layer.lock_layer = legacy_layer.lock_layer
                             new_layer.lock_alpha = legacy_layer.lock_alpha
                             new_layer.is_expanded = legacy_layer.is_expanded

@@ -826,8 +826,8 @@ class PSLayerData(PropertyGroup):
     """Shared layer asset data stored on a NodeTree (``NodeTree.ps_layer_data``).
     
     Contains all properties that define *what* a layer is (type, image,
-    coordinates, etc.) while per-instance stack behaviour (blend_mode,
-    enabled, is_clip) lives on the lightweight ``Layer`` class.
+    coordinates, blend_mode, is_clip, etc.) while per-instance stack
+    behaviour (enabled) lives on the lightweight ``Layer`` class.
     """
     
     uid: StringProperty()
@@ -1096,6 +1096,30 @@ class PSLayerData(PropertyGroup):
         name="Blend Mode",
         description="Blend mode",
         update=_update_blend_mode
+    )
+
+    def _update_is_clip(self, context):
+        if not self.auto_update_node_tree:
+            return
+        self.update_node_tree(context)
+        node_tree = self.id_data
+        for material in bpy.data.materials:
+            if not hasattr(material, 'ps_mat_data'):
+                continue
+            for group in material.ps_mat_data.groups:
+                for channel in group.channels:
+                    if not hasattr(channel, 'v3_layers'):
+                        continue
+                    for layer in channel.v3_layers:
+                        if layer.layer_tree == node_tree:
+                            channel.update_node_tree(context)
+                            break
+
+    is_clip: BoolProperty(
+        name="Clip",
+        description="Clip the layer",
+        default=False,
+        update=_update_is_clip
     )
 
     edit_external_mode: EnumProperty(
@@ -1405,9 +1429,9 @@ class PSLayerData(PropertyGroup):
 class Layer(BaseNestedListItem):
     """Lightweight layer instance in a channel stack.
     
-    Holds per-instance stack behaviour (blend_mode, enabled, is_clip) and
-    a ``layer_tree`` pointer to the shared NodeTree whose
-    ``ps_layer_data`` carries the asset definition.
+    Holds per-instance stack behaviour (enabled) and a ``layer_tree``
+    pointer to the shared NodeTree whose ``ps_layer_data`` carries the
+    asset definition (blend_mode, is_clip, etc.).
     """
     
     uid: StringProperty()
@@ -1451,13 +1475,18 @@ class Layer(BaseNestedListItem):
         update=_update_enabled,
         options=set()
     )
-    is_clip: BoolProperty(
-        name="Clip",
-        description="Clip the layer",
-        default=False,
-        update=_update_enabled
-    )
-    
+
+    @property
+    def is_clip(self):
+        ld = self.layer_data
+        return ld.is_clip if ld else False
+
+    @is_clip.setter
+    def is_clip(self, value):
+        ld = self.layer_data
+        if ld:
+            ld.is_clip = value
+
     @property
     def blend_mode(self):
         ld = self.layer_data
@@ -1572,7 +1601,6 @@ class Layer(BaseNestedListItem):
     def copy_layer_data(self, source_layer: "Layer"):
         self.duplicate_layer_data(source_layer)
         self.enabled = source_layer.enabled
-        self.is_clip = source_layer.is_clip
         self.lock_layer = source_layer.lock_layer
         self.lock_alpha = source_layer.lock_alpha
         self.is_expanded = source_layer.is_expanded
@@ -2891,7 +2919,7 @@ class Channel(BaseNestedListManager):
                     if not unlinked_layer.enabled:
                         continue
                     layer_node_tree = unlinked_layer.layer_tree
-                    layer_is_clip = unlinked_layer.is_clip
+                    layer_is_clip = layer_data.is_clip
                     layer_type = layer_data.type
                     layer_blend_mode = layer_data.blend_mode
                     layer_id = unlinked_layer.id
