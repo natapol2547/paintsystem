@@ -34,7 +34,7 @@ from ..paintsystem.data import (
     GRADIENT_TYPE_ENUM, 
     TEXTURE_TYPE_ENUM,
     GEOMETRY_TYPE_ENUM,
-    Layer,
+    LegacyLayer,
     is_layer_linked,
     sort_actions
 )

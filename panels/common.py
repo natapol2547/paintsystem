@@ -5,7 +5,7 @@ import numpy as np
 from ..utils.version import is_newer_than
 
 # --
-from ..paintsystem.data import Channel, Layer
+from ..paintsystem.data import Channel, LegacyLayer
 from ..paintsystem.context import PSContextMixin
 from ..custom_icons import get_icon, get_icon_from_socket_type
 from ..preferences import get_preferences
@@ -528,7 +528,7 @@ def draw_warning_box(layout: bpy.types.UILayout, lines):
     return warning_col
 
 
-def draw_layer_icon(layer: "Layer", layout: bpy.types.UILayout):
+def draw_layer_icon(layer: "LegacyLayer", layout: bpy.types.UILayout):
     match layer.type:
         case 'IMAGE':
             if not layer.image:

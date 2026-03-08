@@ -10,7 +10,7 @@ from ..preferences import get_preferences, PaintSystemPreferences
 from ..utils.version import is_newer_than
 
 if TYPE_CHECKING:
-    from .data import MaterialData, Group, Channel, Layer, GlobalLayer, PaintSystemGlobalData
+    from .data import MaterialData, Group, Channel, LegacyLayer, GlobalLayer, PaintSystemGlobalData
 
 @dataclass
 class PSContext:
@@ -23,11 +23,11 @@ class PSContext:
     ps_mat_data: "MaterialData" | None = None
     active_group: "Group" | None = None
     active_channel: "Channel" | None = None
-    active_layer: "Layer" | None = None
-    unlinked_layer: "Layer" | None = None
+    active_layer: "LegacyLayer" | None = None
+    unlinked_layer: "LegacyLayer" | None = None
     active_global_layer: "GlobalLayer" | None = None
 
-def get_legacy_global_layer(layer: "Layer") -> "GlobalLayer" | None:
+def get_legacy_global_layer(layer: "LegacyLayer") -> "GlobalLayer" | None:
     """Get the global layer data from the context."""
     if not layer or not bpy.context.scene or not bpy.context.scene.ps_scene_data:
         return None
@@ -48,7 +48,7 @@ def get_ps_object(obj) -> bpy.types.Object | None:
                 return obj
     return None
 
-def parse_material(mat: Material) -> tuple["MaterialData", "Group", "Channel", "Layer"]:
+def parse_material(mat: Material) -> tuple["MaterialData", "Group", "Channel", "LegacyLayer"]:
     """Extract active mat_data, group, channel, and layer from a material."""
     mat_data = None
     active_group = None

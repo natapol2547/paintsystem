@@ -6,7 +6,7 @@ from bpy.props import StringProperty, BoolProperty, IntProperty, EnumProperty
 
 from .common import PSContextMixin, PSImageCreateMixin, DEFAULT_PS_UV_MAP_NAME
 
-from ..paintsystem.data import Layer, set_layer_blend_type, get_layer_blend_type
+from ..paintsystem.data import LegacyLayer, set_layer_blend_type, get_layer_blend_type
 from ..paintsystem.context import parse_material
 from ..panels.common import get_icon_from_channel
 
@@ -678,7 +678,7 @@ class PAINTSYSTEM_OT_ConvertToImageLayer(BakeOperator):
         return {'FINISHED'}
 
 
-def apply_merged_image_to_layer(merged_layer: "Layer", image: Image, uv_map_name: str):
+def apply_merged_image_to_layer(merged_layer: "LegacyLayer", image: Image, uv_map_name: str):
     merged_layer.name = merged_layer.name + " Merged"
     merged_layer.type = "IMAGE"
     merged_layer.coord_type = "UV"

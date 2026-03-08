@@ -5,7 +5,7 @@ import bpy
 from .common import create_mixing_graph, NodeTreeBuilder, create_coord_graph, get_library_nodetree, get_layer_blend_type, set_layer_blend_type, DEFAULT_PS_UV_MAP_NAME
 
 if TYPE_CHECKING:
-    from ..data import Layer
+    from ..data import LegacyLayer
 
 IMAGE_LAYER_VERSION = 5
 FOLDER_LAYER_VERSION = 3
@@ -33,7 +33,7 @@ class PSNodeTreeBuilder:
     
     def __init__(
         self,
-        layer: "Layer",
+        layer: "LegacyLayer",
         version: int,
         color_node_name: Optional[str] = None,
         color_socket: Optional[str] = None,
@@ -410,7 +410,7 @@ def get_adjustment_identifier(adjustment_type: str) -> str:
     return identifier_mapping.get(adjustment_type, "")
 
 # Layers that can have custom types are IMAGE, ATTRIBUTE, CUSTOM, TEXTURE
-def parse_socket_name(layer: "Layer", socket_name: str, default_socket_name: str = None) -> str:
+def parse_socket_name(layer: "LegacyLayer", socket_name: str, default_socket_name: str = None) -> str:
     if layer.type == "NODE_GROUP":
         custom_node_tree = layer.custom_node_tree
         if custom_node_tree:
@@ -420,7 +420,7 @@ def parse_socket_name(layer: "Layer", socket_name: str, default_socket_name: str
         return socket_name if socket_name != "_NONE_" else None
     return default_socket_name
 
-def create_image_graph(layer: "Layer"):
+def create_image_graph(layer: "LegacyLayer"):
     img = layer.image
     # Create builder with mixing graph - alpha will be determined later
     color_socket = parse_socket_name(layer, layer.color_output_name, "Color")
@@ -430,16 +430,16 @@ def create_image_graph(layer: "Layer"):
     builder.create_coord_graph("source", "Vector")
     return builder
 
-def create_folder_graph(layer: "Layer"):
+def create_folder_graph(layer: "LegacyLayer"):
     builder = PSNodeTreeBuilder(layer, FOLDER_LAYER_VERSION, "group_input", "Over Color", "group_input", "Over Alpha")
     return builder
 
-def create_solid_graph(layer: "Layer"):
+def create_solid_graph(layer: "LegacyLayer"):
     builder = PSNodeTreeBuilder(layer, SOLID_COLOR_LAYER_VERSION, "source", "Color")
     builder.add_node("source", "ShaderNodeRGB", {"name": "source"}, default_outputs={0: (1, 1, 1, 1)})
     return builder
 
-def create_attribute_graph(layer: "Layer"):
+def create_attribute_graph(layer: "LegacyLayer"):
     color_socket = parse_socket_name(layer, layer.color_output_name, "Color")
     alpha_socket = parse_socket_name(layer, layer.alpha_output_name, "Alpha")
     if alpha_socket:
@@ -449,7 +449,7 @@ def create_attribute_graph(layer: "Layer"):
     builder.add_node("source", "ShaderNodeAttribute", {"name": "source"})
     return builder
 
-def create_adjustment_graph(layer: "Layer"):
+def create_adjustment_graph(layer: "LegacyLayer"):
     adjustment_type = get_adjustment_identifier(layer.adjustment_type)
     input_socket_name = "Color"
     output_socket_name = "Color"
@@ -474,7 +474,7 @@ def create_adjustment_graph(layer: "Layer"):
     builder.link("group_input", "source", "Color", input_socket_name)
     return builder
 
-def create_gradient_graph(layer: "Layer"):
+def create_gradient_graph(layer: "LegacyLayer"):
     gradient_type = layer.gradient_type
     empty_object = layer.empty_object
     builder = PSNodeTreeBuilder(layer, GRADIENT_LAYER_VERSION, "source", "Color", "source", "Alpha")
@@ -516,7 +516,7 @@ def create_gradient_graph(layer: "Layer"):
     builder.link("map_range", "source", "Result", "Fac")
     return builder
 
-def create_random_graph(layer: "Layer"):
+def create_random_graph(layer: "LegacyLayer"):
     builder = PSNodeTreeBuilder(layer, RANDOM_LAYER_VERSION, "hue_saturation_value", "Color")
     builder.add_node("object_info", "ShaderNodeObjectInfo")
     builder.add_node("white_noise", "ShaderNodeTexWhiteNoise", {"noise_dimensions": "1D"})
@@ -542,7 +542,7 @@ def create_random_graph(layer: "Layer"):
     builder.link("value_multiply_add", "hue_saturation_value", "Value", "Value")
     return builder
 
-def create_custom_graph(layer: "Layer"):
+def create_custom_graph(layer: "LegacyLayer"):
     custom_node_tree = layer.custom_node_tree
     color_input = parse_socket_name(layer, layer.color_input_name, None)
     alpha_input = parse_socket_name(layer, layer.alpha_input_name, None)
@@ -559,7 +559,7 @@ def create_custom_graph(layer: "Layer"):
         builder.link("group_input", "source", "Alpha", alpha_input)
     return builder
 
-def create_texture_graph(layer: "Layer"):
+def create_texture_graph(layer: "LegacyLayer"):
     color_socket = parse_socket_name(layer, layer.color_output_name, "Color")
     alpha_socket = parse_socket_name(layer, layer.alpha_output_name, None)
     texture_type = get_texture_identifier(layer.texture_type)
@@ -571,7 +571,7 @@ def create_texture_graph(layer: "Layer"):
     builder.create_coord_graph('source', 'Vector')
     return builder
 
-def create_geometry_graph(layer: "Layer"):
+def create_geometry_graph(layer: "LegacyLayer"):
     node_map = {
         'WORLD_NORMAL': 'ShaderNodeNewGeometry',
         'WORLD_TRUE_NORMAL': 'ShaderNodeNewGeometry',
@@ -624,7 +624,7 @@ def get_alpha_over_nodetree():
     builder.compile()
     return node_tree
 
-def create_layer_graph(layer: "Layer"):
+def create_layer_graph(layer: "LegacyLayer"):
     layer_graph = None
     match layer.type:
         case "IMAGE":

@@ -4,7 +4,7 @@ from bpy.types import Material
 from .graph.common import LIBRARY_NODE_TREE_VERSIONS, get_library_nodetree
 from .graph.basic_layers import get_layer_version_for_type
 from .graph.nodetree_builder import get_nodetree_version
-from .data import get_legacy_global_layer, iter_all_layers, Layer, Group, Channel
+from .data import get_legacy_global_layer, iter_all_layers, LegacyLayer, Group, Channel
 from typing import TypedDict
 from ..utils.logging import get_logger
 
@@ -15,14 +15,14 @@ class LayerParent(TypedDict):
     group: Group
     channel: Channel
 
-def get_layer_parent_map() -> dict[Layer, LayerParent]:
+def get_layer_parent_map() -> dict[LegacyLayer, LayerParent]:
     """Build a mapping from every layer to its parent material, group, and channel."""
     return {
         layer: LayerParent(mat=mat, group=group, channel=channel)
         for mat, group, channel, layer in iter_all_layers()
     }
 
-def migrate_global_layer_data(layer_parent_map: dict[Layer, LayerParent]):
+def migrate_global_layer_data(layer_parent_map: dict[LegacyLayer, LayerParent]):
     seen_global_layers_map = {}
     for layer, layer_parent in layer_parent_map.items():
         has_migrated_global_layer = False
@@ -57,7 +57,7 @@ def migrate_global_layer_data(layer_parent_map: dict[Layer, LayerParent]):
         if has_migrated_global_layer:
             layer_parent["channel"].update_node_tree(bpy.context)
 
-def migrate_blend_mode(layer_parent_map: dict[Layer, LayerParent]):
+def migrate_blend_mode(layer_parent_map: dict[LegacyLayer, LayerParent]):
     for layer, layer_parent in layer_parent_map.items():
         layer = layer.get_layer_data()
         mix_node = layer.mix_node
@@ -68,7 +68,7 @@ def migrate_blend_mode(layer_parent_map: dict[Layer, LayerParent]):
             logger.debug(f"Layer {layer.name} has blend mode {blend_mode} but {layer.blend_mode} is set")
             layer.blend_mode = blend_mode
 
-def migrate_source_node(layer_parent_map: dict[Layer, LayerParent]):
+def migrate_source_node(layer_parent_map: dict[LegacyLayer, LayerParent]):
     for layer, layer_parent in layer_parent_map.items():
         # Update every source node to have label 'source'
         source_node = layer.source_node
@@ -76,7 +76,7 @@ def migrate_source_node(layer_parent_map: dict[Layer, LayerParent]):
             source_node.name = "source"
             source_node.label = "source"
 
-def migrate_socket_names(layer_parent_map: dict[Layer, LayerParent]):
+def migrate_socket_names(layer_parent_map: dict[LegacyLayer, LayerParent]):
     for layer, layer_parent in layer_parent_map.items():
         # If type == NODE_GROUP, update the color and alpha input and output sockets
         if layer.type == "NODE_GROUP" and layer.custom_node_tree:
@@ -101,7 +101,7 @@ def migrate_socket_names(layer_parent_map: dict[Layer, LayerParent]):
             layer.auto_update_node_tree = True
             layer.update_node_tree(bpy.context)
 
-def update_layer_version(layer_parent_map: dict[Layer, LayerParent]):
+def update_layer_version(layer_parent_map: dict[LegacyLayer, LayerParent]):
     for layer, layer_parent in layer_parent_map.items():
         # Updating layer to the target version
         if not layer.node_tree:
@@ -114,7 +114,7 @@ def update_layer_version(layer_parent_map: dict[Layer, LayerParent]):
             except Exception as e:
                 logger.error(f"Error updating layer {layer.name}: {e}")
 
-def update_layer_name(layer_parent_map: dict[Layer, LayerParent]):
+def update_layer_name(layer_parent_map: dict[LegacyLayer, LayerParent]):
     for layer, layer_parent in layer_parent_map.items():
         if layer.layer_name != layer.name:
             layer.name = layer.layer_name

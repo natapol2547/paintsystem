@@ -293,7 +293,7 @@ def update_active_group(self, context):
     if active_group:
         active_group.update_node_tree(context)
 
-def find_channels_containing_layer(check_layer: "Layer") -> list["Channel"]:
+def find_channels_containing_layer(check_layer: "LegacyLayer") -> list["Channel"]:
     """Find all channels that reference *check_layer* (directly or via link)."""
     channels = []
     for _mat, _grp, channel, layer in iter_all_layers():
@@ -804,7 +804,7 @@ def add_empty_to_collection(context: bpy.types.Context, empty_object: bpy.types.
     if empty_object.name not in collection.objects:
         collection.objects.link(empty_object)
 
-class Layer(BaseNestedListItem):
+class LegacyLayer(BaseNestedListItem):
     """A single paint layer (image, solid colour, adjustment, etc.) within a channel.
     
     Layers are organized in a nested hierarchy (via BaseNestedListItem) and can
@@ -1465,7 +1465,7 @@ class Layer(BaseNestedListItem):
         self.empty_object = empty_object
         return empty_object
     
-    def duplicate_layer_data(self, layer: "Layer"):
+    def duplicate_layer_data(self, layer: "LegacyLayer"):
         self.uid = str(uuid.uuid4())
         if layer.node_tree:
             self.node_tree = layer.node_tree.copy()
@@ -1479,7 +1479,7 @@ class Layer(BaseNestedListItem):
             self.empty_object.name = f"{self.name} ({self.uid[:8]}) Empty"
             self.ensure_empty_object()
     
-    def link_layer_data(self, layer: "Layer"):
+    def link_layer_data(self, layer: "LegacyLayer"):
         self.apply_properties(layer, self, ignore_props=["name", "uid", "id", "order", "parent_id", "layer_name"])
     
     def unlink_layer_data(self):
@@ -1493,11 +1493,11 @@ class Layer(BaseNestedListItem):
             self.linked_material = None
             self.copy_layer_data(layer)
     
-    def copy_layer_data(self, layer: "Layer"):
+    def copy_layer_data(self, layer: "LegacyLayer"):
         self.duplicate_layer_data(layer)
         self.apply_properties(layer, self, ignore_props=["name", "uid", "node_tree", "image", "empty_object", "type", "id", "order", "parent_id", "layer_name"])
     
-    def get_layer_data(self) -> "Layer":
+    def get_layer_data(self) -> "LegacyLayer":
         if self.is_linked:
             if not self.linked_material or not self.linked_material.ps_mat_data:
                 logger.error(f"Linked material {self.linked_material.name if self.linked_material else 'None'} not found")
@@ -1547,7 +1547,7 @@ class Layer(BaseNestedListItem):
             if self.node_tree:
                 bpy.data.node_groups.remove(self.node_tree)
     
-    def apply_properties(self, from_layer: "Layer", to_layer: "Layer", ignore_props: list[str] = []):
+    def apply_properties(self, from_layer: "LegacyLayer", to_layer: "LegacyLayer", ignore_props: list[str] = []):
         retry_props = []
         for prop in from_layer.bl_rna.properties:
             pid = getattr(prop, 'identifier', '')
@@ -1581,7 +1581,7 @@ class Layer(BaseNestedListItem):
     def modifies_color_data(self) -> bool:
         return self.type == "ATTRIBUTE" or (self.type == "GRADIENT" and self.gradient_type == "GRADIENT_MAP") or self.blend_mode != "MIX"
 
-def get_layer_by_uid(material: Material, uid: str) -> Layer | None:
+def get_layer_by_uid(material: Material, uid: str) -> LegacyLayer | None:
     uid_to_layer = _get_material_layer_uid_map(material)
     layer = uid_to_layer.get(uid)
     if not layer:
@@ -1589,9 +1589,9 @@ def get_layer_by_uid(material: Material, uid: str) -> Layer | None:
     return layer
 
 # Module-level cache for material layer UID maps
-_material_uid_cache: Dict[Material, Dict[str, 'Layer']] = {}
+_material_uid_cache: Dict[Material, Dict[str, 'LegacyLayer']] = {}
 
-def _get_material_layer_uid_map(material: Material, force_refresh: bool = False) -> Dict[str, 'Layer']:
+def _get_material_layer_uid_map(material: Material, force_refresh: bool = False) -> Dict[str, 'LegacyLayer']:
     """Get a UID to Layer mapping for a material. Uses caching for performance."""
     if not material or not material.ps_mat_data:
         return {}
@@ -1785,7 +1785,7 @@ class Channel(BaseNestedListManager):
     Compiles its layer graph into a single node tree that can be used by a Group.
     """
     
-    def get_parent_layer_id(self, layer: "Layer", ignore_passthrough: bool = False) -> int:
+    def get_parent_layer_id(self, layer: "LegacyLayer", ignore_passthrough: bool = False) -> int:
         if layer.parent_id == -1:
             return -1
         parent_layer = self.get_item_by_id(layer.parent_id)
@@ -2004,7 +2004,7 @@ class Channel(BaseNestedListManager):
         insert_at: Literal["TOP", "BOTTOM", "CURSOR", "BEFORE", "AFTER"] = "CURSOR", 
         handle_folder: bool = True,
         **kwargs
-    ) -> 'Layer':
+    ) -> 'LegacyLayer':
         parent_id, insert_order = self.get_insertion_data(handle_folder=handle_folder, insert_at=insert_at)
         # Adjust existing items' order
         self.adjust_sibling_orders(parent_id, insert_order)
@@ -2044,7 +2044,7 @@ class Channel(BaseNestedListManager):
         self.update_node_tree(context)
         return layer
     
-    def set_active_index_to_layer(self, context, layer: "Layer"):
+    def set_active_index_to_layer(self, context, layer: "LegacyLayer"):
         self.normalize_orders()
         order = int(layer.order)
         parent_id = int(layer.parent_id)
@@ -2056,12 +2056,12 @@ class Channel(BaseNestedListManager):
             self.active_index, len(self.layers) - 1)
         self.update_node_tree(context)
     
-    def delete_layer(self, context, layer: "Layer"):
+    def delete_layer(self, context, layer: "LegacyLayer"):
         item_id = layer.id
         order = int(layer.order)
         parent_id = int(layer.parent_id)
         logger.debug(f"Deleting layer {layer.name} with id {item_id} and order {order} and parent_id {parent_id}")
-        def on_delete(item: "Layer"):
+        def on_delete(item: "LegacyLayer"):
             item.delete_layer_data()
         if item_id != -1 and self.remove_item_and_children(item_id, on_delete):
             # Update active_index
@@ -2074,7 +2074,7 @@ class Channel(BaseNestedListManager):
             self.active_index, len(self.layers) - 1)
         self.update_node_tree(context)
     
-    def delete_layers(self, context, layers: list["Layer"]):
+    def delete_layers(self, context, layers: list["LegacyLayer"]):
         # Sort layer by index in descending order
         layers.sort(key=lambda x: self.get_collection_index_from_id(x.id), reverse=True)
         for layer in layers:
@@ -2263,7 +2263,7 @@ class Channel(BaseNestedListManager):
         
     @property
     def item_type(self):
-        return Layer
+        return LegacyLayer
     
     @property
     def collection_name(self):
@@ -2284,7 +2284,7 @@ class Channel(BaseNestedListManager):
         type=NodeTree
     )
     layers: CollectionProperty(
-        type=Layer,
+        type=LegacyLayer,
         name="Material Layers",
         description="Collection of material layers in the Paint System"
     )
@@ -2881,7 +2881,7 @@ class PaintSystemGlobalData(PropertyGroup):
         options={'SKIP_SAVE'}
     )
     
-    def add_layer_to_clipboard(self, layer: "Layer"):
+    def add_layer_to_clipboard(self, layer: "LegacyLayer"):
         ps_ctx = parse_context(bpy.context)
         clipboard_layer = self.clipboard_layers.add()
         if layer.is_linked:
@@ -2976,7 +2976,7 @@ class Filter(PropertyGroup):
         default=1
     )
 
-def iter_all_layers() -> Generator[tuple[Material, Group, Channel, Layer], None, None]:
+def iter_all_layers() -> Generator[tuple[Material, Group, Channel, LegacyLayer], None, None]:
     """Yield (material, group, channel, layer) for every layer across all materials.
     
     This is the canonical way to iterate over all Paint System layers and avoids
@@ -2990,11 +2990,11 @@ def iter_all_layers() -> Generator[tuple[Material, Group, Channel, Layer], None,
                         yield material, group, channel, layer
 
 
-def get_all_layers() -> list[Layer]:
+def get_all_layers() -> list[LegacyLayer]:
     """Return a flat list of every layer across all materials."""
     return [layer for _mat, _grp, _ch, layer in iter_all_layers()]
 
-def is_layer_linked(check_layer: Layer) -> bool:
+def is_layer_linked(check_layer: LegacyLayer) -> bool:
     """Check if the layer is linked (referenced by more than one layer entry)."""
     counter = Counter()
     for _mat, _grp, _ch, layer in iter_all_layers():
@@ -3277,7 +3277,7 @@ classes = (
     MarkerAction,
     GlobalLayer,
     LayerMask,
-    Layer,
+    LegacyLayer,
     Channel,
     Group,
     ClipboardLayer,
@@ -3305,10 +3305,45 @@ def register():
         description="Material Data for the Paint System"
     )
     bpy.types.Material.paint_system = PointerProperty(type=LegacyPaintSystemGroups)
+    bpy.types.NodeTree.ps_type = EnumProperty(
+        items=[
+            ('GROUP', "Group", "Group"),
+            ('CHANNEL', "Channel", "Channel"),
+            ('LAYER', "Layer", "Layer"),
+            ('MASK', "Mask", "Mask"),
+        ],
+        name="Paint System Node Tree Type",
+        description="Type of the Paint System Node Tree"
+    )
+    bpy.types.NodeTree.ps_group_data = PointerProperty(
+        type=Group,
+        name="Paint System Group Data",
+        description="Data for the Paint System Group"
+    )
+    bpy.types.NodeTree.ps_channel_data = PointerProperty(
+        type=Channel,
+        name="Paint System Channel Data",
+        description="Data for the Paint System Channel"
+    )
+    bpy.types.NodeTree.ps_layer_data = PointerProperty(
+        type=LegacyLayer,
+        name="Paint System Layer Data",
+        description="Data for the Paint System Layer"
+    )
+    bpy.types.NodeTree.ps_mask_data = PointerProperty(
+        type=LayerMask,
+        name="Paint System Mask Data",
+        description="Data for the Paint System Mask"
+    )
     
 def unregister():
     """Unregister the Paint System data module."""
     del bpy.types.Material.paint_system
     del bpy.types.Material.ps_mat_data
     del bpy.types.Scene.ps_scene_data
+    del bpy.types.NodeTree.ps_type
+    del bpy.types.NodeTree.ps_group_data
+    del bpy.types.NodeTree.ps_channel_data
+    del bpy.types.NodeTree.ps_layer_data
+    del bpy.types.NodeTree.ps_mask_data
     _unregister()

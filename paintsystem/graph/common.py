@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..data import Layer
+    from ..data import LegacyLayer
 
 from pathlib import Path
 from typing import Optional
@@ -19,14 +19,14 @@ LIBRARY_NODE_TREE_VERSIONS = {
     ".PS Tangent Normal": 2,
 }
 
-def get_layer_blend_type(layer: Layer) -> str:
+def get_layer_blend_type(layer: LegacyLayer) -> str:
     """Get the blend mode of the global layer"""
     blend_mode = layer.blend_mode
     if blend_mode == "PASSTHROUGH":
         return "MIX"
     return blend_mode
 
-def set_layer_blend_type(layer: Layer, blend_type: str) -> None:
+def set_layer_blend_type(layer: LegacyLayer, blend_type: str) -> None:
     """Set the blend mode of the global layer"""
     layer.blend_mode = blend_type
 
@@ -111,7 +111,7 @@ def get_library_object(object_name: str, library_filename: str = LIBRARY_FILENAM
         data_to.objects = [object_name]
     return bpy.data.objects.get(object_name)
 
-def create_mixing_graph(builder: NodeTreeBuilder, layer: "Layer", color_node_name: str = None, color_socket: str = None, alpha_node_name: str = None, alpha_socket: str = None) -> NodeTreeBuilder:
+def create_mixing_graph(builder: NodeTreeBuilder, layer: "LegacyLayer", color_node_name: str = None, color_socket: str = None, alpha_node_name: str = None, alpha_socket: str = None) -> NodeTreeBuilder:
     blend_mode = get_layer_blend_type(layer) if layer is not None else "MIX"
     use_pd_over = blend_mode not in ["MIX", "PASSTHROUGH"]
     pre_mix = get_library_nodetree(".PS Pre Mix")
@@ -158,7 +158,7 @@ def create_mixing_graph(builder: NodeTreeBuilder, layer: "Layer", color_node_nam
     return builder
 
 
-def create_coord_graph(builder: NodeTreeBuilder, layer: "Layer", coord_type: str, uv_map_name: str, node_name: str, socket_name: str, alpha_node_name: str = None, alpha_socket: str = None) -> NodeTreeBuilder:
+def create_coord_graph(builder: NodeTreeBuilder, layer: "LegacyLayer", coord_type: str, uv_map_name: str, node_name: str, socket_name: str, alpha_node_name: str = None, alpha_socket: str = None) -> NodeTreeBuilder:
     builder.add_node("mapping", "ShaderNodeMapping")
     if coord_type == "AUTO":
         builder.add_node("uvmap", "ShaderNodeUVMap", {"uv_map": DEFAULT_PS_UV_MAP_NAME}, force_properties=True)
