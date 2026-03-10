@@ -3063,7 +3063,6 @@ class Channel(BaseNestedListManager):
         handle_folder: bool = True,
         **kwargs
     ):
-        print(f"Creating layer {layer_name} with type {layer_type} and is_v3 {self.is_v3}")
         if self.is_v3:
             return self._create_layer_v3(context, layer_name, layer_type, update_active_index, insert_at, handle_folder, **kwargs)
         return self._create_layer_v2(context, layer_name, layer_type, update_active_index, insert_at, handle_folder, **kwargs)
@@ -3124,7 +3123,6 @@ class Channel(BaseNestedListManager):
         handle_folder: bool = True,
         **kwargs
     ) -> 'Layer':
-        print(f"Creating layer {layer_name} with type {layer_type}")
         parent_id, insert_order = self.get_insertion_data(handle_folder=handle_folder, insert_at=insert_at)
         self.adjust_sibling_orders(parent_id, insert_order)
         layer = self.add_item(
