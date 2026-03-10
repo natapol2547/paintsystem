@@ -176,6 +176,7 @@ GEOMETRY_TYPE_ENUM = [
     ('OBJECT_POSITION', "Object Space Position", "Object Space Position"),
     ('BACKFACING', "Backfacing", "Backfacing"),
     ('VECTOR_TRANSFORM', "Vector Transform", "Vector Transform"),
+    ('AMBIENT_OCCLUSION', "Ambient Occlusion", "Ambient Occlusion"),
 ]
 
 ACTION_TYPE_ENUM = [

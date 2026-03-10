@@ -277,6 +277,16 @@ def draw_layer_settings(layout, context):
                 col.prop(mat, "use_backface_culling", text="Backface Culling", icon='CHECKBOX_HLT' if mat.use_backface_culling else 'CHECKBOX_DEHLT')
             elif geometry_type in ['WORLD_NORMAL', 'WORLD_TRUE_NORMAL', 'OBJECT_NORMAL']:
                 col.prop(layer_data, "normalize_normal", text="Normalize Normal", icon='MESH_DATA')
+            elif geometry_type == 'AMBIENT_OCCLUSION':
+                geo_node = layer_data.find_node("geometry")
+                if geo_node:
+                    col.use_property_split = True
+                    col.use_property_decorate = False
+                    col.prop(geo_node, "samples", text="Samples")
+                    col.prop(geo_node, "inside", text="Inside")
+                    col.prop(geo_node, "only_local", text="Only Local")
+                    col.prop(geo_node.inputs["Color"], "default_value", text="Color")
+                    col.prop(geo_node.inputs["Distance"], "default_value", text="Distance")
         case _:
             pass
     

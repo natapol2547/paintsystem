@@ -574,6 +574,7 @@ def create_geometry_graph(layer: "LayerLike", blend_mode: str = None, enabled: b
         'OBJECT_NORMAL': 'ShaderNodeTexCoord',
         'OBJECT_POSITION': 'ShaderNodeTexCoord',
         'VECTOR_TRANSFORM': 'ShaderNodeVectorTransform',
+        'AMBIENT_OCCLUSION': 'ShaderNodeAmbientOcclusion',
     }
     output_name_map = {
         'WORLD_NORMAL': 'Normal',
@@ -583,6 +584,7 @@ def create_geometry_graph(layer: "LayerLike", blend_mode: str = None, enabled: b
         'OBJECT_NORMAL': 'Normal',
         'OBJECT_POSITION': 'Object',
         'VECTOR_TRANSFORM': 'Vector',
+        'AMBIENT_OCCLUSION': 'Color',
     }
     normalize_normals = layer.normalize_normal
     geometry_type = layer.geometry_type
@@ -596,9 +598,12 @@ def create_geometry_graph(layer: "LayerLike", blend_mode: str = None, enabled: b
     builder = PSNodeTreeBuilder(layer, GEOMETRY_LAYER_VERSION, color_node_name, color_socket, blend_mode=blend_mode, enabled=enabled)
     if geometry_type == 'VECTOR_TRANSFORM':
         builder.link("group_input", "geometry", "Color", "Vector")
-    if geometry_type in ['WORLD_NORMAL', 'WORLD_TRUE_NORMAL', 'OBJECT_NORMAL'] and normalize_normals:
+    elif geometry_type in ['WORLD_NORMAL', 'WORLD_TRUE_NORMAL', 'OBJECT_NORMAL'] and normalize_normals:
         builder.add_node("normalize", "ShaderNodeVectorMath", {"operation": "MULTIPLY_ADD", "hide": True}, {1: (0.5, 0.5, 0.5), 2: (0.5, 0.5, 0.5)})
         builder.link("geometry", "normalize", output_name_map[geometry_type], "Vector")
+    elif geometry_type == 'AMBIENT_OCCLUSION':
+        builder.add_node("obj_geometry", "ShaderNodeNewGeometry")
+        builder.link("obj_geometry", "geometry", "Normal", "Normal")
     builder.add_node("geometry", node_map[geometry_type])
     return builder
 
