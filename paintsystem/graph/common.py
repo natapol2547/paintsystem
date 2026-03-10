@@ -2,7 +2,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..data import Layer
+    from ..data import LegacyLayer, PSLayerData
+    LayerLike = LegacyLayer | PSLayerData
 
 from pathlib import Path
 from typing import Optional
@@ -20,15 +21,15 @@ LIBRARY_NODE_TREE_VERSIONS = {
     ".PS Post Mix": 1,
 }
 
-def get_layer_blend_type(layer: Layer) -> str:
-    """Get the blend mode of the global layer"""
+def get_layer_blend_type(layer) -> str:
+    """Get the blend mode of the layer, resolving PASSTHROUGH to MIX."""
     blend_mode = layer.blend_mode
     if blend_mode == "PASSTHROUGH":
         return "MIX"
     return blend_mode
 
-def set_layer_blend_type(layer: Layer, blend_type: str) -> None:
-    """Set the blend mode of the global layer"""
+def set_layer_blend_type(layer, blend_type: str) -> None:
+    """Set the blend mode of the layer."""
     layer.blend_mode = blend_type
 
 def _resolve_library_path(filename: str = LIBRARY_FILENAME) -> Path:
@@ -112,9 +113,11 @@ def get_library_object(object_name: str, library_filename: str = LIBRARY_FILENAM
         data_to.objects = [object_name]
     return bpy.data.objects.get(object_name)
 
-def create_mixing_graph(builder: NodeTreeBuilder, layer: "Layer"|None, color_node_name: str = None, color_socket: str = None, alpha_node_name: str = None, alpha_socket: str = None) -> NodeTreeBuilder:
-    blend_mode = get_layer_blend_type(layer) if layer is not None else "MIX"
-    use_pd_over = blend_mode not in ["MIX", "PASSTHROUGH"] and not layer.is_clip if layer else False
+def create_mixing_graph(builder: NodeTreeBuilder, layer: "LayerLike"|None, color_node_name: str = None, color_socket: str = None, alpha_node_name: str = None, alpha_socket: str = None, blend_mode: str = None, enabled: bool = True) -> NodeTreeBuilder:
+    if blend_mode is None:
+        blend_mode = get_layer_blend_type(layer) if layer is not None else "MIX"
+    actual_blend_mode = "MIX" if blend_mode == "PASSTHROUGH" else blend_mode
+    use_pd_over = actual_blend_mode not in ["MIX", "PASSTHROUGH"] and not layer.is_clip if layer else False
     pre_mix = get_library_nodetree(".PS Pre Mix")
     post_mix = get_library_nodetree(".PS Post Mix")
     if use_pd_over:
@@ -125,7 +128,7 @@ def create_mixing_graph(builder: NodeTreeBuilder, layer: "Layer"|None, color_nod
     if use_pd_over:
         builder.add_node("pd_over", "ShaderNodeGroup", {"node_tree": pd_over})
     builder.add_node("post_mix", "ShaderNodeGroup", {"node_tree": post_mix})
-    builder.add_node("mix_rgb", "ShaderNodeMix", {"blend_type": blend_mode, "data_type": "RGBA"}, force_properties=True)
+    builder.add_node("mix_rgb", "ShaderNodeMix", {"blend_type": actual_blend_mode, "data_type": "RGBA"}, force_properties=True)
     if alpha_node_name is not None and alpha_socket is not None:
         builder.link(alpha_node_name, "pre_mix", alpha_socket, "Over Alpha")
     builder.link("group_input", "pre_mix", "Color", "Color")
@@ -150,7 +153,7 @@ def create_mixing_graph(builder: NodeTreeBuilder, layer: "Layer"|None, color_nod
     builder.link("pre_mix", "post_mix", "Over Alpha", "Over Alpha")
     builder.link("group_input", "post_mix", "Alpha", "Alpha")
     builder.link("group_input", "post_mix", "Clip", "Clip")
-    if layer and not layer.enabled:
+    if not enabled:
         builder.link("group_input", "group_output", "Color", "Color")
         builder.link("group_input", "group_output", "Alpha", "Alpha")
     else:
@@ -159,7 +162,7 @@ def create_mixing_graph(builder: NodeTreeBuilder, layer: "Layer"|None, color_nod
     return builder
 
 
-def create_coord_graph(builder: NodeTreeBuilder, layer: "Layer", coord_type: str, uv_map_name: str, node_name: str, socket_name: str, alpha_node_name: str = None, alpha_socket: str = None) -> NodeTreeBuilder:
+def create_coord_graph(builder: NodeTreeBuilder, layer: "LegacyLayer", coord_type: str, uv_map_name: str, node_name: str, socket_name: str, alpha_node_name: str = None, alpha_socket: str = None) -> NodeTreeBuilder:
     builder.add_node("mapping", "ShaderNodeMapping")
     if coord_type == "AUTO":
         builder.add_node("uvmap", "ShaderNodeUVMap", {"uv_map": DEFAULT_PS_UV_MAP_NAME}, force_properties=True)

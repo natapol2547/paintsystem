@@ -8,6 +8,8 @@ from .common import PSContextMixin
 from ..paintsystem.data import (
     LegacyPaintSystemContextParser,
     LegacyPaintSystemLayer,
+    LegacyLayer,
+    PSLayerData,
     LAYER_TYPE_ENUM,
 )
 from ..paintsystem.graph.nodetree_builder import capture_node_state, apply_node_state
@@ -274,11 +276,163 @@ class PAINTSYSTEM_OT_DismissUpdate(PSContextMixin, Operator):
         ps_ctx.ps_settings.update_state = 'UNAVAILABLE'
         return {'FINISHED'}
 
+ASSET_PROPERTIES = [
+    'uid', 'layer_name', 'type', 'image', 'correct_image_aspect',
+    'custom_node_tree', 'color_input_name', 'alpha_input_name',
+    'color_output_name', 'alpha_output_name', 'coord_type', 'uv_map_name',
+    'adjustment_type', 'gradient_type', 'texture_type', 'geometry_type',
+    'normalize_normal', 'empty_object', 'projection_position',
+    'projection_rotation', 'projection_fov', 'projection_space',
+    'use_decal_depth_clip', 'parallax_space', 'parallax_uv_map_name',
+    'edit_external_mode', 'external_image', 'is_clip',
+]
+
+
+def migrate_legacy_layer_to_ps_layer_data(legacy_layer: "LegacyLayer", node_tree: "NodeTree") -> list[str]:
+    """Copy asset properties from a LegacyLayer to NodeTree.ps_layer_data.
+    
+    Returns list of property names that failed to migrate.
+    """
+    ps_data: PSLayerData = node_tree.ps_layer_data
+    
+    failed = []
+    ps_data.auto_update_node_tree = False
+    for pid in ASSET_PROPERTIES:
+        try:
+            setattr(ps_data, pid, getattr(legacy_layer, pid))
+        except Exception:
+            failed.append(pid)
+    
+    for action in legacy_layer.actions:
+        new_action = ps_data.actions.add()
+        for prop in action.bl_rna.properties:
+            pid = getattr(prop, 'identifier', '')
+            if not pid or getattr(prop, 'is_readonly', False):
+                continue
+            try:
+                setattr(new_action, pid, getattr(action, pid))
+            except Exception:
+                pass
+    ps_data.active_action_index = legacy_layer.active_action_index
+    
+    for mask in legacy_layer.masks:
+        new_mask = ps_data.masks.add()
+        for prop in mask.bl_rna.properties:
+            pid = getattr(prop, 'identifier', '')
+            if not pid or getattr(prop, 'is_readonly', False):
+                continue
+            try:
+                setattr(new_mask, pid, getattr(mask, pid))
+            except Exception:
+                pass
+    ps_data.active_mask_index = legacy_layer.active_mask_index
+    ps_data.auto_update_node_tree = True
+    
+    if failed:
+        logger.warning(f"Failed to migrate properties {failed} for {legacy_layer.name}")
+    return failed
+
+
+class PAINTSYSTEM_OT_MigrateV2ToV3(PSContextMixin, Operator):
+    bl_idname = "paint_system.migrate_v2_to_v3"
+    bl_label = "Update to Version 3"
+    bl_description = "Migrate Paint System data from V2 to V3 (NodeTree-based layer data)"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        for mat in bpy.data.materials:
+            if hasattr(mat, 'ps_mat_data') and mat.ps_mat_data.groups:
+                if mat.ps_mat_data.data_version < 3:
+                    return True
+        return False
+
+    def execute(self, context):
+        migrated_count = 0
+        failed_materials = []
+        linked_tree_map = {}
+
+        for mat in bpy.data.materials:
+            if not hasattr(mat, 'ps_mat_data') or not mat.ps_mat_data.groups:
+                continue
+            if mat.ps_mat_data.data_version >= 3:
+                continue
+
+            try:
+                for group in mat.ps_mat_data.groups:
+                    for channel in group.channels:
+                        for legacy_layer in channel.layers:
+                            if legacy_layer.is_linked:
+                                share_key = (
+                                    legacy_layer.linked_material.name if legacy_layer.linked_material else "",
+                                    legacy_layer.linked_layer_uid
+                                )
+                            else:
+                                share_key = (mat.name, legacy_layer.uid)
+
+                            if share_key in linked_tree_map:
+                                target_tree = linked_tree_map[share_key]
+                            else:
+                                layer_data = legacy_layer.get_layer_data()
+                                if layer_data is None:
+                                    logger.warning(f"Skipping layer {legacy_layer.name}: could not resolve source data")
+                                    continue
+                                target_tree = layer_data.node_tree
+                                if not target_tree:
+                                    target_tree = bpy.data.node_groups.new(
+                                        name=f"PS_Layer ({layer_data.name})",
+                                        type='ShaderNodeTree'
+                                    )
+                                migrate_legacy_layer_to_ps_layer_data(layer_data, target_tree)
+                                try:
+                                    target_tree.ps_layer_data.blend_mode = legacy_layer.blend_mode
+                                    target_tree.ps_layer_data.is_clip = legacy_layer.is_clip
+                                except Exception:
+                                    pass
+                                linked_tree_map[share_key] = target_tree
+
+                            new_layer = channel.v3_layers.add()
+                            new_layer.id = legacy_layer.id
+                            new_layer.name = legacy_layer.name
+                            new_layer.parent_id = legacy_layer.parent_id
+                            new_layer.order = legacy_layer.order
+                            new_layer.uid = legacy_layer.uid
+                            new_layer.layer_name = legacy_layer.layer_name
+                            new_layer.layer_tree = target_tree
+                            new_layer.auto_update_node_tree = False
+                            new_layer.enabled = legacy_layer.enabled
+                            new_layer.lock_layer = legacy_layer.lock_layer
+                            new_layer.lock_alpha = legacy_layer.lock_alpha
+                            new_layer.is_expanded = legacy_layer.is_expanded
+                            new_layer.auto_update_node_tree = True
+                            new_layer.update_node_tree(context)
+
+                        max_id = max((l.id for l in channel.v3_layers), default=0)
+                        channel.next_id = max(channel.next_id, max_id + 1)
+                        channel.layers.clear()
+                        channel.update_node_tree(context)
+
+                    group.update_node_tree(context)
+
+                mat.ps_mat_data.data_version = 3
+                migrated_count += 1
+            except Exception as e:
+                logger.error(f"Failed to migrate material {mat.name}: {e}")
+                failed_materials.append(mat.name)
+
+        if failed_materials:
+            self.report({'WARNING'}, f"Migration completed with errors on: {', '.join(failed_materials)}")
+        else:
+            self.report({'INFO'}, f"Successfully migrated {migrated_count} material(s) to V3")
+        return {'FINISHED'}
+
+
 classes = (
     PAINTSYSTEM_OT_UpdatePaintSystemData,
     PAINTSYSTEM_OT_CheckForUpdates,
     PAINTSYSTEM_OT_OpenExtensionPreferences,
     PAINTSYSTEM_OT_DismissUpdate,
+    PAINTSYSTEM_OT_MigrateV2ToV3,
 )
 
 register, unregister = register_classes_factory(classes)

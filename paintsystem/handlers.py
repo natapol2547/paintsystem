@@ -1,6 +1,6 @@
 import bpy
 
-from .versioning import get_layer_parent_map, migrate_global_layer_data, migrate_blend_mode, migrate_source_node, migrate_socket_names, update_layer_name, update_layer_version, update_library_nodetree_version
+from .versioning import get_layer_parent_map, migrate_global_layer_data, migrate_blend_mode, migrate_source_node, migrate_socket_names, update_layer_name, update_layer_version, update_library_nodetree_version, update_v3_layer_version
 from .version_check import get_latest_version
 from .context import parse_context
 from .data import sort_actions, get_all_layers, is_valid_uuidv4, iter_all_layers
@@ -45,7 +45,6 @@ def frame_change_pre(scene: bpy.types.Scene):
             match action.action_bind:
                 case 'FRAME':
                     if action.frame <= scene.frame_current:
-                        # logger.debug(f"Frame {action.frame} found at frame {scene.frame_current}")
                         if action.action_type == 'ENABLE' and update_task.get(layer, layer.enabled) == False:
                             update_task[layer] = True
                         elif action.action_type == 'DISABLE' and update_task.get(layer, layer.enabled) == True:
@@ -53,7 +52,6 @@ def frame_change_pre(scene: bpy.types.Scene):
                 case 'MARKER':
                     marker = scene.timeline_markers.get(action.marker_name)
                     if marker and marker.frame <= scene.frame_current:
-                        # logger.debug(f"Marker {marker.frame} found at frame {scene.frame_current}")
                         if action.action_type == 'ENABLE' and update_task.get(layer, layer.enabled) == False:
                             update_task[layer] = True
                         elif action.action_type == 'DISABLE' and update_task.get(layer, layer.enabled) == True:
@@ -95,6 +93,7 @@ def load_paint_system_data():
     update_layer_version(layer_parent_map)
     update_layer_name(layer_parent_map)
     update_library_nodetree_version()
+    update_v3_layer_version()
 
     # As layers in ps_scene_data is not used anymore, we can remove it in the future
     if ps_scene_data and hasattr(ps_scene_data, 'layers') and len(ps_scene_data.layers) > 0:
@@ -121,15 +120,18 @@ def save_handler(scene: bpy.types.Scene):
     
     seen_channels = set()
     for _mat, _grp, channel, layer in iter_all_layers():
-        # Collect bake images once per channel
         ch_id = id(channel)
         if ch_id not in seen_channels:
             seen_channels.add(ch_id)
             if channel.bake_image and channel.bake_image.is_dirty:
                 images.add(channel.bake_image)
-        # Collect layer images
-        if layer.image:
-            images.add(layer.image)
+        layer_image = None
+        if hasattr(layer, 'layer_data') and layer.layer_data:
+            layer_image = layer.layer_data.image
+        elif hasattr(layer, 'image'):
+            layer_image = layer.image
+        if layer_image:
+            images.add(layer_image)
             
     for image in images:
         save_image(image)
@@ -139,8 +141,15 @@ def save_handler(scene: bpy.types.Scene):
 def refresh_image(scene: bpy.types.Scene):
     ps_ctx = parse_context(bpy.context)
     active_layer = ps_ctx.active_layer
-    if active_layer and active_layer.image:
-        active_layer.image.reload()
+    if not active_layer:
+        return
+    img = None
+    if hasattr(active_layer, 'layer_data') and active_layer.layer_data:
+        img = active_layer.layer_data.image
+    elif hasattr(active_layer, 'image'):
+        img = active_layer.image
+    if img:
+        img.reload()
 
 
 @bpy.app.handlers.persistent
@@ -156,8 +165,15 @@ def color_history_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph
         active_layer = ps_ctx.active_layer
         if not active_layer:
             return
-        image: bpy.types.Image = active_layer.image
-        if active_layer and active_layer.type == "IMAGE" and image and image.is_dirty:
+        if ps_ctx.active_layer_data:
+            image = ps_ctx.active_layer_data.image
+            layer_type = ps_ctx.active_layer_data.type
+        elif hasattr(active_layer, 'image'):
+            image = active_layer.image
+            layer_type = active_layer.type
+        else:
+            return
+        if layer_type == "IMAGE" and image and image.is_dirty:
             palette = ensure_color_history_palette(ps_scene_data)
             current_color = ps_scene_data.get_brush_color(bpy.context)
             
