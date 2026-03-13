@@ -317,13 +317,19 @@ class PAINTSYSTEM_OT_DuplicatePaintSystemData(PSContextMixin, MultiMaterialOpera
         ps_mat_data = ps_ctx.ps_mat_data
         mat = ps_ctx.active_material
         
-        for group in ps_mat_data.groups:
+        # Build (group, group_ref) pairs — works for V3 (group_nodes) only.
+        group_pairs = []
+        for ref in ps_mat_data.group_nodes:
+            if ref.node_tree:
+                group_pairs.append((ref.node_tree.ps_group_data, ref))
+
+        for group, group_ref in group_pairs:
             original_node_tree = group.node_tree
             
             # Store links connected to the original node group before replacing
-            group_nodes = [n for n in mat.node_tree.nodes if n.type == 'GROUP' and n.node_tree == original_node_tree]
+            mat_group_nodes = [n for n in mat.node_tree.nodes if n.type == 'GROUP' and n.node_tree == original_node_tree]
             relink_map = {}
-            for node_group in group_nodes:
+            for node_group in mat_group_nodes:
                 input_links = []
                 output_links = []
                 for input_socket in node_group.inputs[:]:
@@ -342,9 +348,14 @@ class PAINTSYSTEM_OT_DuplicatePaintSystemData(PSContextMixin, MultiMaterialOpera
                     'input_links': input_links,
                     'output_links': output_links,
                 }
-            
-            node_tree = bpy.data.node_groups.new(name=f"Paint System ({mat.name})", type='ShaderNodeTree')
-            group.node_tree = node_tree
+
+            # Create fresh NodeTree for the group and update both the
+            # GroupNodeRef slot and the embedded Group's own node_tree pointer.
+            new_group_tree = bpy.data.node_groups.new(name=f"Paint System ({mat.name})", type='ShaderNodeTree')
+            new_group_tree.ps_type = 'GROUP'
+            group_ref.node_tree = new_group_tree
+            group.node_tree = new_group_tree
+
             for channel in group.channels:
                 node_tree = bpy.data.node_groups.new(name=f"PS_Channel ({channel.name})", type='ShaderNodeTree')
                 channel.node_tree = node_tree

@@ -502,6 +502,10 @@ class MAT_PT_Layers(PSContextMixin, Panel):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
+        # Hide the panel entirely when the material still has V2 legacy data —
+        # the main panel will show the migration prompt instead.
+        if ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.ps_data_version < 3:
+            return False
         if ps_ctx.active_group and check_group_multiuser(ps_ctx.active_group.node_tree):
             return False
         return ps_ctx.ps_object and (ps_ctx.active_channel is not None or ps_ctx.ps_object.type == 'GREASEPENCIL')

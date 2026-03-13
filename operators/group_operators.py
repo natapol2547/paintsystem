@@ -274,8 +274,13 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
     
     def invoke(self, context, event):
         ps_ctx = self.parse_context(context)
-        if ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.groups:
-            self.group_name = get_next_unique_name(self.group_name, [group.name for group in ps_ctx.ps_mat_data.groups])
+        if ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.group_nodes:
+            existing_names = [
+                ref.node_tree.ps_group_data.name
+                for ref in ps_ctx.ps_mat_data.group_nodes
+                if ref.node_tree
+            ]
+            self.group_name = get_next_unique_name(self.group_name, existing_names)
         else:
             self.group_name = "New Group"
         self.get_coord_type(context)
@@ -392,7 +397,7 @@ class PAINTSYSTEM_OT_DeleteGroup(PSContextMixin, Operator):
                 case 'NORMAL':
                     nodes = [group_node]
                     dissolve_nodes(node_tree, nodes)
-        lm = ListManager(ps_mat_data, 'groups', ps_mat_data, 'active_index')
+        lm = ListManager(ps_mat_data, 'group_nodes', ps_mat_data, 'active_index')
         lm.remove_active_item()
         redraw_panel(context)
         return {'FINISHED'}
@@ -433,7 +438,7 @@ class PAINTSYSTEM_OT_MoveGroup(PSContextMixin, MultiMaterialOperator):
     def process_material(self, context):
         ps_ctx = self.parse_context(context)
         ps_mat_data = ps_ctx.ps_mat_data
-        lm = ListManager(ps_mat_data, 'groups', ps_mat_data, 'active_index')
+        lm = ListManager(ps_mat_data, 'group_nodes', ps_mat_data, 'active_index')
         lm.move_active_down() if self.direction == 'DOWN' else lm.move_active_up()
         redraw_panel(context)
         return {'FINISHED'}

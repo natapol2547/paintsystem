@@ -59,6 +59,12 @@ from .graph import (
 from .graph.common import get_library_nodetree, get_library_object, DEFAULT_PS_UV_MAP_NAME
 from .nested_list_manager import BaseNestedListManager, BaseNestedListItem
 
+# Global kill-switch for ALL update_node_tree callbacks (Layer, Channel, Group).
+# Set to True during bulk operations like V2→V3 migration to suppress every
+# node-tree rebuild, including cross-object callbacks (update_blend_mode,
+# update_active_channel, etc.) that bypass per-object auto_update_node_tree.
+pause_all_node_tree_updates = False
+
 BLEND_MODE_ENUM = []
 for blend_mode in bpy.types.ShaderNodeMixRGB.bl_rna.properties['blend_type'].enum_items:
     BLEND_MODE_ENUM.append((blend_mode.identifier, blend_mode.name, blend_mode.description))
@@ -828,6 +834,8 @@ class Layer(BaseNestedListItem):
     )
     
     def update_node_tree(self, context):
+        if pause_all_node_tree_updates:
+            return
         if not self.auto_update_node_tree:
             return
         # Ensure the paint system UV map even if it's linked
@@ -1241,6 +1249,10 @@ class Layer(BaseNestedListItem):
         default=False,
         update=update_active_image
     )
+    # DEPRECATED in V3: when this Layer is embedded in a NodeTree
+    # (ps_layer_data), use ``self.id_data`` to get the owning NodeTree.
+    # For the Layer inside ps_group_data.channels[j].layers[k], this still
+    # points to the layer's compiled ShaderNodeTree.
     node_tree: PointerProperty(
         name="Node Tree",
         type=NodeTree
@@ -1509,14 +1521,15 @@ class Layer(BaseNestedListItem):
             layer = uid_to_layer.get(self.linked_layer_uid)
             if not layer:
                 layer = _get_material_layer_uid_map(self.linked_material, force_refresh=True).get(self.linked_layer_uid)
-            return uid_to_layer.get(self.linked_layer_uid)
+            return layer
         return self
     
     def transfer_linked_data(self):
         linked_layer_uid_map = {}
         for material in bpy.data.materials:
-            if hasattr(material, 'ps_mat_data'):
-                for group in material.ps_mat_data.groups:
+            ps_data = getattr(material, 'ps_mat_data', None)
+            if ps_data:
+                for group in iter_mat_groups(ps_data):
                     for channel in group.channels:
                         for layer in channel.layers:
                             if layer.is_linked and layer.linked_layer_uid == self.uid:
@@ -1604,7 +1617,7 @@ def _get_material_layer_uid_map(material: Material, force_refresh: bool = False)
     
     # Build the UID map
     uid_map = {}
-    for group in material.ps_mat_data.groups:
+    for group in iter_mat_groups(material.ps_mat_data):
         for channel in group.channels:
             for layer in channel.layers:
                 if layer.uid:
@@ -1797,6 +1810,10 @@ class Channel(BaseNestedListManager):
         return parent_layer.id
     
     def update_node_tree(self, context:Context):
+        if pause_all_node_tree_updates:
+            return
+        if not self.auto_update_node_tree:
+            return
         if not self.node_tree:
             return
         _invalidate_material_layer_cache(parse_context(context).active_material)
@@ -2172,8 +2189,9 @@ class Channel(BaseNestedListManager):
                 alpha_output = value_node.outputs['Value']
                 to_be_deleted_nodes.append(value_node)
             
-            if hasattr(mat, "ps_mat_data") and mat.ps_mat_data.groups and use_group_tree:
-                for group in mat.ps_mat_data.groups:
+            ps_data = getattr(mat, "ps_mat_data", None)
+            if ps_data and use_group_tree:
+                for group in iter_mat_groups(ps_data):
                     if group.node_tree and self.name in group.channels:
                         bake_node = find_node(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': group.node_tree})
                         color_output = bake_node.outputs[self.name]
@@ -2280,9 +2298,18 @@ class Channel(BaseNestedListManager):
         default=False,
         options={'SKIP_SAVE'}  # Don't save this flag in the .blend file
     )
+    # DEPRECATED in V3: when this Channel is embedded in a NodeTree
+    # (ps_channel_data), use ``self.id_data`` to get the owning NodeTree.
+    # For the Channel inside ps_group_data.channels, this still points to
+    # the channel's compiled ShaderNodeTree.
     node_tree: PointerProperty(
         name="Node Tree",
         type=NodeTree
+    )
+    auto_update_node_tree: BoolProperty(
+        name="Auto Update Node Tree",
+        default=True,
+        options={'SKIP_SAVE'}
     )
     layers: CollectionProperty(
         type=Layer,
@@ -2540,17 +2567,35 @@ class Group(PropertyGroup):
         return group_node
     
     def update_node_tree(self, context):
-        if not self.node_tree:
+        if pause_all_node_tree_updates:
             return
-        node_tree = self.node_tree
+        if not self.auto_update_node_tree:
+            return
+        node_tree = self.node_tree or (
+            self.id_data if isinstance(self.id_data, bpy.types.NodeTree) else None
+        )
+        if not node_tree:
+            return
         mat = None
-        # Get the material that contains this group
+        # Get the material that contains this group (V3 and V2 paths).
         for material in bpy.data.materials:
-            if material.ps_mat_data and material.ps_mat_data.groups:
-                for group in material.ps_mat_data.groups:
-                    if group.node_tree == node_tree:
-                        mat = material
-                        break
+            ps_data = getattr(material, 'ps_mat_data', None)
+            if not ps_data:
+                continue
+            # V3: search group_nodes slots
+            for ref in ps_data.group_nodes:
+                if ref.node_tree == node_tree:
+                    mat = material
+                    break
+            if mat:
+                break
+            # V2 legacy: search groups collection
+            for group in ps_data.groups:
+                if group.node_tree == node_tree:
+                    mat = material
+                    break
+            if mat:
+                break
         if mat:
             node_tree.name = f"PS {self.name} ({mat.name})"
         else:
@@ -2630,9 +2675,16 @@ class Group(PropertyGroup):
         update_active_image(self, context)
     
     active_index: IntProperty(name="Active Channel Index", update=update_channel)
+    # DEPRECATED in V3: when this Group is embedded in a NodeTree
+    # (ps_group_data), use ``self.id_data`` to get the owning NodeTree.
     node_tree: PointerProperty(
         name="Node Tree",
         type=NodeTree
+    )
+    auto_update_node_tree: BoolProperty(
+        name="Auto Update Node Tree",
+        default=True,
+        options={'SKIP_SAVE'}
     )
     
     def create_channel(
@@ -2896,15 +2948,40 @@ class PaintSystemGlobalData(PropertyGroup):
         self.clipboard_layers.clear()
         self.active_clipboard_index = 0
 
+class GroupNodeRef(PropertyGroup):
+    """A lightweight V3 group slot — just a pointer to the group's NodeTree.
+
+    The full Group data (name, channels, layers, etc.) lives in
+    ``node_tree.ps_group_data`` once the NodeTree is assigned.
+    """
+    node_tree: PointerProperty(
+        name="Node Tree",
+        type=NodeTree
+    )
+
+
 class MaterialData(PropertyGroup):
     """Per-material Paint System data (stored on ``Material.ps_mat_data``).
     
     Contains groups, preview state, and helper methods for creating groups.
     """
+    # V2 legacy — kept so that existing .blend files can still be read and
+    # migrated. Do not write new data here; use group_nodes instead.
     groups: CollectionProperty(
         type=Group,
         name="Groups",
-        description="Collection of groups in the Paint System"
+        description="(V2 legacy) Collection of groups in the Paint System"
+    )
+    # V3: each slot holds a NodeTree whose ps_group_data carries full Group data.
+    group_nodes: CollectionProperty(
+        type=GroupNodeRef,
+        name="Group Nodes",
+        description="(V3) NodeTree-backed group references"
+    )
+    ps_data_version: IntProperty(
+        name="Paint System Data Version",
+        description="Internal data-format version (2 = V2 legacy, 3 = V3 NodeTree-based)",
+        default=2
     )
     active_index: IntProperty(name="Active Group Index")
     use_alpha: BoolProperty(
@@ -2931,16 +3008,33 @@ class MaterialData(PropertyGroup):
     )
     
     def create_new_group(self, context, group_name: str, node_tree: bpy.types.NodeTree = None):
+        """Create a new V3 group backed by a NodeTree.
+
+        The group's configuration is stored in ``node_tree.ps_group_data``;
+        a lightweight ``GroupNodeRef`` entry is added to ``group_nodes``.
+        """
         if not node_tree:
-            node_tree = bpy.data.node_groups.new(name=f"Temp Group Name", type='ShaderNodeTree')
+            node_tree = bpy.data.node_groups.new(name="Temp Group Name", type='ShaderNodeTree')
         else:
-            # Delete all nodes in the node tree
             for node in node_tree.nodes:
                 node_tree.nodes.remove(node)
-        lm = ListManager(self, 'groups', self, 'active_index')
-        new_group = lm.add_item()
+
+        # Tag the NodeTree so it is recognised as a Paint System group.
+        node_tree.ps_type = 'GROUP'
+
+        # The Group PropertyGroup is embedded directly in the NodeTree.
+        new_group = node_tree.ps_group_data
         new_group.name = group_name
         new_group.node_tree = node_tree
+
+        # Register a slot in the V3 group list.
+        lm = ListManager(self, 'group_nodes', self, 'active_index')
+        new_ref = lm.add_item()
+        new_ref.node_tree = node_tree
+
+        # Ensure this material is marked as V3.
+        self.ps_data_version = 3
+
         new_group.update_node_tree(context)
         return new_group
 
@@ -2977,15 +3071,43 @@ class Filter(PropertyGroup):
         default=1
     )
 
+def iter_mat_groups(ps_mat_data: "MaterialData") -> Generator["Group", None, None]:
+    """Yield every Group for *ps_mat_data*, handling both V2 and V3 layouts.
+
+    V3: groups are stored in ``group_nodes[i].node_tree.ps_group_data``.
+    V2 (legacy): groups are stored directly in ``groups``.
+    """
+    if ps_mat_data.ps_data_version >= 3:
+        for ref in ps_mat_data.group_nodes:
+            if ref.node_tree:
+                yield ref.node_tree.ps_group_data
+    else:
+        yield from ps_mat_data.groups
+
+
 def iter_all_layers() -> Generator[tuple[Material, Group, Channel, Layer], None, None]:
     """Yield (material, group, channel, layer) for every layer across all materials.
     
     This is the canonical way to iterate over all Paint System layers and avoids
     duplicating the four-level nested loop throughout the codebase.
+    Supports both V3 (group_nodes) and V2 legacy (groups) materials.
     """
     for material in bpy.data.materials:
-        if hasattr(material, 'ps_mat_data'):
-            for group in material.ps_mat_data.groups:
+        ps_data = getattr(material, 'ps_mat_data', None)
+        if not ps_data:
+            continue
+        if ps_data.ps_data_version >= 3:
+            # V3: group data lives in each GroupNodeRef's NodeTree.
+            for ref in ps_data.group_nodes:
+                if not ref.node_tree:
+                    continue
+                group = ref.node_tree.ps_group_data
+                for channel in group.channels:
+                    for layer in channel.layers:
+                        yield material, group, channel, layer
+        else:
+            # V2 legacy path.
+            for group in ps_data.groups:
                 for channel in group.channels:
                     for layer in channel.layers:
                         yield material, group, channel, layer
@@ -3284,6 +3406,7 @@ classes = (
     ClipboardLayer,
     TempMaterial,
     PaintSystemGlobalData,
+    GroupNodeRef,
     MaterialData,
     LegacyPaintSystemLayer,
     LegacyPaintSystemGroup,
@@ -3306,9 +3429,43 @@ def register():
         description="Material Data for the Paint System"
     )
     bpy.types.Material.paint_system = PointerProperty(type=LegacyPaintSystemGroups)
-    
+
+    # V3: NodeTree-level properties so that group/channel/layer data is
+    # self-contained inside the NodeTree and can be linked across files.
+    bpy.types.NodeTree.ps_type = EnumProperty(
+        name="Paint System Type",
+        description="Identifies which kind of Paint System data this NodeTree carries",
+        items=[
+            ('NONE',    'None',    'Not a Paint System node tree'),
+            ('GROUP',   'Group',   'Carries a Paint System Group in ps_group_data'),
+            ('CHANNEL', 'Channel', 'Carries a Paint System Channel in ps_channel_data'),
+            ('LAYER',   'Layer',   'Carries a Paint System Layer in ps_layer_data'),
+        ],
+        default='NONE',
+    )
+    bpy.types.NodeTree.ps_group_data = PointerProperty(
+        name="Paint System Group Data",
+        type=Group,
+        description="(V3) Group configuration embedded in this NodeTree",
+    )
+    bpy.types.NodeTree.ps_channel_data = PointerProperty(
+        name="Paint System Channel Data",
+        type=Channel,
+        description="(V3) Channel configuration embedded in this NodeTree",
+    )
+    bpy.types.NodeTree.ps_layer_data = PointerProperty(
+        name="Paint System Layer Data",
+        type=Layer,
+        description="(V3) Layer configuration embedded in this NodeTree",
+    )
+
+
 def unregister():
     """Unregister the Paint System data module."""
+    del bpy.types.NodeTree.ps_layer_data
+    del bpy.types.NodeTree.ps_channel_data
+    del bpy.types.NodeTree.ps_group_data
+    del bpy.types.NodeTree.ps_type
     del bpy.types.Material.paint_system
     del bpy.types.Material.ps_mat_data
     del bpy.types.Scene.ps_scene_data

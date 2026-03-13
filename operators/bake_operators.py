@@ -24,7 +24,7 @@ class BakeOperator(PSContextMixin, PSImageCreateMixin, Operator):
             temp_materials.clear()
             for obj in check_objects:
                 for mat in obj.data.materials:
-                    if hasattr(mat, "ps_mat_data") and len(mat.ps_mat_data.groups) != 0 and mat.name not in seen_materials:
+                    if hasattr(mat, "ps_mat_data") and len(mat.ps_mat_data.group_nodes) != 0 and mat.name not in seen_materials:
                         seen_materials.add(mat.name)
                         temp_material = temp_materials.add()
                         temp_material.material = mat

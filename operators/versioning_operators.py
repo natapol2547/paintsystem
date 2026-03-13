@@ -5,6 +5,7 @@ from bpy.utils import register_classes_factory
 from ..paintsystem.version_check import get_latest_version, get_current_version, reset_version_cache
 from .common import PSContextMixin
 
+from ..paintsystem import data as _ps_data
 from ..paintsystem.data import (
     LegacyPaintSystemContextParser,
     LegacyPaintSystemLayer,
@@ -19,6 +20,178 @@ import addon_utils
 from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# V2 → V3 migration helpers
+# ---------------------------------------------------------------------------
+
+def _copy_pg(src, dst, skip_props=None):
+    """Copy all non-collection, non-readonly properties from *src* to *dst*.
+
+    Handles scalar, enum, bool, string, float, and pointer properties.
+    Collections must be handled separately by the caller.
+    """
+    _skip = {'rna_type', 'updating_name_flag'} | (skip_props or set())
+    for prop in src.bl_rna.properties:
+        pid = prop.identifier
+        if pid in _skip or prop.is_readonly:
+            continue
+        if prop.type == 'COLLECTION':
+            continue
+        try:
+            setattr(dst, pid, getattr(src, pid))
+        except (AttributeError, TypeError, RuntimeError):
+            pass
+
+
+def _copy_marker_actions(src_layer, dst_layer):
+    """Copy the MarkerAction collection from *src_layer* to *dst_layer*."""
+    for action in src_layer.actions:
+        new_action = dst_layer.actions.add()
+        _copy_pg(action, new_action)
+
+
+def _copy_masks(src_layer, dst_layer):
+    """Copy the LayerMask collection from *src_layer* to *dst_layer*."""
+    for mask in src_layer.masks:
+        new_mask = dst_layer.masks.add()
+        _copy_pg(mask, new_mask)
+
+
+def _copy_layer(src_layer, dst_layer, create_snapshot=True):
+    """Copy a Layer PropertyGroup into *dst_layer* without triggering rebuilds.
+
+    When *create_snapshot* is True (the default) and the layer is non-linked
+    with an existing NodeTree, the layer data is also written into
+    ``node_tree.ps_layer_data`` for V3 linking.  Pass ``False`` when copying
+    layers into a channel snapshot to avoid redundant nested snapshots.
+
+    ``auto_update_node_tree`` is left **False** on both *dst_layer* and the
+    snapshot; the caller is responsible for re-enabling it after the full
+    migration completes.
+    """
+    dst_layer.auto_update_node_tree = False
+    _copy_pg(src_layer, dst_layer,
+             skip_props={'auto_update_node_tree', 'actions', 'masks'})
+    _copy_marker_actions(src_layer, dst_layer)
+    _copy_masks(src_layer, dst_layer)
+
+    if create_snapshot and not dst_layer.is_linked and dst_layer.node_tree:
+        dst_layer.node_tree.ps_type = 'LAYER'
+        snap = dst_layer.node_tree.ps_layer_data
+        snap.auto_update_node_tree = False
+        _copy_pg(dst_layer, snap,
+                 skip_props={'auto_update_node_tree', 'actions', 'masks',
+                             'node_tree'})
+        _copy_marker_actions(dst_layer, snap)
+        _copy_masks(dst_layer, snap)
+
+
+def _copy_channel(src_channel, dst_channel):
+    """Copy a Channel PropertyGroup (including its layers) into *dst_channel*.
+
+    Updates are paused on the destination channel during the copy to avoid
+    expensive node-tree rebuilds.  The channel's NodeTree is tagged as
+    ``'CHANNEL'`` and its ``ps_channel_data`` snapshot is populated
+    (skipping ``node_tree`` to avoid circular references).
+
+    ``auto_update_node_tree`` is left **False** on the channel, its layers,
+    and all snapshot PropertyGroups; the caller re-enables them after the
+    full migration completes.
+    """
+    dst_channel.auto_update_node_tree = False
+    _copy_pg(src_channel, dst_channel,
+             skip_props={'layers', 'auto_update_node_tree'})
+
+    for src_layer in src_channel.layers:
+        dst_layer = dst_channel.layers.add()
+        _copy_layer(src_layer, dst_layer)
+
+    ch_nt = dst_channel.node_tree
+    if ch_nt:
+        ch_nt.ps_type = 'CHANNEL'
+        snap = ch_nt.ps_channel_data
+        snap.auto_update_node_tree = False
+        _copy_pg(dst_channel, snap,
+                 skip_props={'layers', 'auto_update_node_tree', 'node_tree'})
+        for dst_layer in dst_channel.layers:
+            snap_layer = snap.layers.add()
+            _copy_layer(src_layer=dst_layer, dst_layer=snap_layer,
+                        create_snapshot=False)
+
+
+def _reenable_auto_update(ps_data):
+    """Re-enable ``auto_update_node_tree`` on every migrated V3 PropertyGroup.
+
+    Called once after **all** data has been copied so that no update callback
+    can fire during the migration window.
+    """
+    for ref in ps_data.group_nodes:
+        nt = ref.node_tree
+        if not nt:
+            continue
+        group = nt.ps_group_data
+        group.auto_update_node_tree = True
+
+        for channel in group.channels:
+            channel.auto_update_node_tree = True
+            for layer in channel.layers:
+                layer.auto_update_node_tree = True
+
+            ch_nt = channel.node_tree
+            if ch_nt:
+                ch_snap = ch_nt.ps_channel_data
+                ch_snap.auto_update_node_tree = True
+                for snap_layer in ch_snap.layers:
+                    snap_layer.auto_update_node_tree = True
+
+        for channel in group.channels:
+            for layer in channel.layers:
+                if not layer.is_linked and layer.node_tree:
+                    layer.node_tree.ps_layer_data.auto_update_node_tree = True
+
+
+def _migrate_material_v2_to_v3(ps_data):
+    """Migrate a single material's ps_mat_data from V2 to V3 in-place.
+
+    All ``auto_update_node_tree`` flags are kept **False** throughout the
+    entire copy phase.  Only after every group, channel, layer, and snapshot
+    has been populated does ``_reenable_auto_update`` flip them back to True,
+    ensuring no ``update_node_tree`` callback fires during migration.
+    """
+    for v2_group in ps_data.groups:
+        node_tree = v2_group.node_tree
+        if not node_tree:
+            logger.warning("V2 group '%s' has no node_tree — skipping.", v2_group.name)
+            continue
+
+        node_tree.ps_type = 'GROUP'
+        target_group = node_tree.ps_group_data
+        target_group.auto_update_node_tree = False
+        target_group.node_tree = node_tree
+
+        _copy_pg(v2_group, target_group,
+                 skip_props={'channels', 'auto_update_node_tree', 'node_tree'})
+
+        for v2_channel in v2_group.channels:
+            dst_channel = target_group.channels.add()
+            _copy_channel(v2_channel, dst_channel)
+
+        ref = ps_data.group_nodes.add()
+        ref.node_tree = node_tree
+
+    # Keep active_index in bounds for the new group_nodes list.
+    new_len = len(ps_data.group_nodes)
+    if new_len > 0:
+        ps_data.active_index = min(ps_data.active_index, new_len - 1)
+    else:
+        ps_data.active_index = 0
+
+    # Free V2 data and mark this material as V3.
+    ps_data.groups.clear()
+    ps_data.ps_data_version = 3
+
+    _reenable_auto_update(ps_data)
 
 pid_mapping = {
     "name": "name",
@@ -216,6 +389,68 @@ class PAINTSYSTEM_OT_UpdatePaintSystemData(PSContextMixin, Operator):
         return {'FINISHED'}
 
 
+class PAINTSYSTEM_OT_MigrateV2ToV3(Operator):
+    """Migrate all Paint System materials in this file from V2 to V3 format.
+
+    V3 stores group/channel/layer data directly in NodeTrees, enabling proper
+    Blender linking. This is a one-way migration: after running it the file
+    cannot be opened in earlier versions of Paint System.
+    """
+
+    bl_idname = "paint_system.migrate_v2_to_v3"
+    bl_label = "Update Paint System to V3"
+    bl_description = (
+        "Migrate all Paint System materials to V3 (NodeTree-based storage). "
+        "Required to continue working. This cannot be undone."
+    )
+    bl_options = {'REGISTER'}
+
+    def execute(self, context):
+        migrated = 0
+        skipped = 0
+        errors = []
+
+        _ps_data.pause_all_node_tree_updates = True
+        try:
+            for mat in bpy.data.materials:
+                ps_data = getattr(mat, 'ps_mat_data', None)
+                if not ps_data:
+                    continue
+                if ps_data.ps_data_version >= 3:
+                    skipped += 1
+                    continue
+                if not ps_data.groups:
+                    ps_data.ps_data_version = 3
+                    continue
+                try:
+                    _migrate_material_v2_to_v3(ps_data)
+                    migrated += 1
+                    logger.info("Migrated material '%s' to V3.", mat.name)
+                except Exception as exc:  # pylint: disable=broad-except
+                    errors.append(f"{mat.name}: {exc}")
+                    logger.error("Failed to migrate '%s': %s", mat.name, exc)
+        finally:
+            _ps_data.pause_all_node_tree_updates = False
+            _ps_data._invalidate_material_layer_cache()
+
+        if errors:
+            self.report(
+                {'WARNING'},
+                f"Migrated {migrated} material(s) to V3 with {len(errors)} error(s): "
+                + "; ".join(errors),
+            )
+        else:
+            self.report(
+                {'INFO'},
+                f"Successfully migrated {migrated} material(s) to V3"
+                + (f" ({skipped} already at V3)." if skipped else "."),
+            )
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_confirm(self, event)
+
+
 class PAINTSYSTEM_OT_CheckForUpdates(PSContextMixin, Operator):
     bl_idname = "paint_system.check_for_updates"
     bl_label = "Check for Updates"
@@ -276,6 +511,7 @@ class PAINTSYSTEM_OT_DismissUpdate(PSContextMixin, Operator):
 
 classes = (
     PAINTSYSTEM_OT_UpdatePaintSystemData,
+    PAINTSYSTEM_OT_MigrateV2ToV3,
     PAINTSYSTEM_OT_CheckForUpdates,
     PAINTSYSTEM_OT_OpenExtensionPreferences,
     PAINTSYSTEM_OT_DismissUpdate,

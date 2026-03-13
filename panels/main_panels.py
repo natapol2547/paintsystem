@@ -132,9 +132,13 @@ class MAT_MT_PaintSystemMaterialSelectMenu(PSContextMixin, Menu):
 class MATERIAL_UL_PaintSystemGroups(PSContextMixin, UIList):
     bl_idname = "MATERIAL_UL_PaintSystemGroups"
     bl_label = "Paint System Groups"
-    
+
     def draw_item(self, context, layout, data, item, icon, active_data, active_property, index):
-        layout.prop(item, "name", text="", emboss=False)
+        # In V3 *item* is a GroupNodeRef; the name lives in the embedded Group.
+        if hasattr(item, 'node_tree') and item.node_tree:
+            layout.label(text=item.node_tree.ps_group_data.name, icon='NODETREE')
+        else:
+            layout.prop(item, "name", text="", emboss=False)
 
 
 class MAT_PT_PaintSystemGroups(PSContextMixin, Panel):
@@ -150,7 +154,10 @@ class MAT_PT_PaintSystemGroups(PSContextMixin, Panel):
         layout = self.layout
         layout.label(text="Groups")
         scale_content(context, layout)
-        layout.template_list("MATERIAL_UL_PaintSystemGroups", "", ps_ctx.ps_mat_data, "groups", ps_ctx.ps_mat_data, "active_index")
+        # V3: list group_nodes (GroupNodeRef slots); the UIList reads names from
+        # node_tree.ps_group_data. V2 materials should never reach this panel
+        # since the migration banner returns early from the main draw().
+        layout.template_list("MATERIAL_UL_PaintSystemGroups", "", ps_ctx.ps_mat_data, "group_nodes", ps_ctx.ps_mat_data, "active_index")
 
 
 class MAT_PT_PaintSystemMaterialSettings(PSContextMixin, Panel):
@@ -176,13 +183,14 @@ class MAT_PT_PaintSystemMaterialSettings(PSContextMixin, Panel):
                 row.prop(mat, "name", text="")
         layout.prop(mat, "surface_render_method", text="Render Method")
         layout.prop(mat, "use_backface_culling", text="Backface Culling")
-        if ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.groups:
+        if ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.group_nodes:
             box = layout.box()
-            box.label(text=f"Paint System Node Groups:", icon_value=get_icon("sunflower"))
+            box.label(text="Paint System Node Groups:", icon_value=get_icon("sunflower"))
             row = box.row(align=True)
             scale_content(context, row, 1.3, 1.2)
             row.popover("MAT_PT_PaintSystemGroups", text="", icon="NODETREE")
-            row.prop(ps_ctx.active_group, "name", text="")
+            if ps_ctx.active_group:
+                row.prop(ps_ctx.active_group, "name", text="")
             row.operator("paint_system.new_group", icon='ADD', text="")
             row.operator("wm.call_menu", text="", icon="REMOVE").name = "MAT_MT_DeleteGroupMenu"
 
@@ -199,9 +207,12 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
         row = layout.row(align=True)
         if ps_ctx.ps_mat_data is None:
             return
-        groups = ps_ctx.ps_mat_data.groups
-        if ps_ctx.ps_mat_data and groups:
-            if len(groups) > 1:
+        ps_mat_data = ps_ctx.ps_mat_data
+        # In V3 the live group list is group_nodes; fall back to legacy groups
+        # only so we know whether *any* groups exist for UI decisions.
+        group_nodes = ps_mat_data.group_nodes
+        if group_nodes:
+            if len(group_nodes) > 1:
                 row.popover("MAT_PT_PaintSystemGroups", text="", icon="NODETREE")
             row.operator("paint_system.new_group", icon='ADD', text="")
             row.operator("wm.call_menu", text="", icon="REMOVE").name = "MAT_MT_DeleteGroupMenu"
@@ -241,6 +252,33 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
             
             return
         ps_ctx = self.parse_context(context)
+
+        # ── V2 → V3 migration prompt ──────────────────────────────────────
+        # Show this whenever the active material still has V2 legacy data
+        # (ps_data_version < 3 and the old groups collection is non-empty).
+        if (ps_ctx.ps_mat_data
+                and ps_ctx.ps_mat_data.ps_data_version < 3
+                and ps_ctx.ps_mat_data.groups):
+            box = layout.box()
+            col = box.column()
+            warning_box = col.box()
+            col = warning_box.column()
+            col.alert = True
+            col.label(text="Paint System V2 Detected", icon="ERROR")
+            col.label(text="Update to V3 to continue working.")
+            row = warning_box.row()
+            scale_content(context, row)
+            row.operator("wm.save_as_mainfile", text="Save As (Recommended)")
+            row = warning_box.row()
+            row.alert = True
+            scale_content(context, row)
+            row.operator(
+                "paint_system.migrate_v2_to_v3",
+                text="Update Paint System to V3",
+                icon="FILE_REFRESH",
+            )
+            return
+
         if is_online() and ps_ctx.ps_settings:
             # Trigger version check (non-blocking)
             get_latest_version()

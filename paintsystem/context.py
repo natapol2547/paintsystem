@@ -49,18 +49,39 @@ def get_ps_object(obj) -> bpy.types.Object | None:
     return None
 
 def parse_material(mat: Material) -> tuple["MaterialData", "Group", "Channel", "Layer"]:
-    """Extract active mat_data, group, channel, and layer from a material."""
+    """Extract active mat_data, group, channel, and layer from a material.
+
+    V3 materials (ps_data_version >= 3) resolve the active group via the
+    ``group_nodes`` NodeTree-backed slots.  V2 materials (ps_data_version < 3)
+    that still have data in the legacy ``groups`` collection return
+    ``(mat_data, None, None, None)`` — the panels will show the migration
+    banner in that case.
+    """
     mat_data = None
     active_group = None
     active_channel = None
     unlinked_layer = None
 
-    if mat and hasattr(mat, 'ps_mat_data') and mat.ps_mat_data:
-        mat_data = mat.ps_mat_data
-        groups = mat_data.groups
-        if groups and mat_data.active_index >= 0:
-            active_group = groups[min(mat_data.active_index, len(groups) - 1)]
-    
+    if not (mat and hasattr(mat, 'ps_mat_data') and mat.ps_mat_data):
+        return mat_data, active_group, active_channel, unlinked_layer
+
+    mat_data = mat.ps_mat_data
+
+    if mat_data.ps_data_version < 3:
+        # V2 mode: if there is legacy data, withhold navigation so that the
+        # panels can display the migration prompt instead of broken UI.
+        if mat_data.groups:
+            return mat_data, None, None, None
+        # No legacy data — treat as a fresh V3-ready material (group_nodes
+        # will be empty; create_new_group will set ps_data_version = 3).
+
+    # V3 path: group data lives in each GroupNodeRef's NodeTree.
+    group_nodes = mat_data.group_nodes
+    if group_nodes and mat_data.active_index >= 0:
+        ref = group_nodes[min(mat_data.active_index, len(group_nodes) - 1)]
+        if ref.node_tree:
+            active_group = ref.node_tree.ps_group_data
+
     if active_group:
         channels = active_group.channels
         if channels and active_group.active_index >= 0:
@@ -70,7 +91,7 @@ def parse_material(mat: Material) -> tuple["MaterialData", "Group", "Channel", "
         layers = active_channel.layers
         if layers and active_channel.active_index >= 0:
             unlinked_layer = layers[min(active_channel.active_index, len(layers) - 1)]
-    
+
     return mat_data, active_group, active_channel, unlinked_layer
 
 def parse_context(context: bpy.types.Context) -> PSContext:

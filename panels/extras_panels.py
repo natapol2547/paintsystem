@@ -432,7 +432,7 @@ class NODE_PT_PaintSystemShaderEditor(PSContextMixin, Panel):
         row = box.row(align=True)
         row.label(text="Groups:", icon='OUTLINER_OB_GROUP_INSTANCE')
         nodetree_operator(row, ps_ctx.active_group.node_tree, text="Create Node")
-        box.template_list("MATERIAL_UL_PaintSystemGroups", "", ps_ctx.ps_mat_data, "groups", ps_ctx.ps_mat_data, "active_index", rows=max(2, len(ps_ctx.ps_mat_data.groups)))
+        box.template_list("MATERIAL_UL_PaintSystemGroups", "", ps_ctx.ps_mat_data, "group_nodes", ps_ctx.ps_mat_data, "active_index", rows=max(2, len(ps_ctx.ps_mat_data.group_nodes)))
         
         # Channels and Layers section
         channels = ps_ctx.active_group.channels
@@ -487,13 +487,14 @@ class NODE_PT_PaintSystemShaderEditor(PSContextMixin, Panel):
 def draw_paint_system_material(self, context):
     layout = self.layout
     ps_ctx = PSContextMixin.parse_context(context)
-    if ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.groups:
+    if ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.group_nodes:
         box = layout.box()
-        box.label(text=f"Paint System Node Groups:", icon_value=get_icon("sunflower"))
+        box.label(text="Paint System Node Groups:", icon_value=get_icon("sunflower"))
         row = box.row(align=True)
         scale_content(context, row, 1.3, 1.2)
         row.popover("MAT_PT_PaintSystemGroups", text="", icon="NODETREE")
-        row.prop(ps_ctx.active_group, "name", text="")
+        if ps_ctx.active_group:
+            row.prop(ps_ctx.active_group, "name", text="")
         row.operator("paint_system.new_group", icon='ADD', text="")
         row.operator("paint_system.delete_group", icon='REMOVE', text="")
 
