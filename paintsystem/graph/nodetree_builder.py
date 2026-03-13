@@ -866,7 +866,7 @@ class NodeTreeBuilder:
             node_name = getattr(node, 'name', 'Unknown Node') # Safe access to node name
             socket_type_str = "output" if is_source else "input"
             raise ValueError(
-                f"Required {socket_type_str} socket '{socket}' not found on node '{node_name}' (type: {getattr(node, 'type', 'Unknown')})."
+                f"Required {socket_type_str} socket '{socket}' not found on node '{node_name}' (identifier: {identifier}) (type: {getattr(node, 'type', 'Unknown')})."
             )
         
         return node, sock

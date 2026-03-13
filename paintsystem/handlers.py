@@ -92,9 +92,9 @@ def load_paint_system_data():
     migrate_blend_mode(layer_parent_map)
     migrate_source_node(layer_parent_map)
     migrate_socket_names(layer_parent_map)
+    update_library_nodetree_version()
     update_layer_version(layer_parent_map)
     update_layer_name(layer_parent_map)
-    update_library_nodetree_version()
 
     # As layers in ps_scene_data is not used anymore, we can remove it in the future
     if ps_scene_data and hasattr(ps_scene_data, 'layers') and len(ps_scene_data.layers) > 0:

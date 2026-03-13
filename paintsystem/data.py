@@ -1273,11 +1273,14 @@ class Layer(BaseNestedListItem):
         default=True,
         # update=select_layer
     )
+    def update_is_clip(self, context: Context):
+        self.update_node_tree(context)
+        update_active_channel(self, context)
     is_clip: BoolProperty(
         name="Clip",
         description="Clip the layer",
         default=False,
-        update=update_active_channel
+        update=update_is_clip
     )
     enabled: BoolProperty(
         name="Enabled",
