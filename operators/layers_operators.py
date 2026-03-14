@@ -17,6 +17,7 @@ from ..paintsystem.data import (
     GEOMETRY_TYPE_ENUM,
     add_empty_to_collection,
     get_layer_by_uid,
+    iter_channel_layers,
 )
 from ..paintsystem.image import save_image
 from ..utils import get_next_unique_name
@@ -77,7 +78,7 @@ class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSImageCreateMixin, MultiMaterialO
         """Get the next image name from the active channel"""
         ps_ctx = self.parse_context(context)
         if ps_ctx.active_channel:
-            return get_next_unique_name("Image", [layer.name for layer in ps_ctx.active_channel.layers])
+            return get_next_unique_name("Image", [layer.name for layer in iter_channel_layers(ps_ctx.active_channel)])
 
     def process_material(self, context):
         self.store_coord_type(context)
@@ -331,7 +332,7 @@ class PAINTSYSTEM_OT_FixMissingGradientEmpty(PSContextMixin, Operator):
     
     def execute(self, context):
         ps_ctx = self.parse_context(context)
-        for layer in ps_ctx.active_channel.layers:
+        for layer in iter_channel_layers(ps_ctx.active_channel):
             if layer.type == 'GRADIENT':
                 layer.update_node_tree(context)
         ps_ctx.active_layer.update_node_tree(context)
@@ -864,7 +865,12 @@ class PAINTSYSTEM_OT_PasteLayer(PSContextMixin, Operator):
             if not layer:
                 continue
             if self.linked:
-                new_layer = ps_ctx.active_channel.create_layer(context, layer.layer_name, "BLANK" if layer.type != "FOLDER" else "FOLDER", insert_at="CURSOR" if idx == 0 else "AFTER", linked_layer_uid=clipboard_layer.uid, linked_material=clipboard_layer.material)
+                layer_nt = layer.get_node_tree()
+                if ps_ctx.active_channel._is_v3() and layer_nt:
+                    ps_ctx.active_channel.add_linked_layer_ref(layer_nt)
+                    new_layer = layer_nt.ps_layer_data
+                else:
+                    new_layer = ps_ctx.active_channel.create_layer(context, layer.layer_name, "BLANK" if layer.type != "FOLDER" else "FOLDER", insert_at="CURSOR" if idx == 0 else "AFTER", linked_layer_uid=clipboard_layer.uid, linked_material=clipboard_layer.material)
             else:
                 new_layer = ps_ctx.active_channel.create_layer(context, layer.layer_name, layer.type, insert_at="CURSOR" if idx == 0 else "AFTER")
                 new_layer.copy_layer_data(layer)

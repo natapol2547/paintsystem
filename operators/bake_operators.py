@@ -6,7 +6,7 @@ from bpy.props import StringProperty, BoolProperty, IntProperty, EnumProperty
 
 from .common import PSContextMixin, PSImageCreateMixin, DEFAULT_PS_UV_MAP_NAME
 
-from ..paintsystem.data import Layer, set_layer_blend_type, get_layer_blend_type
+from ..paintsystem.data import Layer, set_layer_blend_type, get_layer_blend_type, iter_channel_layers, iter_group_channels
 from ..paintsystem.context import parse_material
 from ..panels.common import get_icon_from_channel
 
@@ -323,7 +323,7 @@ class PAINTSYSTEM_OT_BakeAllChannels(BakeOperator):
         ps_ctx = self.parse_context(context)
         for mat in bake_materials:
             _, active_group, _, _ = parse_material(mat)
-            for channel in active_group.channels:
+            for channel in iter_group_channels(active_group):
                 bake_image = channel.bake_image
                 if not bake_image:
                     self.image_name = f"{active_group.name}_{channel.name}_Baked"
@@ -404,7 +404,7 @@ class PAINTSYSTEM_OT_ExportAllImages(PSContextMixin, Operator):
     def invoke(self, context, event):
         ps_ctx = self.parse_context(context)
         bake_image_num = 0
-        for channel in ps_ctx.active_group.channels:
+        for channel in iter_group_channels(ps_ctx.active_group):
             if channel.bake_image:
                 bake_image_num += 1
         if bake_image_num == 0:
@@ -423,7 +423,7 @@ class PAINTSYSTEM_OT_ExportAllImages(PSContextMixin, Operator):
         export_box = box.box()
         export_col = export_box.column(align=True)
         exported_count = 0
-        for channel in active_group.channels:
+        for channel in iter_group_channels(active_group):
             row = export_col.row()
             if channel.bake_image:
                 image_name = channel.bake_image.name
@@ -470,7 +470,7 @@ class PAINTSYSTEM_OT_ExportAllImages(PSContextMixin, Operator):
         exported_count = 0
         failed_count = 0
         
-        for channel in active_group.channels:
+        for channel in iter_group_channels(active_group):
             if channel.bake_image:
                 try:
                     
@@ -578,7 +578,7 @@ class PAINTSYSTEM_OT_TransferImageLayerUV(BakeOperator):
         
         to_be_enabled_layers = []
         # Ensure all layers are disabled except the active layer
-        for layer in active_channel.layers:
+        for layer in iter_channel_layers(active_channel):
             if layer.enabled and layer != active_layer:
                 to_be_enabled_layers.append(layer)
                 layer.enabled = False
@@ -650,7 +650,7 @@ class PAINTSYSTEM_OT_ConvertToImageLayer(BakeOperator):
         
         to_be_enabled_layers = []
         # Ensure all layers are disabled except the active layer
-        for layer in active_channel.layers:
+        for layer in iter_channel_layers(active_channel):
             if layer.type != "FOLDER" and layer.enabled and layer != active_layer and layer not in children:
                 to_be_enabled_layers.append(layer)
                 layer.enabled = False

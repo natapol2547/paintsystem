@@ -33,11 +33,19 @@ class MAT_MT_PaintSystemChannelsMergeAndExport(PSContextMixin, Menu):
         else:
             col.operator("paint_system.export_image", text=f"Export Active Channel ({active_channel.name})", icon='EXPORT')
 
+def _resolve_channel(item):
+    """Unwrap a Channel or ChannelRef to the underlying Channel data."""
+    if hasattr(item, 'node_tree') and not hasattr(item, 'layers'):
+        return item.node_tree.ps_channel_data if item.node_tree else None
+    return item
+
 class PAINTSYSTEM_UL_channels(PSContextMixin, UIList):
     """UIList for displaying paint channels."""
 
     def draw_item(self, context, layout: bpy.types.UILayout, data, item, icon, active_data, active_propname, index):
-        channel = item
+        channel = _resolve_channel(item)
+        if not channel:
+            return
         ps_ctx = self.parse_context(context)
         if channel.use_bake_image:
             row = layout.row()
@@ -70,18 +78,23 @@ class PAINTSYSTEM_UL_channels(PSContextMixin, UIList):
 
 def draw_channels_list(context, layout):
     ps_ctx = PSContextMixin.parse_context(context)
+    from ..paintsystem.data import iter_group_channels
+    active_group = ps_ctx.active_group
+    channels_prop = "channel_nodes" if active_group.channel_nodes else "channels"
+    channels_list = getattr(active_group, channels_prop)
     row = layout.row()
     row.template_list(
         "PAINTSYSTEM_UL_channels", 
         "",
-        ps_ctx.active_group,
-        "channels", 
-        ps_ctx.active_group,
+        active_group,
+        channels_prop, 
+        active_group,
         "active_index",
-        rows=max(len(ps_ctx.active_group.channels), 3),
+        rows=max(len(channels_list), 3),
     )
     col = row.column(align=True)
-    available_templates = [template for template in CHANNEL_TEMPLATE_ENUM if not any(channel.name == template[1] for channel in ps_ctx.active_group.channels)]
+    all_channels = list(iter_group_channels(active_group))
+    available_templates = [template for template in CHANNEL_TEMPLATE_ENUM if not any(channel.name == template[1] for channel in all_channels)]
     if available_templates:
         col.operator("wm.call_menu", icon='ADD', text="").name = "MAT_MT_AddChannelMenu"
     else:
@@ -107,7 +120,7 @@ class MAT_PT_ChannelsSelect(PSContextMixin, Panel):
 
 def poll_channels_panel(context: Context):
     ps_ctx = PSContextMixin.parse_context(context)
-    if ps_ctx.active_group and check_group_multiuser(ps_ctx.active_group.node_tree):
+    if ps_ctx.active_group and check_group_multiuser(ps_ctx.active_group.get_node_tree()):
         return False
     return ps_ctx.ps_mat_data and ps_ctx.active_group is not None
 
@@ -222,7 +235,7 @@ class MAT_PT_ChannelsSettings(PSContextMixin, Panel):
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
-        return ps_ctx.active_channel is not None and len(ps_ctx.active_group.channels) > 0
+        return ps_ctx.active_channel is not None and (len(ps_ctx.active_group.channel_nodes) > 0 or len(ps_ctx.active_group.channels) > 0)
     
     def draw(self, context):
         layout = self.layout
@@ -245,7 +258,8 @@ class MAT_MT_AddChannelMenu(PSContextMixin, Menu):
         col = layout.column()
         col.operator("paint_system.add_channel", text="Custom Channel", icon_value=get_icon('channels')).template = "CUSTOM"
         col.separator()
-        available_templates = [template for template in CHANNEL_TEMPLATE_ENUM if not any(channel.name == template[1] for channel in ps_ctx.active_group.channels)]
+        from ..paintsystem.data import iter_group_channels
+        available_templates = [template for template in CHANNEL_TEMPLATE_ENUM if not any(channel.name == template[1] for channel in iter_group_channels(ps_ctx.active_group))]
         if available_templates:
             col.label(text="Templates")
             for template in available_templates:

@@ -104,10 +104,11 @@ def migrate_socket_names(layer_parent_map: dict[Layer, LayerParent]):
 def update_layer_version(layer_parent_map: dict[Layer, LayerParent]):
     for layer, layer_parent in layer_parent_map.items():
         # Updating layer to the target version
-        if not layer.node_tree:
+        layer_nt = layer.get_node_tree()
+        if not layer_nt:
             continue
         target_version = get_layer_version_for_type(layer.type)
-        if get_nodetree_version(layer.node_tree) != target_version:
+        if get_nodetree_version(layer_nt) != target_version:
             logger.info(f"Updating layer {layer.name} to version {target_version}")
             try:
                 layer.update_node_tree(bpy.context)

@@ -5,7 +5,7 @@ import numpy as np
 from ..utils.version import is_newer_than
 
 # --
-from ..paintsystem.data import Channel, Layer
+from ..paintsystem.data import Channel, Layer, iter_group_channels
 from ..paintsystem.context import PSContextMixin
 from ..custom_icons import get_icon, get_icon_from_socket_type
 from ..preferences import get_preferences
@@ -206,7 +206,7 @@ def check_group_multiuser(group_node_tree: bpy.types.NodeTree) -> bool:
                     user_count += 1
         else:
             for group in ps_data.groups:
-                if group.node_tree == group_node_tree:
+                if group.get_node_tree() == group_node_tree:
                     user_count += 1
     return user_count > 1
 
@@ -288,8 +288,8 @@ def toggle_paint_mode_ui(layout: bpy.types.UILayout, context: bpy.types.Context)
         text="Toggle Paint Mode", depress=current_mode == 'PAINT_TEXTURE', icon_value=get_icon('paintbrush'))
     
     group_node = find_node(mat.node_tree, {
-                                'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree})
-    if (not is_basic_setup(mat.node_tree) or len(active_group.channels) > 1 or ps_ctx.ps_mat_data.preview_channel) and group_node:
+                                'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.get_node_tree()})
+    if (not is_basic_setup(mat.node_tree) or len(list(iter_group_channels(active_group))) > 1 or ps_ctx.ps_mat_data.preview_channel) and group_node:
                 row.operator("paint_system.isolate_active_channel",
                             text="", depress=ps_ctx.ps_mat_data.preview_channel, icon_value=get_icon_from_channel(ps_ctx.active_channel) if ps_ctx.ps_mat_data.preview_channel else get_icon("channel"))
     row.operator("wm.save_mainfile",
@@ -299,7 +299,7 @@ def toggle_paint_mode_ui(layout: bpy.types.UILayout, context: bpy.types.Context)
     
     if ps_ctx.ps_object.type == 'MESH':
         paint_row.enabled = not active_channel.use_bake_image
-        if ps_ctx.ps_settings.show_tooltips and not ps_ctx.ps_settings.hide_norm_paint_tips and active_group.template in {'NORMAL', 'PBR'} and any(channel.name == 'Normal' for channel in active_group.channels) and active_channel.name == 'Normal':
+        if ps_ctx.ps_settings.show_tooltips and not ps_ctx.ps_settings.hide_norm_paint_tips and active_group.template in {'NORMAL', 'PBR'} and any(channel.name == 'Normal' for channel in iter_group_channels(active_group)) and active_channel.name == 'Normal':
             row = col.row(align=True)
             row.scale_y = 1.5
             row.scale_x = 1.5
@@ -323,7 +323,7 @@ def toggle_paint_mode_ui(layout: bpy.types.UILayout, context: bpy.types.Context)
 def layer_settings_ui(layout: bpy.types.UILayout, context: bpy.types.Context):
     ps_ctx = PSContextMixin.parse_context(context)
     active_layer = ps_ctx.active_layer
-    if not active_layer or not active_layer.node_tree:
+    if not active_layer or not active_layer.get_node_tree():
         return
     color_mix_node = active_layer.mix_node
     

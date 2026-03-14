@@ -55,23 +55,33 @@ def draw_input_sockets(layout, context: Context, only_output: bool = False):
         row = panel.row(align=True)
         row.label(icon="BLANK1")
         draw_socket_grid(row, active_layer, include_inputs=not only_output)
+def _resolve_layer(item):
+    """Unwrap a Layer or LayerRef to the underlying Layer data."""
+    if hasattr(item, 'node_tree') and not hasattr(item, 'uid'):
+        # LayerRef — resolve via NodeTree
+        return item.node_tree.ps_layer_data if item.node_tree else None
+    return item
+
 class MAT_PT_UL_LayerList(PSContextMixin, UIList):
     def draw_item(self, context: Context, layout: bpy.types.UILayout, data, item, icon, active_data, active_property, index):
         ps_ctx = self.parse_context(context)
-        linked_item = item.get_layer_data()
+        raw_item = _resolve_layer(item)
+        if not raw_item:
+            return
+        linked_item = raw_item.get_layer_data()
         if not linked_item:
             return
         # The UIList passes channel as 'data'
         active_channel = data
         flattened = active_channel.flattened_layers
         if index < len(flattened):
-            level = active_channel.get_item_level_from_id(item.id)
+            level = active_channel.get_item_level_from_id(raw_item.id)
             main_row = layout.row(align=True)
-            warnings = item.get_layer_warnings(context)
+            warnings = raw_item.get_layer_warnings(context)
                 # main_row.label(text="\n".join(warnings), icon='ERROR')
             # Check if parent of the current item is enabled
             parent_item = active_channel.get_item_by_id(
-                item.parent_id)
+                raw_item.parent_id)
             if parent_item and not parent_item.enabled:
                 main_row.enabled = False
 
@@ -100,7 +110,7 @@ class MAT_PT_UL_LayerList(PSContextMixin, UIList):
                 row.label(icon="LINKED")
             if warnings:
                 op = row.operator("paint_system.show_layer_warnings", text="", icon_value=get_icon('error'), emboss=False)
-                op.layer_id = item.id
+                op.layer_id = raw_item.id
             if ps_ctx.ps_settings.show_opacity_in_layer_list:
                 row.label(text=f"{linked_item.opacity:.1f}")
             row.prop(linked_item, "enabled", text="",
@@ -118,7 +128,8 @@ class MAT_PT_UL_LayerList(PSContextMixin, UIList):
         # Please note that the default UI_UL_list defines helper functions for common tasks (see its doc for more info).
         # If you do not make filtering and/or ordering, return empty list(s) (this will be more efficient than
         # returning full lists doing nothing!).
-        layers = getattr(data, propname).values()
+        raw_items = getattr(data, propname).values()
+        resolved = [_resolve_layer(item) for item in raw_items]
         flattened_layers = data.flattened_unlinked_layers
 
         # Default return values.
@@ -126,9 +137,9 @@ class MAT_PT_UL_LayerList(PSContextMixin, UIList):
         flt_neworder = []
 
         # Filtering by name
-        flt_flags = [self.bitflag_filter_item] * len(layers)
-        for idx, layer in enumerate(layers):
-            flt_neworder.append(flattened_layers.index(layer))
+        flt_flags = [self.bitflag_filter_item] * len(raw_items)
+        for idx, layer in enumerate(resolved):
+            flt_neworder.append(flattened_layers.index(layer) if layer in flattened_layers else idx)
             while layer.parent_id != -1:
                 layer = data.get_item_by_id(layer.parent_id)
                 if layer and not layer.is_expanded:
@@ -506,7 +517,7 @@ class MAT_PT_Layers(PSContextMixin, Panel):
         # the main panel will show the migration prompt instead.
         if ps_ctx.ps_mat_data and ps_ctx.ps_mat_data.ps_data_version < 3:
             return False
-        if ps_ctx.active_group and check_group_multiuser(ps_ctx.active_group.node_tree):
+        if ps_ctx.active_group and check_group_multiuser(ps_ctx.active_group.get_node_tree()):
             return False
         return ps_ctx.ps_object and (ps_ctx.active_channel is not None or ps_ctx.ps_object.type == 'GREASEPENCIL')
     
@@ -609,7 +620,7 @@ class MAT_PT_Layers(PSContextMixin, Panel):
                 if not ps_ctx.ps_settings.use_legacy_ui:
                     main_row = layout.row()
                     box = main_row.box()
-                    if ps_ctx.active_layer and ps_ctx.active_layer.node_tree:
+                    if ps_ctx.active_layer and ps_ctx.active_layer.get_node_tree():
                         settings_box = box.box()
                         layer_settings_ui(settings_box, context)
                 else:
@@ -621,11 +632,12 @@ class MAT_PT_Layers(PSContextMixin, Panel):
             # contains_mat_setup = any([node.type == 'GROUP' and node.node_tree ==
             #                           active_channel.node_tree for node in mat.node_tree.nodes])
 
-            layers = active_channel.layers
+            layers_prop = "layer_nodes" if active_channel.layer_nodes else "layers"
+            layers = getattr(active_channel, layers_prop)
 
             # Toggle paint mode (switch between object and texture paint mode)
             group_node = find_node(mat.node_tree, {
-                                'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree})
+                                'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.get_node_tree()})
             if not group_node:
                 warning_col = draw_warning_box(box, [
                     ("Paint System not connected", 'ERROR'),
@@ -635,7 +647,7 @@ class MAT_PT_Layers(PSContextMixin, Panel):
                     warning_col.operator("paint_system.focus_ps_node", text="Open Shader Editor", icon="NODETREE")
 
             if active_channel.use_bake_image:
-                image_node = find_node(active_channel.node_tree, {'bl_idname': 'ShaderNodeTexImage', 'image': active_channel.bake_image})
+                image_node = find_node(active_channel.get_node_tree(), {'bl_idname': 'ShaderNodeTexImage', 'image': active_channel.bake_image})
                 bake_box = layout.box()
                 col = bake_box.column()
                 # col.label(text="Baked Image", icon="TEXTURE_DATA")
@@ -649,7 +661,7 @@ class MAT_PT_Layers(PSContextMixin, Panel):
             layers_col = row.column()
             scale_content(context, row, scale_x=1, scale_y=1.5)
             layers_col.template_list(
-                "MAT_PT_UL_LayerList", "", active_channel, "layers", active_channel, "active_index",
+                "MAT_PT_UL_LayerList", "", active_channel, layers_prop, active_channel, "active_index",
                 rows=min(max(6, len(layers)), 7)
             )
 

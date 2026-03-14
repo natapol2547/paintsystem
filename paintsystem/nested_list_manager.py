@@ -33,15 +33,41 @@ class BaseNestedListManager(PropertyGroup):
         """Override this to return the name of the collection property"""
         return "items"
 
+    # -- Collection abstraction methods --
+    # Subclasses can override these to change how items are stored/accessed
+    # (e.g. via NodeTree refs instead of direct CollectionProperty items).
+
+    def _get_items(self):
+        """Return an iterable of all managed items."""
+        return getattr(self, self.collection_name)
+
+    def _get_item_at(self, index):
+        """Return the managed item at *index*."""
+        return self._get_items()[index]
+
+    def _items_count(self):
+        """Return the number of managed items."""
+        return len(self._get_items())
+
+    def _add_raw_item(self):
+        """Append a new empty item and return it."""
+        return getattr(self, self.collection_name).add()
+
+    def _remove_raw_item(self, index):
+        """Remove the item at *index* from the underlying collection."""
+        getattr(self, self.collection_name).remove(index)
+
+    # -- Public API --
+
     def get_active_item(self):
         """Get currently active item based on active_index."""
-        if getattr(self, self.collection_name) is None or self.active_index < 0 or self.active_index >= len(getattr(self, self.collection_name)):
+        if self._items_count() == 0 or self.active_index < 0 or self.active_index >= self._items_count():
             return None
-        return getattr(self, self.collection_name)[self.active_index]
+        return self._get_item_at(self.active_index)
 
     def adjust_sibling_orders(self, parent_id, insert_order):
         """Increase order of all items at or above the insert_order under the same parent"""
-        for item in getattr(self, self.collection_name):
+        for item in self._get_items():
             if item.parent_id == parent_id and item.order >= insert_order:
                 item.order += 1
 
@@ -57,7 +83,7 @@ class BaseNestedListManager(PropertyGroup):
             case "TOP":
                 insert_order = 1
             case "BOTTOM":
-                insert_order = len(getattr(self, self.collection_name)) + 1
+                insert_order = self._items_count() + 1
             case "BEFORE":
                 if active_item:
                     parent_id = active_item.parent_id
@@ -74,7 +100,7 @@ class BaseNestedListManager(PropertyGroup):
                         parent_id = active_item.id
                         # Find lowest order in folder or default to 1
                         orders = [
-                            item.order for item in getattr(self, self.collection_name) if item.parent_id == parent_id]
+                            item.order for item in self._get_items() if item.parent_id == parent_id]
                         insert_order = min(orders) if orders else 1
                     else:
                         # If selected item is not a folder, add at same level
@@ -90,7 +116,7 @@ class BaseNestedListManager(PropertyGroup):
             if parent and parent.type != 'FOLDER':
                 return -1
 
-        new_item = getattr(self, self.collection_name).add()
+        new_item = self._add_raw_item()
         new_item.id = self.next_id
         new_item.name = name
         new_item.parent_id = parent_id
@@ -107,7 +133,7 @@ class BaseNestedListManager(PropertyGroup):
     
     def get_children(self, parent_id):
         children = []
-        for item in getattr(self, self.collection_name):
+        for item in self._get_items():
             if item.parent_id == parent_id:
                 children.append(item)
                 if item.type == 'FOLDER':
@@ -118,16 +144,15 @@ class BaseNestedListManager(PropertyGroup):
         item = self.get_item_by_id(item_id)
         if item:
             children_index = [self.get_collection_index_from_id(child.id) for child in self.get_children(item_id)]
-            collection = getattr(self, self.collection_name)
             for index in sorted(children_index, reverse=True):
-                collection.remove(index)
+                self._remove_raw_item(index)
 
     def remove_item_and_children(self, item_id, on_delete=None):
         """Remove an item and all its children"""
         to_remove = []
 
         def collect_children(parent_id):
-            for i, item in enumerate(getattr(self, self.collection_name)):
+            for i, item in enumerate(self._get_items()):
                 if item.parent_id == parent_id:
                     to_remove.append(i)
                     if item.type == 'FOLDER':
@@ -145,32 +170,32 @@ class BaseNestedListManager(PropertyGroup):
             # Remove items from highest index to lowest
             for index in sorted(to_remove, reverse=True):
                 if on_delete:
-                    on_delete(getattr(self, self.collection_name)[index])
-                getattr(self, self.collection_name).remove(index)
+                    on_delete(self._get_item_at(index))
+                self._remove_raw_item(index)
 
             return True
         self.normalize_orders()
         return False
 
     def get_next_order(self, parent_id):
-        return max((item.order for item in getattr(self, self.collection_name) if item.parent_id == parent_id), default=-1) + 1
+        return max((item.order for item in self._get_items() if item.parent_id == parent_id), default=-1) + 1
 
     def get_item_by_id(self, item_id):
-        for item in getattr(self, self.collection_name):
+        for item in self._get_items():
             if item.id == item_id:
                 return item
         return None
 
     def get_collection_index_from_id(self, item_id):
-        for index, item in enumerate(getattr(self, self.collection_name)):
+        for index, item in enumerate(self._get_items()):
             if item.id == item_id:
                 return index
         return -1
 
     def get_id_from_flattened_index(self, flattened_index):
-        flattened = getattr(self, self.collection_name)
-        if 0 <= flattened_index < len(flattened):
-            return flattened[flattened_index].id
+        items = self._get_items()
+        if 0 <= flattened_index < len(items):
+            return items[flattened_index].id
         return -1
 
     def flatten_hierarchy(self):
@@ -178,7 +203,7 @@ class BaseNestedListManager(PropertyGroup):
         def collect_items(parent_id, level):
             collected = []
             children = sorted(
-                [item for item in getattr(self, self.collection_name) if item.parent_id == parent_id],
+                [item for item in self._get_items() if item.parent_id == parent_id],
                 key=lambda i: i.order
             )
             for item in children:
@@ -205,7 +230,7 @@ class BaseNestedListManager(PropertyGroup):
         """Normalize orders to be sequential starting from 1 within each parent level"""
         # Group items by parent_id
         parent_groups = {}
-        for item in getattr(self, self.collection_name):
+        for item in self._get_items():
             if item.parent_id not in parent_groups:
                 parent_groups[item.parent_id] = []
             parent_groups[item.parent_id].append(item)
@@ -275,7 +300,7 @@ class BaseNestedListManager(PropertyGroup):
 
             # Check if at top of current parent
             siblings = sorted(
-                [i for i in getattr(self, self.collection_name) if i.parent_id == item.parent_id], key=lambda x: x.order)
+                [i for i in self._get_items() if i.parent_id == item.parent_id], key=lambda x: x.order)
             if item.order == 0 and item.parent_id != -1:  # At top of current parent and not at root
                 parent = self.get_item_by_id(item.parent_id)
                 if parent:
@@ -342,13 +367,13 @@ class BaseNestedListManager(PropertyGroup):
             item.order = parent.order
 
             # Shift parent and siblings down
-            for sibling in getattr(self, self.collection_name):
+            for sibling in self._get_items():
                 if sibling.parent_id == grandparent_id and sibling.order >= parent.order:
                     sibling.order += 1
         else:  # DOWN
             # Move to bottom of grandparent level
             max_order = max(
-                (i.order for i in getattr(self, self.collection_name) if i.parent_id == grandparent_id),
+                (i.order for i in self._get_items() if i.parent_id == grandparent_id),
                 default=-1
             )
             item.parent_id = grandparent_id
@@ -362,7 +387,7 @@ class BaseNestedListManager(PropertyGroup):
 
         if position == 'TOP':
             # Shift existing items down
-            for other in getattr(self, self.collection_name):
+            for other in self._get_items():
                 if other.parent_id == target_folder.id:
                     other.order += 1
             item.order = 0
@@ -380,7 +405,7 @@ class BaseNestedListManager(PropertyGroup):
         else:  # DOWN
             item.order = target_item.order
             # Shift other items
-            for other in getattr(self, self.collection_name):
+            for other in self._get_items():
                 if (other.parent_id == target_item.parent_id and
                     other.order >= target_item.order and
                         other.id != item.id):
@@ -433,7 +458,7 @@ class BaseNestedListManager(PropertyGroup):
                     return self.move_item_adjacent(item, target_item, direction)
                 elif action == 'SKIP':
                     siblings = sorted(
-                        [i for i in getattr(self, self.collection_name) if i.parent_id == item.parent_id],
+                        [i for i in self._get_items() if i.parent_id == item.parent_id],
                         key=lambda x: x.order
                     )
                     return self.skip_over_item(item, siblings, direction)
@@ -448,7 +473,7 @@ class BaseNestedListManager(PropertyGroup):
                     return self.move_item_adjacent(item, next_item, direction)
                 elif action == 'SKIP':
                     siblings = sorted(
-                        [i for i in getattr(self, self.collection_name) if i.parent_id == item.parent_id],
+                        [i for i in self._get_items() if i.parent_id == item.parent_id],
                         key=lambda x: x.order
                     )
                     return self.skip_over_item(item, siblings, direction)

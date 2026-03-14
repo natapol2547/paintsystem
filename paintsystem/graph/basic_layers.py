@@ -53,7 +53,7 @@ class PSNodeTreeBuilder:
             alpha_socket: Socket name/index on the alpha node
             **kwargs: Additional arguments passed to NodeTreeBuilder
         """
-        node_tree = layer.node_tree
+        node_tree = layer.get_node_tree()
         self._builder = NodeTreeBuilder(node_tree, "Layer", version=version, **kwargs)
         self._layer = layer
         

@@ -3,6 +3,7 @@ from bpy.types import Operator
 from bpy.utils import register_classes_factory
 
 from .common import PSContextMixin, execute_operator_in_area, wait_for_redraw
+from ..paintsystem.data import iter_group_channels
 from ..utils.nodes import find_node, is_in_nodetree
 
 
@@ -28,12 +29,12 @@ class PAINTSYSTEM_OT_InspectLayerNodeTree(PSContextMixin, Operator):
         
         # Find the channel
         channel = None
-        for ch in ps_ctx.active_group.channels:
+        for ch in iter_group_channels(ps_ctx.active_group):
             if ch.name == self.channel_name:
                 channel = ch
                 break
         
-        if not channel or not channel.node_tree:
+        if not channel or not channel.get_node_tree():
             return {'CANCELLED'}
         
         # Find the layer
@@ -42,7 +43,7 @@ class PAINTSYSTEM_OT_InspectLayerNodeTree(PSContextMixin, Operator):
             return {'CANCELLED'}
         
         linked_layer = layer.get_layer_data()
-        if not linked_layer or not linked_layer.node_tree:
+        if not linked_layer or not linked_layer.get_node_tree():
             return {'CANCELLED'}
         
         # First, navigate to the material's main node tree
@@ -51,7 +52,7 @@ class PAINTSYSTEM_OT_InspectLayerNodeTree(PSContextMixin, Operator):
         # Find the group node for the PS group in the material
         group_node = find_node(ps_ctx.active_material.node_tree, {
             'bl_idname': 'ShaderNodeGroup',
-            'node_tree': ps_ctx.active_group.node_tree
+            'node_tree': ps_ctx.active_group.get_node_tree()
         }, connected_to_output=False)
         
         if group_node:
@@ -59,9 +60,9 @@ class PAINTSYSTEM_OT_InspectLayerNodeTree(PSContextMixin, Operator):
             context.space_data.path.append(group_node.node_tree, node=group_node)
         
         # Now find the channel node within the group
-        channel_node = find_node(ps_ctx.active_group.node_tree, {
+        channel_node = find_node(ps_ctx.active_group.get_node_tree(), {
             'bl_idname': 'ShaderNodeGroup',
-            'node_tree': channel.node_tree
+            'node_tree': channel.get_node_tree()
         }, connected_to_output=False)
         
         if channel_node:
@@ -69,9 +70,9 @@ class PAINTSYSTEM_OT_InspectLayerNodeTree(PSContextMixin, Operator):
             context.space_data.path.append(channel_node.node_tree, node=channel_node)
         
         # Find the layer's node group in the channel's node tree
-        node_to_select = find_node(channel.node_tree, {
+        node_to_select = find_node(channel.get_node_tree(), {
             'bl_idname': 'ShaderNodeGroup',
-            'node_tree': linked_layer.node_tree
+            'node_tree': linked_layer.get_node_tree()
         }, connected_to_output=False)
         
         if not node_to_select:

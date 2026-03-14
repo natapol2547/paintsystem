@@ -2,7 +2,7 @@ import bpy
 from bpy.props import EnumProperty
 
 # ---
-from ..paintsystem.data import CHANNEL_TEMPLATE_ENUM, CHANNEL_TYPE_ENUM, COLOR_SPACE_ENUM
+from ..paintsystem.data import CHANNEL_TEMPLATE_ENUM, CHANNEL_TYPE_ENUM, COLOR_SPACE_ENUM, iter_group_channels
 from ..utils import get_next_unique_name
 from .common import MultiMaterialOperator, PSContextMixin, redraw_panel
 from ..paintsystem.list_manager import ListManager
@@ -26,7 +26,7 @@ class PAINTSYSTEM_OT_AddChannel(PSContextMixin, MultiMaterialOperator):
         """Set a unique name for the new channel."""
         ps_ctx = PSContextMixin.parse_context(context)
         active_group = ps_ctx.active_group
-        return get_next_unique_name(self.channel_name, [channel.name for channel in active_group.channels])
+        return get_next_unique_name(self.channel_name, [channel.name for channel in iter_group_channels(active_group)])
 
     channel_name: bpy.props.StringProperty(
         name="Channel Name",
@@ -148,7 +148,7 @@ class PAINTSYSTEM_OT_DeleteChannel(PSContextMixin, MultiMaterialOperator):
     def draw(self, context):
         layout = self.layout
         ps_ctx = self.parse_context(context)
-        layout.label(text=f"Are you sure you want to delete '{ps_ctx.active_group.channels[ps_ctx.active_group.active_index].name}' Channel?")
+        layout.label(text=f"Are you sure you want to delete '{list(iter_group_channels(ps_ctx.active_group))[ps_ctx.active_group.active_index].name}' Channel?")
 
 
 class PAINTSYSTEM_OT_MoveChannelUp(PSContextMixin, MultiMaterialOperator):

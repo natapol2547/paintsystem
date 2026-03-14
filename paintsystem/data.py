@@ -301,11 +301,21 @@ def update_active_group(self, context):
         active_group.update_node_tree(context)
 
 def find_channels_containing_layer(check_layer: "Layer") -> list["Channel"]:
-    """Find all channels that reference *check_layer* (directly or via link)."""
+    """Find all channels that reference *check_layer* (directly or via link).
+
+    V3: compares the owning NodeTree identity (shared NodeTree = linked).
+    V2: falls back to ``linked_layer_uid`` comparison.
+    """
     channels = []
+    check_nt = check_layer.get_node_tree() if isinstance(check_layer.id_data, bpy.types.NodeTree) else None
     for _mat, _grp, channel, layer in iter_all_layers():
-        if layer == check_layer or layer.linked_layer_uid == check_layer.uid:
-            channels.append(channel)
+        if check_nt:
+            layer_nt = layer.get_node_tree() if isinstance(layer.id_data, bpy.types.NodeTree) else None
+            if layer_nt == check_nt:
+                channels.append(channel)
+        else:
+            if layer == check_layer or layer.linked_layer_uid == check_layer.uid:
+                channels.append(channel)
     return channels
 
 def get_node_from_nodetree(node_tree: NodeTree, identifier: str) -> Node | None:
@@ -833,6 +843,12 @@ class Layer(BaseNestedListItem):
         update=update_name
     )
     
+    def get_node_tree(self):
+        """Return the NodeTree for this layer (V3: self.id_data, V2: self.node_tree)."""
+        if isinstance(self.id_data, bpy.types.NodeTree):
+            return self.id_data
+        return self.node_tree
+
     def update_node_tree(self, context):
         if pause_all_node_tree_updates:
             return
@@ -859,7 +875,8 @@ class Layer(BaseNestedListItem):
             self.blend_mode = "MIX"
         
         # Ensure node tree
-        if not self.node_tree:
+        node_tree = self.get_node_tree()
+        if not node_tree:
             node_tree = bpy.data.node_groups.new(name=f"PS_Layer ({self.name})", type='ShaderNodeTree')
             self.node_tree = node_tree
         
@@ -876,12 +893,12 @@ class Layer(BaseNestedListItem):
             ExpectedSocket(name="Color", socket_type="NodeSocketColor"),
             ExpectedSocket(name="Alpha", socket_type="NodeSocketFloat"),
         ]
-        ensure_sockets(self.node_tree, expected_input, "INPUT")
-        ensure_sockets(self.node_tree, expected_output, "OUTPUT")
+        ensure_sockets(node_tree, expected_input, "INPUT")
+        ensure_sockets(node_tree, expected_output, "OUTPUT")
         
         # Update node tree name
         if self.name:
-            self.node_tree.name = f"PS {self.name} ({self.uid[:8]})"
+            node_tree.name = f"PS {self.name} ({self.uid[:8]})"
         
         if self.coord_type == "DECAL":
             if not self.empty_object:
@@ -947,24 +964,23 @@ class Layer(BaseNestedListItem):
     
             
     def find_node(self, identifier: str) -> Node | None:
-        self = self.get_layer_data()
-        return get_node_from_nodetree(self.node_tree, identifier)
+        layer_data = self.get_layer_data()
+        return get_node_from_nodetree(layer_data.get_node_tree(), identifier)
             
     @property
     def mix_node(self) -> Node | None:
-        self = self.get_layer_data()
         return self.find_node("mix_rgb")
     
     @property
     def post_mix_node(self) -> Node | None:
-        self = self.get_layer_data()
         return self.find_node("post_mix")
     
     @property
     def source_node(self) -> Node | None:
-        if not self.node_tree:
+        nt = self.get_node_tree()
+        if not nt:
             return None
-        source_node = self.node_tree.nodes.get("source")
+        source_node = nt.nodes.get("source")
         if source_node:
             return source_node
         # Backup
@@ -1483,8 +1499,12 @@ class Layer(BaseNestedListItem):
     
     def duplicate_layer_data(self, layer: "Layer"):
         self.uid = str(uuid.uuid4())
-        if layer.node_tree:
-            self.node_tree = layer.node_tree.copy()
+        src_nt = layer.get_node_tree()
+        if src_nt:
+            if isinstance(self.id_data, bpy.types.NodeTree) and self.id_data == src_nt:
+                pass  # V3 self-duplication: NodeTree is already correct
+            elif not isinstance(self.id_data, bpy.types.NodeTree):
+                self.node_tree = src_nt.copy()  # V2 path
         if layer.image:
             # if image is not saved, save it
             image: Image = layer.image
@@ -1514,12 +1534,18 @@ class Layer(BaseNestedListItem):
         self.apply_properties(layer, self, ignore_props=["name", "uid", "node_tree", "image", "empty_object", "type", "id", "order", "parent_id", "layer_name"])
     
     def get_layer_data(self) -> "Layer":
+        """Return the actual Layer data.
+
+        V3: always returns self (linked layers share the same NodeTree and
+        thus the same ps_layer_data).
+        V2: resolves linked_layer_uid / linked_material to the original Layer.
+        """
+        if isinstance(self.id_data, bpy.types.NodeTree):
+            return self  # V3: no indirection needed
         if self.is_linked:
             if not self.linked_material or not self.linked_material.ps_mat_data:
                 logger.error(f"Linked material {self.linked_material.name if self.linked_material else 'None'} not found")
                 return None
-            
-            # Use cached UID lookup dictionary for O(1) access instead of nested loops
             uid_to_layer = _get_material_layer_uid_map(self.linked_material)
             layer = uid_to_layer.get(self.linked_layer_uid)
             if not layer:
@@ -1533,8 +1559,8 @@ class Layer(BaseNestedListItem):
             ps_data = getattr(material, 'ps_mat_data', None)
             if ps_data:
                 for group in iter_mat_groups(ps_data):
-                    for channel in group.channels:
-                        for layer in channel.layers:
+                    for channel in iter_group_channels(group):
+                        for layer in iter_channel_layers(channel):
                             if layer.is_linked and layer.linked_layer_uid == self.uid:
                                 linked_layer_uid_map[layer.uid] = [layer, material]
         # Migrate layer data to one of the linked layers
@@ -1549,9 +1575,22 @@ class Layer(BaseNestedListItem):
         return new_main_layer, new_material
     
     def delete_layer_data(self):
+        """Delete the layer data.
+
+        V3: only removes the layer's NodeTree if no other LayerRef still
+        references it (i.e. the layer is not linked elsewhere).
+        V2: transfers data to a linked layer if it is linked.
         """
-        Delete the layer data. Transfer to a linked layer if it is linked.
-        """
+        if isinstance(self.id_data, bpy.types.NodeTree):
+            # V3 path
+            layer_nt = self.id_data
+            if self.empty_object:
+                bpy.data.objects.remove(self.empty_object, do_unlink=True)
+            if not is_layer_linked_v3(layer_nt):
+                bpy.data.node_groups.remove(layer_nt)
+            return
+
+        # V2 path
         layer = self.get_layer_data()
         if is_layer_linked(layer) and not self.is_linked:
             logger.debug(f"Transferring layer data for {layer.name} to linked layers")
@@ -1560,7 +1599,6 @@ class Layer(BaseNestedListItem):
             logger.debug(f"Deleting layer data for {self.name}")
             if self.empty_object:
                 bpy.data.objects.remove(self.empty_object, do_unlink=True)
-            # TODO: The following causes some issue when undoing
             if self.node_tree:
                 bpy.data.node_groups.remove(self.node_tree)
     
@@ -1621,8 +1659,8 @@ def _get_material_layer_uid_map(material: Material, force_refresh: bool = False)
     # Build the UID map
     uid_map = {}
     for group in iter_mat_groups(material.ps_mat_data):
-        for channel in group.channels:
-            for layer in channel.layers:
+        for channel in iter_group_channels(group):
+            for layer in iter_channel_layers(channel):
                 if layer.uid:
                     uid_map[layer.uid] = layer
     
@@ -1796,6 +1834,20 @@ def vector_transform(node_builder: NodeTreeBuilder, color_name: str, color_socke
         new_color_socket = color_socket
     return new_color_name, new_color_socket
 
+
+class LayerRef(PropertyGroup):
+    """V3 layer slot — a pointer to the layer's NodeTree.
+
+    The full Layer data lives in ``node_tree.ps_layer_data``.
+    Linked layers are expressed by having multiple LayerRef entries
+    (potentially across different channels) point to the **same** NodeTree.
+    """
+    node_tree: PointerProperty(
+        name="Node Tree",
+        type=NodeTree
+    )
+
+
 class Channel(BaseNestedListManager):
     """A paint channel (e.g. Color, Roughness, Normal) that owns a hierarchy of layers.
     
@@ -1812,22 +1864,29 @@ class Channel(BaseNestedListManager):
                 return self.get_parent_layer_id(parent_layer)
         return parent_layer.id
     
+    def get_node_tree(self):
+        """Return the NodeTree for this channel (V3: self.id_data, V2: self.node_tree)."""
+        if isinstance(self.id_data, bpy.types.NodeTree):
+            return self.id_data
+        return self.node_tree
+
     def update_node_tree(self, context:Context):
         if pause_all_node_tree_updates:
             return
         if not self.auto_update_node_tree:
             return
-        if not self.node_tree:
+        node_tree = self.get_node_tree()
+        if not node_tree:
             return
         _invalidate_material_layer_cache(parse_context(context).active_material)
         
-        self.node_tree.name = f"PS {self.name}"
-        if len(self.node_tree.interface.items_tree) == 0:
-            self.node_tree.interface.new_socket("Color", in_out="OUTPUT", socket_type="NodeSocketColor")
-            self.node_tree.interface.new_socket("Alpha", in_out="OUTPUT", socket_type="NodeSocketFloat")
-            self.node_tree.interface.new_socket("Color", in_out="INPUT", socket_type="NodeSocketColor")
-            self.node_tree.interface.new_socket("Alpha", in_out="INPUT", socket_type="NodeSocketFloat")
-        node_builder = NodeTreeBuilder(self.node_tree, frame_name="Channel Graph", node_width=200)
+        node_tree.name = f"PS {self.name}"
+        if len(node_tree.interface.items_tree) == 0:
+            node_tree.interface.new_socket("Color", in_out="OUTPUT", socket_type="NodeSocketColor")
+            node_tree.interface.new_socket("Alpha", in_out="OUTPUT", socket_type="NodeSocketFloat")
+            node_tree.interface.new_socket("Color", in_out="INPUT", socket_type="NodeSocketColor")
+            node_tree.interface.new_socket("Alpha", in_out="INPUT", socket_type="NodeSocketFloat")
+        node_builder = NodeTreeBuilder(node_tree, frame_name="Channel Graph", node_width=200)
         node_builder.add_node("group_input", "NodeGroupInput")
         node_builder.add_node("group_output", "NodeGroupOutput")
         
@@ -1894,7 +1953,8 @@ class Channel(BaseNestedListManager):
         if len(flattened_unlinked_layers) > 0:
             for unlinked_layer in flattened_unlinked_layers:
                 layer = unlinked_layer.get_layer_data()
-                if layer is None or not layer.node_tree:
+                layer_nt = layer.get_node_tree() if layer else None
+                if layer is None or not layer_nt:
                     continue
                 sample_id = unlinked_layer.parent_id
                 if unlinked_layer.parent_id != -1:
@@ -1903,7 +1963,7 @@ class Channel(BaseNestedListManager):
                 layer_identifier = unlinked_layer.uid
                 add_command = node_builder.add_node(
                     layer_identifier, "ShaderNodeGroup",
-                    {"node_tree": layer.node_tree},
+                    {"node_tree": layer_nt},
                     {"Clip": layer.is_clip or layer.type == "ADJUSTMENT"},
                     force_properties=True,
                     force_default_values=True
@@ -2004,17 +2064,19 @@ class Channel(BaseNestedListManager):
         """Update the channel name to ensure uniqueness."""
         if self.updating_name_flag:
             return
-        if not self.node_tree:
+        ch_nt = self.get_node_tree()
+        if not ch_nt:
             return
-        self.node_tree.name = f".PS_Channel ({self.name})"
+        ch_nt.name = f".PS_Channel ({self.name})"
         self.updating_name_flag = True
         parsed_context = parse_context(context)
         active_group = parsed_context.active_group
-        new_name = get_next_unique_name(self.name, [channel.name for channel in active_group.channels if channel != self])
-        if new_name != self.name:
-            self.name = new_name
-        self.updating_name_flag = False
-        update_active_group(self, context)
+        if active_group:
+            new_name = get_next_unique_name(self.name, [channel.name for channel in iter_group_channels(active_group) if channel != self])
+            if new_name != self.name:
+                self.name = new_name
+            self.updating_name_flag = False
+            update_active_group(self, context)
     
     def create_layer(
         self, 
@@ -2056,7 +2118,7 @@ class Channel(BaseNestedListManager):
         if update_active_index:
             new_id = layer.id
             if new_id != -1:
-                for i, item in enumerate(self.layers):
+                for i, item in enumerate(self._get_items()):
                     if item.id == new_id:
                         self.active_index = i
                         break
@@ -2064,17 +2126,23 @@ class Channel(BaseNestedListManager):
         layer.update_node_tree(context)
         self.update_node_tree(context)
         return layer
-    
+
+    def add_linked_layer_ref(self, layer_node_tree: NodeTree):
+        """V3 only: add a LayerRef pointing to an existing layer NodeTree (linking)."""
+        ref = self.layer_nodes.add()
+        ref.node_tree = layer_node_tree
+        self.active_index = len(self.layer_nodes) - 1
+
     def set_active_index_to_layer(self, context, layer: "Layer"):
         self.normalize_orders()
         order = int(layer.order)
         parent_id = int(layer.parent_id)
-        for i, item in enumerate(self.layers):
+        for i, item in enumerate(self._get_items()):
             self.active_index = i
             if item.order == order and item.parent_id == parent_id:
                 break
         self.active_index = min(
-            self.active_index, len(self.layers) - 1)
+            self.active_index, self._items_count() - 1)
         self.update_node_tree(context)
     
     def delete_layer(self, context, layer: "Layer"):
@@ -2087,12 +2155,12 @@ class Channel(BaseNestedListManager):
         if item_id != -1 and self.remove_item_and_children(item_id, on_delete):
             # Update active_index
             self.normalize_orders()
-            for i, item in enumerate(self.layers):
+            for i, item in enumerate(self._get_items()):
                 self.active_index = i
                 if item.order == order and item.parent_id == parent_id:
                     break
         self.active_index = min(
-            self.active_index, len(self.layers) - 1)
+            self.active_index, self._items_count() - 1)
         self.update_node_tree(context)
     
     def delete_layers(self, context, layers: list["Layer"]):
@@ -2195,8 +2263,9 @@ class Channel(BaseNestedListManager):
             ps_data = getattr(mat, "ps_mat_data", None)
             if ps_data and use_group_tree:
                 for group in iter_mat_groups(ps_data):
-                    if group.node_tree and self.name in group.channels:
-                        bake_node = find_node(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': group.node_tree})
+                    group_nt = group.get_node_tree()
+                    if group_nt and any(ch.name == self.name for ch in iter_group_channels(group)):
+                        bake_node = find_node(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': group_nt})
                         color_output = bake_node.outputs[self.name]
                         if self.use_alpha:
                             alpha_output = bake_node.outputs[f'{self.name} Alpha']
@@ -2205,7 +2274,7 @@ class Channel(BaseNestedListManager):
             if not bake_node:
                 # Use channel node group instead
                 bake_node = node_tree.nodes.new(type='ShaderNodeGroup')
-                bake_node.node_tree = self.node_tree
+                bake_node.node_tree = self.get_node_tree()
                 color_output = bake_node.outputs['Color']
                 if self.use_alpha:
                     alpha_output = bake_node.outputs['Alpha']
@@ -2290,7 +2359,40 @@ class Channel(BaseNestedListManager):
     @property
     def collection_name(self):
         return "layers"
-            
+
+    def _is_v3(self):
+        return isinstance(self.id_data, bpy.types.NodeTree) and self.layer_nodes is not None
+
+    def _get_items(self):
+        if self._is_v3():
+            return [ref.node_tree.ps_layer_data for ref in self.layer_nodes if ref.node_tree]
+        return self.layers
+
+    def _get_item_at(self, index):
+        if self._is_v3():
+            return self.layer_nodes[index].node_tree.ps_layer_data
+        return self.layers[index]
+
+    def _items_count(self):
+        if self._is_v3():
+            return len(self.layer_nodes)
+        return len(self.layers)
+
+    def _add_raw_item(self):
+        if self._is_v3():
+            nt = bpy.data.node_groups.new(name="PS Layer", type='ShaderNodeTree')
+            nt.ps_type = 'LAYER'
+            ref = self.layer_nodes.add()
+            ref.node_tree = nt
+            return nt.ps_layer_data
+        return self.layers.add()
+
+    def _remove_raw_item(self, index):
+        if self._is_v3():
+            self.layer_nodes.remove(index)
+        else:
+            self.layers.remove(index)
+
     name: StringProperty(
         name="Name",
         description="Channel name",
@@ -2314,10 +2416,17 @@ class Channel(BaseNestedListManager):
         default=True,
         options={'SKIP_SAVE'}
     )
+    # V2 legacy — kept for migration. V3 code uses layer_nodes.
     layers: CollectionProperty(
         type=Layer,
         name="Material Layers",
-        description="Collection of material layers in the Paint System"
+        description="(V2 legacy) Collection of material layers in the Paint System"
+    )
+    # V3: each slot holds a NodeTree whose ps_layer_data carries full Layer data.
+    layer_nodes: CollectionProperty(
+        type=LayerRef,
+        name="Layer Nodes",
+        description="(V3) NodeTree-backed layer references"
     )
     
     @property
@@ -2538,7 +2647,7 @@ class Channel(BaseNestedListManager):
             ps_ctx.ps_mat_data.original_view_transform = str(context.scene.view_settings.view_transform) # bpy.data.scenes["Scene"].view_settings.view_transform
             
             # Find channel node tree
-            node = find_node(mat.node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree})
+            node = find_node(mat.node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.get_node_tree()})
             if node:
                 # Connect node tree to material output
                 connect_sockets(mat_output.inputs[0], node.outputs[active_channel.name])
@@ -2556,6 +2665,17 @@ class Channel(BaseNestedListManager):
             active_channel.disable_output_transform = False
 
 
+class ChannelRef(PropertyGroup):
+    """V3 channel slot — a pointer to the channel's NodeTree.
+
+    The full Channel data lives in ``node_tree.ps_channel_data``.
+    """
+    node_tree: PointerProperty(
+        name="Node Tree",
+        type=NodeTree
+    )
+
+
 class Group(PropertyGroup):
     """A Paint System group that bundles multiple channels into one node-tree.
     
@@ -2563,10 +2683,17 @@ class Group(PropertyGroup):
     and exposes its channels as input/output sockets.
     """
     
+    def get_node_tree(self):
+        """Return the NodeTree for this group (V3: self.id_data, V2: self.node_tree)."""
+        if isinstance(self.id_data, bpy.types.NodeTree):
+            return self.id_data
+        return self.node_tree
+
     def get_group_node(self, node_tree: NodeTree) -> bpy.types.Node:
-        group_node = find_node(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': self.node_tree})
+        own_nt = self.get_node_tree()
+        group_node = find_node(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': own_nt})
         if not group_node:
-            group_node = find_node(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': self.node_tree}, connected_to_output=False)
+            group_node = find_node(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': own_nt}, connected_to_output=False)
         return group_node
     
     def update_node_tree(self, context):
@@ -2574,9 +2701,7 @@ class Group(PropertyGroup):
             return
         if not self.auto_update_node_tree:
             return
-        node_tree = self.node_tree or (
-            self.id_data if isinstance(self.id_data, bpy.types.NodeTree) else None
-        )
+        node_tree = self.get_node_tree()
         if not node_tree:
             return
         mat = None
@@ -2608,7 +2733,7 @@ class Group(PropertyGroup):
             return
         
         expected_sockets: List[ExpectedSocket] = []
-        for channel in self.channels:
+        for channel in iter_group_channels(self):
             # Map channel type to valid socket type
             type_map = {"COLOR": "NodeSocketColor", "VECTOR": "NodeSocketVector", "FLOAT": "NodeSocketFloat"}
             socket_type = type_map.get(channel.type, "NodeSocketColor")
@@ -2619,16 +2744,16 @@ class Group(PropertyGroup):
         ensure_sockets(node_tree, expected_sockets, "OUTPUT")
         ensure_sockets(node_tree, expected_sockets, "INPUT")
         
-        node_builder = NodeTreeBuilder(self.node_tree, frame_name="Group Graph", clear=True)
+        node_builder = NodeTreeBuilder(node_tree, frame_name="Group Graph", clear=True)
         node_builder.add_node("group_input", "NodeGroupInput")
         node_builder.add_node("group_output", "NodeGroupOutput")
-        for channel in self.channels:
-            if not channel.node_tree or len(channel.node_tree.interface.items_tree) == 0:
-                # Channel is not valid, skip it
+        for channel in iter_group_channels(self):
+            ch_nt = channel.get_node_tree()
+            if not ch_nt or len(ch_nt.interface.items_tree) == 0:
                 continue
             channel_name = channel.name
             c_alpha_name = f"{channel.name} Alpha"
-            node_builder.add_node(channel_name, "ShaderNodeGroup", {"node_tree": channel.node_tree}, {"Alpha": 1})
+            node_builder.add_node(channel_name, "ShaderNodeGroup", {"node_tree": ch_nt}, {"Alpha": 1})
             node_builder.link("group_input", channel_name, channel_name, "Color")
                 
             if channel.use_alpha:
@@ -2644,10 +2769,17 @@ class Group(PropertyGroup):
         default="New Group",
         update=update_node_tree
     )
+    # V2 legacy — kept for migration. V3 code uses channel_nodes.
     channels: CollectionProperty(
         type=Channel,
         name="Channels",
-        description="Collection of channels in the Paint System"
+        description="(V2 legacy) Collection of channels in the Paint System"
+    )
+    # V3: each slot holds a NodeTree whose ps_channel_data carries full Channel data.
+    channel_nodes: CollectionProperty(
+        type=ChannelRef,
+        name="Channel Nodes",
+        description="(V3) NodeTree-backed channel references"
     )
     template: EnumProperty(
         name="Template",
@@ -2695,20 +2827,25 @@ class Group(PropertyGroup):
         context, 
         channel_name: str = "New Channel",
         channel_type: str = "COLOR",
-        disable_output_transform: bool = False, # Newly created channels are disabled by default
+        disable_output_transform: bool = False,
         **kwargs
     ):
-        channels = self.channels
-        node_tree = bpy.data.node_groups.new(name=f"Temp Channel Name", type='ShaderNodeTree')
-        new_channel = channels.add()
-        self.active_index = len(channels) - 1
-        unique_name = get_next_unique_name(channel_name, [channel.name for channel in channels])
+        node_tree = bpy.data.node_groups.new(name="Temp Channel Name", type='ShaderNodeTree')
+        node_tree.ps_type = 'CHANNEL'
+
+        new_channel = node_tree.ps_channel_data
+        existing_names = [ch.name for ch in iter_group_channels(self)]
+        unique_name = get_next_unique_name(channel_name, existing_names)
         new_channel.name = unique_name
         new_channel.type = channel_type
         new_channel.disable_output_transform = disable_output_transform
         for key, value in kwargs.items():
             setattr(new_channel, key, value)
-        new_channel.node_tree = node_tree
+
+        ref = self.channel_nodes.add()
+        ref.node_tree = node_tree
+        self.active_index = len(self.channel_nodes) - 1
+
         new_channel.update_node_tree(context)
         self.update_node_tree(context)
         return new_channel
@@ -2780,13 +2917,35 @@ class Group(PropertyGroup):
                 raise ValueError(f"Invalid template: {template}")
     
     def delete_channel(self, context, channel: "Channel"):
-        active_index = self.channels.find(channel.name)
-        if active_index < 0 or active_index >= len(self.channels):
-            logger.warning(f"No valid channel selected for deletion")
-            return
-        
-        self.channels.remove(active_index)
-        self.active_index = max(0, active_index - 1)
+        if self.channel_nodes:
+            # V3 path: find the ChannelRef whose NodeTree holds this channel
+            channel_nt = channel.get_node_tree()
+            idx = -1
+            for i, ref in enumerate(self.channel_nodes):
+                if ref.node_tree == channel_nt:
+                    idx = i
+                    break
+            if idx < 0:
+                logger.warning("No valid channel selected for deletion (V3)")
+                return
+            # Delete all layers owned by this channel first
+            for layer_ref in list(channel.layer_nodes):
+                if layer_ref.node_tree:
+                    layer = layer_ref.node_tree.ps_layer_data
+                    layer.delete_layer_data()
+            channel.layer_nodes.clear()
+            self.channel_nodes.remove(idx)
+            if channel_nt:
+                bpy.data.node_groups.remove(channel_nt)
+            self.active_index = max(0, idx - 1)
+        else:
+            # V2 path
+            active_index = self.channels.find(channel.name)
+            if active_index < 0 or active_index >= len(self.channels):
+                logger.warning("No valid channel selected for deletion")
+                return
+            self.channels.remove(active_index)
+            self.active_index = max(0, active_index - 1)
         self.update_node_tree(context)
 
 
@@ -3026,9 +3185,9 @@ class MaterialData(PropertyGroup):
         node_tree.ps_type = 'GROUP'
 
         # The Group PropertyGroup is embedded directly in the NodeTree.
+        # Do NOT set new_group.node_tree — in V3, use self.id_data instead.
         new_group = node_tree.ps_group_data
         new_group.name = group_name
-        new_group.node_tree = node_tree
 
         # Register a slot in the V3 group list.
         lm = ListManager(self, 'group_nodes', self, 'active_index')
@@ -3088,32 +3247,49 @@ def iter_mat_groups(ps_mat_data: "MaterialData") -> Generator["Group", None, Non
         yield from ps_mat_data.groups
 
 
-def iter_all_layers() -> Generator[tuple[Material, Group, Channel, Layer], None, None]:
+def iter_group_channels(group: "Group") -> Generator["Channel", None, None]:
+    """Yield every Channel for *group*, handling both V2 and V3 layouts.
+
+    V3: channels are stored in ``channel_nodes[i].node_tree.ps_channel_data``.
+    V2 (legacy): channels are stored directly in ``channels``.
+    """
+    if isinstance(group.id_data, bpy.types.NodeTree) and group.channel_nodes:
+        for ref in group.channel_nodes:
+            if ref.node_tree:
+                yield ref.node_tree.ps_channel_data
+    else:
+        yield from group.channels
+
+
+def iter_channel_layers(channel: "Channel") -> Generator["Layer", None, None]:
+    """Yield every Layer for *channel*, handling both V2 and V3 layouts.
+
+    V3: layers are stored in ``layer_nodes[i].node_tree.ps_layer_data``.
+    V2 (legacy): layers are stored directly in ``layers``.
+    """
+    if isinstance(channel.id_data, bpy.types.NodeTree) and channel.layer_nodes:
+        for ref in channel.layer_nodes:
+            if ref.node_tree:
+                yield ref.node_tree.ps_layer_data
+    else:
+        yield from channel.layers
+
+
+def iter_all_layers() -> Generator[tuple[Material, "Group", "Channel", "Layer"], None, None]:
     """Yield (material, group, channel, layer) for every layer across all materials.
-    
+
     This is the canonical way to iterate over all Paint System layers and avoids
     duplicating the four-level nested loop throughout the codebase.
-    Supports both V3 (group_nodes) and V2 legacy (groups) materials.
+    Supports both V3 (group_nodes / channel_nodes / layer_nodes) and V2 legacy.
     """
     for material in bpy.data.materials:
         ps_data = getattr(material, 'ps_mat_data', None)
         if not ps_data:
             continue
-        if ps_data.ps_data_version >= 3:
-            # V3: group data lives in each GroupNodeRef's NodeTree.
-            for ref in ps_data.group_nodes:
-                if not ref.node_tree:
-                    continue
-                group = ref.node_tree.ps_group_data
-                for channel in group.channels:
-                    for layer in channel.layers:
-                        yield material, group, channel, layer
-        else:
-            # V2 legacy path.
-            for group in ps_data.groups:
-                for channel in group.channels:
-                    for layer in channel.layers:
-                        yield material, group, channel, layer
+        for group in iter_mat_groups(ps_data):
+            for channel in iter_group_channels(group):
+                for layer in iter_channel_layers(channel):
+                    yield material, group, channel, layer
 
 
 def get_all_layers() -> list[Layer]:
@@ -3121,11 +3297,38 @@ def get_all_layers() -> list[Layer]:
     return [layer for _mat, _grp, _ch, layer in iter_all_layers()]
 
 def is_layer_linked(check_layer: Layer) -> bool:
-    """Check if the layer is linked (referenced by more than one layer entry)."""
+    """Check if the layer is linked (referenced by more than one entry).
+
+    V3: delegates to ``is_layer_linked_v3`` using the layer's NodeTree.
+    V2: uses ``linked_layer_uid`` comparison across all layers.
+    """
+    if isinstance(check_layer.id_data, bpy.types.NodeTree):
+        return is_layer_linked_v3(check_layer.id_data)
     counter = Counter()
     for _mat, _grp, _ch, layer in iter_all_layers():
         counter[layer.uid if not layer.is_linked else layer.linked_layer_uid] += 1
     return counter[check_layer.uid if not check_layer.is_linked else check_layer.linked_layer_uid] > 1
+
+
+def is_layer_linked_v3(layer_node_tree: NodeTree) -> bool:
+    """V3: a layer is linked if more than one LayerRef across any channel
+    points to the same NodeTree."""
+    count = 0
+    for material in bpy.data.materials:
+        ps_data = getattr(material, 'ps_mat_data', None)
+        if not ps_data or ps_data.ps_data_version < 3:
+            continue
+        for group in iter_mat_groups(ps_data):
+            for ref in group.channel_nodes:
+                if not ref.node_tree:
+                    continue
+                channel = ref.node_tree.ps_channel_data
+                for layer_ref in channel.layer_nodes:
+                    if layer_ref.node_tree == layer_node_tree:
+                        count += 1
+                        if count > 1:
+                            return True
+    return False
 
 def sort_actions(context: bpy.types.Context, global_layer: GlobalLayer) -> list[MarkerAction]:
     sorted_actions = []
@@ -3404,7 +3607,9 @@ classes = (
     GlobalLayer,
     LayerMask,
     Layer,
+    LayerRef,
     Channel,
+    ChannelRef,
     Group,
     ClipboardLayer,
     TempMaterial,

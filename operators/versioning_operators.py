@@ -58,66 +58,151 @@ def _copy_masks(src_layer, dst_layer):
         _copy_pg(mask, new_mask)
 
 
-def _copy_layer(src_layer, dst_layer, create_snapshot=True):
-    """Copy a Layer PropertyGroup into *dst_layer* without triggering rebuilds.
+def _copy_layer_to_nt(src_layer, layer_nt):
+    """Copy a V2 Layer's properties into a NodeTree's ps_layer_data.
 
-    When *create_snapshot* is True (the default) and the layer is non-linked
-    with an existing NodeTree, the layer data is also written into
-    ``node_tree.ps_layer_data`` for V3 linking.  Pass ``False`` when copying
-    layers into a channel snapshot to avoid redundant nested snapshots.
-
-    ``auto_update_node_tree`` is left **False** on both *dst_layer* and the
-    snapshot; the caller is responsible for re-enabling it after the full
-    migration completes.
+    Tags the NodeTree as LAYER and populates ``ps_layer_data``.
+    ``auto_update_node_tree`` is left **False**; the caller re-enables it
+    after the full migration completes.
     """
-    dst_layer.auto_update_node_tree = False
-    _copy_pg(src_layer, dst_layer,
-             skip_props={'auto_update_node_tree', 'actions', 'masks'})
-    _copy_marker_actions(src_layer, dst_layer)
-    _copy_masks(src_layer, dst_layer)
+    layer_nt.ps_type = 'LAYER'
+    dst = layer_nt.ps_layer_data
+    dst.auto_update_node_tree = False
+    _copy_pg(src_layer, dst,
+             skip_props={'auto_update_node_tree', 'actions', 'masks',
+                         'node_tree', 'linked_layer_uid', 'linked_material'})
+    _copy_marker_actions(src_layer, dst)
+    _copy_masks(src_layer, dst)
+    if dst.type != src_layer.type:
+        logger.warning(
+            "  _copy_layer_to_nt: type mismatch! src=%s dst=%s (uid=%s)",
+            src_layer.type, dst.type, src_layer.uid,
+        )
+    logger.info(
+        "  _copy_layer_to_nt: uid=%s name='%s' type=%s -> NT='%s' (dst.type=%s)",
+        src_layer.uid, src_layer.name, src_layer.type, layer_nt.name, dst.type,
+    )
+    return dst
 
-    if create_snapshot and not dst_layer.is_linked and dst_layer.node_tree:
-        dst_layer.node_tree.ps_type = 'LAYER'
-        snap = dst_layer.node_tree.ps_layer_data
-        snap.auto_update_node_tree = False
-        _copy_pg(dst_layer, snap,
-                 skip_props={'auto_update_node_tree', 'actions', 'masks',
-                             'node_tree'})
-        _copy_marker_actions(dst_layer, snap)
-        _copy_masks(dst_layer, snap)
+
+def _find_v2_layer_by_uid(material, uid):
+    """Search a V2 material's groups/channels/layers for a layer with the given uid."""
+    if not material:
+        logger.warning("    _find_v2_layer_by_uid: material is None")
+        return None
+    ps_data = getattr(material, 'ps_mat_data', None)
+    if not ps_data:
+        logger.warning("    _find_v2_layer_by_uid: material '%s' has no ps_mat_data",
+                        material.name)
+        return None
+    logger.info("    _find_v2_layer_by_uid: searching '%s' (groups=%d, version=%d) "
+                "for uid='%s'",
+                material.name, len(ps_data.groups), ps_data.ps_data_version, uid)
+    for group in ps_data.groups:
+        for channel in group.channels:
+            for layer in channel.layers:
+                if layer.uid == uid:
+                    logger.info("    _find_v2_layer_by_uid: FOUND layer '%s' "
+                                "type=%s in group='%s' channel='%s'",
+                                layer.name, layer.type, group.name, channel.name)
+                    return layer
+    logger.warning("    _find_v2_layer_by_uid: NOT FOUND in '%s'. "
+                    "Available layer uids:", material.name)
+    for group in ps_data.groups:
+        for channel in group.channels:
+            for layer in channel.layers:
+                logger.warning("      group='%s' channel='%s' layer='%s' "
+                                "uid=%s type=%s",
+                                group.name, channel.name, layer.name,
+                                layer.uid, layer.type)
+    return None
 
 
-def _copy_channel(src_channel, dst_channel):
-    """Copy a Channel PropertyGroup (including its layers) into *dst_channel*.
+def _copy_channel_to_nt(src_channel, channel_nt, uid_to_layer_nt):
+    """Copy a V2 Channel's properties into a NodeTree's ps_channel_data.
 
-    Updates are paused on the destination channel during the copy to avoid
-    expensive node-tree rebuilds.  The channel's NodeTree is tagged as
-    ``'CHANNEL'`` and its ``ps_channel_data`` snapshot is populated
-    (skipping ``node_tree`` to avoid circular references).
+    Tags the NodeTree as CHANNEL and populates ``ps_channel_data``.
+    Layer data is written into each layer's NodeTree and a LayerRef is
+    added to ``ps_channel_data.layer_nodes``.
 
-    ``auto_update_node_tree`` is left **False** on the channel, its layers,
-    and all snapshot PropertyGroups; the caller re-enables them after the
-    full migration completes.
+    For linked layers (V2: ``is_linked=True``, ``type='BLANK'``), the
+    original layer is resolved via ``linked_material`` + ``linked_layer_uid``.
+    If the original has already been migrated its NodeTree is reused;
+    otherwise it is migrated on the spot so the LayerRef can share it.
+
+    ``auto_update_node_tree`` is left **False** on all written PropertyGroups.
     """
-    dst_channel.auto_update_node_tree = False
-    _copy_pg(src_channel, dst_channel,
-             skip_props={'layers', 'auto_update_node_tree'})
+    channel_nt.ps_type = 'CHANNEL'
+    dst = channel_nt.ps_channel_data
+    dst.auto_update_node_tree = False
+    _copy_pg(src_channel, dst,
+             skip_props={'layers', 'layer_nodes', 'auto_update_node_tree',
+                         'node_tree'})
 
     for src_layer in src_channel.layers:
-        dst_layer = dst_channel.layers.add()
-        _copy_layer(src_layer, dst_layer)
+        logger.info(
+            "  Layer uid=%s name='%s' type=%s is_linked=%s "
+            "linked_uid='%s' linked_mat=%s has_node_tree=%s",
+            src_layer.uid, src_layer.name, src_layer.type,
+            src_layer.is_linked, src_layer.linked_layer_uid,
+            (src_layer.linked_material.name
+             if src_layer.linked_material else 'None'),
+            src_layer.node_tree is not None,
+        )
 
-    ch_nt = dst_channel.node_tree
-    if ch_nt:
-        ch_nt.ps_type = 'CHANNEL'
-        snap = ch_nt.ps_channel_data
-        snap.auto_update_node_tree = False
-        _copy_pg(dst_channel, snap,
-                 skip_props={'layers', 'auto_update_node_tree', 'node_tree'})
-        for dst_layer in dst_channel.layers:
-            snap_layer = snap.layers.add()
-            _copy_layer(src_layer=dst_layer, dst_layer=snap_layer,
-                        create_snapshot=False)
+        if src_layer.is_linked:
+            linked_uid = src_layer.linked_layer_uid
+            if linked_uid in uid_to_layer_nt:
+                layer_nt = uid_to_layer_nt[linked_uid]
+                logger.info(
+                    "    -> LINKED (cached): reusing NT='%s'", layer_nt.name,
+                )
+            else:
+                linked_mat = src_layer.linked_material
+                logger.info(
+                    "    -> LINKED (resolving): searching material '%s' for uid '%s'",
+                    linked_mat.name if linked_mat else 'None', linked_uid,
+                )
+                original = _find_v2_layer_by_uid(linked_mat, linked_uid)
+                if original and original.node_tree:
+                    layer_nt = original.node_tree
+                    _copy_layer_to_nt(original, layer_nt)
+                    uid_to_layer_nt[linked_uid] = layer_nt
+                    logger.info(
+                        "    -> Resolved original: uid=%s name='%s' type=%s NT='%s'",
+                        original.uid, original.name, original.type, layer_nt.name,
+                    )
+                else:
+                    logger.warning(
+                        "    -> FAILED to resolve linked layer uid='%s' "
+                        "(original=%s, has_node_tree=%s) — skipping.",
+                        linked_uid,
+                        original.name if original else 'None',
+                        (original.node_tree is not None) if original else 'N/A',
+                    )
+                    continue
+        elif src_layer.node_tree:
+            layer_nt = src_layer.node_tree
+            if src_layer.uid not in uid_to_layer_nt:
+                _copy_layer_to_nt(src_layer, layer_nt)
+                uid_to_layer_nt[src_layer.uid] = layer_nt
+                logger.info("    -> NORMAL: migrated to NT='%s'", layer_nt.name)
+            else:
+                layer_nt = uid_to_layer_nt[src_layer.uid]
+                logger.info(
+                    "    -> NORMAL (already migrated): reusing NT='%s'",
+                    layer_nt.name,
+                )
+        else:
+            logger.warning(
+                "    -> SKIPPED: not linked and no node_tree",
+            )
+            continue
+
+        ref = dst.layer_nodes.add()
+        ref.node_tree = layer_nt
+
+    return dst
 
 
 def _reenable_auto_update(ps_data):
@@ -126,59 +211,97 @@ def _reenable_auto_update(ps_data):
     Called once after **all** data has been copied so that no update callback
     can fire during the migration window.
     """
-    for ref in ps_data.group_nodes:
-        nt = ref.node_tree
+    for group_ref in ps_data.group_nodes:
+        nt = group_ref.node_tree
         if not nt:
             continue
         group = nt.ps_group_data
         group.auto_update_node_tree = True
 
-        for channel in group.channels:
+        for ch_ref in group.channel_nodes:
+            ch_nt = ch_ref.node_tree
+            if not ch_nt:
+                continue
+            channel = ch_nt.ps_channel_data
             channel.auto_update_node_tree = True
-            for layer in channel.layers:
-                layer.auto_update_node_tree = True
+            for layer_ref in channel.layer_nodes:
+                if layer_ref.node_tree:
+                    layer_ref.node_tree.ps_layer_data.auto_update_node_tree = True
 
-            ch_nt = channel.node_tree
-            if ch_nt:
-                ch_snap = ch_nt.ps_channel_data
-                ch_snap.auto_update_node_tree = True
-                for snap_layer in ch_snap.layers:
-                    snap_layer.auto_update_node_tree = True
+def _unlink_id_pointers(pg):
+    """
+    Recursively walk a PropertyGroup and nullify any pointers to Blender IDs.
+    This works around Blender's ID user decrement bug when clearing nested PropertyGroups.
+    Collections are always readonly in Blender RNA (you can't replace the collection
+    itself, only its items), so they are handled separately outside the readonly guard.
+    """
+    for prop in pg.bl_rna.properties:
+        pid = prop.identifier
 
-        for channel in group.channels:
-            for layer in channel.layers:
-                if not layer.is_linked and layer.node_tree:
-                    layer.node_tree.ps_layer_data.auto_update_node_tree = True
+        if prop.type == 'COLLECTION':
+            # Always recurse into collections regardless of readonly flag.
+            for item in getattr(pg, pid):
+                _unlink_id_pointers(item)
+
+        elif prop.type == 'POINTER' and not prop.is_readonly:
+            val = getattr(pg, pid, None)
+            if val is None:
+                continue
+            if isinstance(val, bpy.types.ID):
+                setattr(pg, pid, None)
+            elif isinstance(val, bpy.types.PropertyGroup):
+                _unlink_id_pointers(val)
 
 
-def _migrate_material_v2_to_v3(ps_data):
+def _migrate_material_v2_to_v3(ps_data, uid_to_layer_nt):
     """Migrate a single material's ps_mat_data from V2 to V3 in-place.
 
+    V3 structure:
+      MaterialData.group_nodes → GroupNodeRef → NodeTree(GROUP)
+        ps_group_data.channel_nodes → ChannelRef → NodeTree(CHANNEL)
+          ps_channel_data.layer_nodes → LayerRef → NodeTree(LAYER)
+
+    *uid_to_layer_nt* is shared across all materials so that cross-material
+    linked layers (V2 ``linked_material`` + ``linked_layer_uid``) can
+    resolve to a NodeTree already migrated from a different material.
+
     All ``auto_update_node_tree`` flags are kept **False** throughout the
-    entire copy phase.  Only after every group, channel, layer, and snapshot
-    has been populated does ``_reenable_auto_update`` flip them back to True,
-    ensuring no ``update_node_tree`` callback fires during migration.
+    entire copy phase.  Only after every group, channel, and layer has been
+    migrated does ``_reenable_auto_update`` flip them back to True, ensuring
+    no ``update_node_tree`` callback fires during migration.
     """
+    mat_name = ps_data.id_data.name if ps_data.id_data else '<unknown>'
+    logger.info("=== Migrating material '%s' ===", mat_name)
+
     for v2_group in ps_data.groups:
-        node_tree = v2_group.node_tree
-        if not node_tree:
+        group_nt = v2_group.node_tree
+        if not group_nt:
             logger.warning("V2 group '%s' has no node_tree — skipping.", v2_group.name)
             continue
 
-        node_tree.ps_type = 'GROUP'
-        target_group = node_tree.ps_group_data
+        logger.info("Group '%s' -> NT='%s'", v2_group.name, group_nt.name)
+        group_nt.ps_type = 'GROUP'
+        target_group = group_nt.ps_group_data
         target_group.auto_update_node_tree = False
-        target_group.node_tree = node_tree
 
         _copy_pg(v2_group, target_group,
-                 skip_props={'channels', 'auto_update_node_tree', 'node_tree'})
+                 skip_props={'channels', 'channel_nodes',
+                             'auto_update_node_tree', 'node_tree'})
 
         for v2_channel in v2_group.channels:
-            dst_channel = target_group.channels.add()
-            _copy_channel(v2_channel, dst_channel)
+            ch_nt = v2_channel.node_tree
+            if not ch_nt:
+                logger.warning("V2 channel '%s' has no node_tree — skipping.", v2_channel.name)
+                continue
+            logger.info(" Channel '%s' -> NT='%s' (%d layers)",
+                        v2_channel.name, ch_nt.name, len(v2_channel.layers))
+            _copy_channel_to_nt(v2_channel, ch_nt, uid_to_layer_nt)
+
+            ch_ref = target_group.channel_nodes.add()
+            ch_ref.node_tree = ch_nt
 
         ref = ps_data.group_nodes.add()
-        ref.node_tree = node_tree
+        ref.node_tree = group_nt
 
     # Keep active_index in bounds for the new group_nodes list.
     new_len = len(ps_data.group_nodes)
@@ -187,7 +310,39 @@ def _migrate_material_v2_to_v3(ps_data):
     else:
         ps_data.active_index = 0
 
+    # Log the final V3 state before cleanup.
+    logger.info("--- V3 result for '%s' ---", mat_name)
+    for gi, gref in enumerate(ps_data.group_nodes):
+        gnt = gref.node_tree
+        if not gnt:
+            logger.info("  group_nodes[%d]: NT=None", gi)
+            continue
+        gd = gnt.ps_group_data
+        logger.info("  group_nodes[%d]: NT='%s'  channels=%d",
+                     gi, gnt.name, len(gd.channel_nodes))
+        for ci, cref in enumerate(gd.channel_nodes):
+            cnt = cref.node_tree
+            if not cnt:
+                logger.info("    channel_nodes[%d]: NT=None", ci)
+                continue
+            cd = cnt.ps_channel_data
+            logger.info("    channel_nodes[%d]: NT='%s'  layers=%d",
+                         ci, cnt.name, len(cd.layer_nodes))
+            for li, lref in enumerate(cd.layer_nodes):
+                lnt = lref.node_tree
+                if not lnt:
+                    logger.info("      layer_nodes[%d]: NT=None", li)
+                    continue
+                ld = lnt.ps_layer_data
+                logger.info(
+                    "      layer_nodes[%d]: NT='%s' type=%s name='%s' uid=%s",
+                    li, lnt.name, ld.type, ld.name, ld.uid,
+                )
+
     # Free V2 data and mark this material as V3.
+    for v2_group in ps_data.groups:
+        _unlink_id_pointers(v2_group)
+
     ps_data.groups.clear()
     ps_data.ps_data_version = 3
 
@@ -372,7 +527,7 @@ class PAINTSYSTEM_OT_UpdatePaintSystemData(PSContextMixin, Operator):
             # Remap the node tree
             # Find node group
             for node_group, links in relink_map.items():
-                node_group.node_tree = new_group.node_tree
+                node_group.node_tree = new_group.get_node_tree()
                 for link in links['input_links']:
                     dest_name = link.get('dest_name')
                     from_socket = link.get('from_socket')
@@ -411,6 +566,7 @@ class PAINTSYSTEM_OT_MigrateV2ToV3(Operator):
         errors = []
 
         _ps_data.pause_all_node_tree_updates = True
+        uid_to_layer_nt = {}
         try:
             for mat in bpy.data.materials:
                 ps_data = getattr(mat, 'ps_mat_data', None)
@@ -423,12 +579,17 @@ class PAINTSYSTEM_OT_MigrateV2ToV3(Operator):
                     ps_data.ps_data_version = 3
                     continue
                 try:
-                    _migrate_material_v2_to_v3(ps_data)
+                    _migrate_material_v2_to_v3(ps_data, uid_to_layer_nt)
                     migrated += 1
                     logger.info("Migrated material '%s' to V3.", mat.name)
                 except Exception as exc:  # pylint: disable=broad-except
                     errors.append(f"{mat.name}: {exc}")
-                    logger.error("Failed to migrate '%s': %s", mat.name, exc)
+                    logger.error("Failed to migrate '%s': %s", mat.name, exc,
+                                 exc_info=True)
+            logger.info("=== uid_to_layer_nt final (%d entries) ===",
+                        len(uid_to_layer_nt))
+            for uid, nt in uid_to_layer_nt.items():
+                logger.info("  uid=%s -> NT='%s'", uid, nt.name)
         finally:
             _ps_data.pause_all_node_tree_updates = False
             _ps_data._invalidate_material_layer_cache()

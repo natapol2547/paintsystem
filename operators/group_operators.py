@@ -383,7 +383,7 @@ class PAINTSYSTEM_OT_DeleteGroup(PSContextMixin, Operator):
         node_tree = ps_ctx.active_material.node_tree
         if self.bake_channels:
             pass
-        for group_node in find_nodes(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree}):
+        for group_node in find_nodes(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.get_node_tree()}):
             match active_group.template:
                 case 'BASIC':
                     nodes = find_basic_setup_nodes(group_node)

@@ -83,14 +83,28 @@ def parse_material(mat: Material) -> tuple["MaterialData", "Group", "Channel", "
             active_group = ref.node_tree.ps_group_data
 
     if active_group:
-        channels = active_group.channels
-        if channels and active_group.active_index >= 0:
-            active_channel = channels[min(active_group.active_index, len(channels) - 1)]
+        channel_nodes = active_group.channel_nodes
+        if channel_nodes and active_group.active_index >= 0:
+            ref = channel_nodes[min(active_group.active_index, len(channel_nodes) - 1)]
+            if ref.node_tree:
+                active_channel = ref.node_tree.ps_channel_data
+        elif not channel_nodes:
+            # V2 fallback
+            channels = active_group.channels
+            if channels and active_group.active_index >= 0:
+                active_channel = channels[min(active_group.active_index, len(channels) - 1)]
 
     if active_channel:
-        layers = active_channel.layers
-        if layers and active_channel.active_index >= 0:
-            unlinked_layer = layers[min(active_channel.active_index, len(layers) - 1)]
+        layer_nodes = active_channel.layer_nodes
+        if layer_nodes and active_channel.active_index >= 0:
+            ref = layer_nodes[min(active_channel.active_index, len(layer_nodes) - 1)]
+            if ref.node_tree:
+                unlinked_layer = ref.node_tree.ps_layer_data
+        elif not layer_nodes:
+            # V2 fallback
+            layers = active_channel.layers
+            if layers and active_channel.active_index >= 0:
+                unlinked_layer = layers[min(active_channel.active_index, len(layers) - 1)]
 
     return mat_data, active_group, active_channel, unlinked_layer
 

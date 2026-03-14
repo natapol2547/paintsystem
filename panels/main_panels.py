@@ -318,7 +318,7 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
                     row.popover("MAT_PT_PaintSystemMaterialSettings", text="", icon="PREFERENCES")
         
 
-        if ps_ctx.active_group and check_group_multiuser(ps_ctx.active_group.node_tree):
+        if ps_ctx.active_group and check_group_multiuser(ps_ctx.active_group.get_node_tree()):
             warning_col = draw_warning_box(layout, [
                 ("Duplicated Paint System Data", 'ERROR'),
             ])

@@ -324,7 +324,7 @@ class PAINTSYSTEM_OT_DuplicatePaintSystemData(PSContextMixin, MultiMaterialOpera
                 group_pairs.append((ref.node_tree.ps_group_data, ref))
 
         for group, group_ref in group_pairs:
-            original_node_tree = group.node_tree
+            original_node_tree = group.get_node_tree()
             
             # Store links connected to the original node group before replacing
             mat_group_nodes = [n for n in mat.node_tree.nodes if n.type == 'GROUP' and n.node_tree == original_node_tree]
@@ -349,27 +349,51 @@ class PAINTSYSTEM_OT_DuplicatePaintSystemData(PSContextMixin, MultiMaterialOpera
                     'output_links': output_links,
                 }
 
-            # Create fresh NodeTree for the group and update both the
-            # GroupNodeRef slot and the embedded Group's own node_tree pointer.
+            # Create fresh NodeTree for the group.
             new_group_tree = bpy.data.node_groups.new(name=f"Paint System ({mat.name})", type='ShaderNodeTree')
             new_group_tree.ps_type = 'GROUP'
             group_ref.node_tree = new_group_tree
-            group.node_tree = new_group_tree
+            new_group = new_group_tree.ps_group_data
+            from ..paintsystem.data import iter_group_channels, iter_channel_layers
+            # Copy group properties from old to new
+            for prop in group.bl_rna.properties:
+                pid = prop.identifier
+                if prop.is_readonly or prop.type == 'COLLECTION' or pid == 'node_tree':
+                    continue
+                try:
+                    setattr(new_group, pid, getattr(group, pid))
+                except (AttributeError, TypeError, RuntimeError):
+                    pass
 
-            for channel in group.channels:
-                node_tree = bpy.data.node_groups.new(name=f"PS_Channel ({channel.name})", type='ShaderNodeTree')
-                channel.node_tree = node_tree
-                for layer in channel.layers:
-                    if layer.is_linked:
+            for channel in iter_group_channels(group):
+                ch_nt = bpy.data.node_groups.new(name=f"PS_Channel ({channel.name})", type='ShaderNodeTree')
+                ch_nt.ps_type = 'CHANNEL'
+                new_ch = ch_nt.ps_channel_data
+                for prop in channel.bl_rna.properties:
+                    pid = prop.identifier
+                    if prop.is_readonly or prop.type == 'COLLECTION' or pid == 'node_tree':
                         continue
+                    try:
+                        setattr(new_ch, pid, getattr(channel, pid))
+                    except (AttributeError, TypeError, RuntimeError):
+                        pass
+                ch_ref = new_group.channel_nodes.add()
+                ch_ref.node_tree = ch_nt
+
+                for layer in iter_channel_layers(channel):
                     layer.duplicate_layer_data(layer)
                     layer.update_node_tree(context)
-                channel.update_node_tree(context)
-            group.update_node_tree(context)
+                    layer_nt = layer.get_node_tree()
+                    if layer_nt:
+                        layer_ref = new_ch.layer_nodes.add()
+                        layer_ref.node_tree = layer_nt
+                new_ch.update_node_tree(context)
+            new_group.update_node_tree(context)
+            group = new_group
             
             # Reconnect the sockets using stored endpoints
             for node_group, links in relink_map.items():
-                node_group.node_tree = group.node_tree
+                node_group.node_tree = group.get_node_tree()
                 for link in links['input_links']:
                     dest_name = link.get('dest_name')
                     from_socket = link.get('from_socket')
@@ -524,7 +548,7 @@ class PAINTSYSTEM_OT_FocusPSNode(PSContextMixin, Operator):
         space.show_region_ui = True
         
         # Find the node group
-        node_to_focus = find_node(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.node_tree}, connected_to_output=False)
+        node_to_focus = find_node(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': active_group.get_node_tree()}, connected_to_output=False)
         if not node_to_focus:
             # Find material output instead
             node_to_focus = get_material_output(node_tree)

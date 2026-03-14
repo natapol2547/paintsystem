@@ -4,6 +4,7 @@ from bpy.types import NodeTree, Panel, Menu, UILayout, Context
 from bpy.utils import register_classes_factory
 
 from .common import PSContextMixin, draw_layer_icon, get_event_icons, find_keymap, find_keymap_by_name, get_icon_from_channel, scale_content, get_icon
+from ..paintsystem.data import iter_group_channels
 from ..utils.version import is_newer_than
 from ..utils.unified_brushes import get_unified_settings
 from ..utils.nodes import is_in_nodetree
@@ -431,11 +432,11 @@ class NODE_PT_PaintSystemShaderEditor(PSContextMixin, Panel):
         box = layout.box()
         row = box.row(align=True)
         row.label(text="Groups:", icon='OUTLINER_OB_GROUP_INSTANCE')
-        nodetree_operator(row, ps_ctx.active_group.node_tree, text="Create Node")
+        nodetree_operator(row, ps_ctx.active_group.get_node_tree(), text="Create Node")
         box.template_list("MATERIAL_UL_PaintSystemGroups", "", ps_ctx.ps_mat_data, "group_nodes", ps_ctx.ps_mat_data, "active_index", rows=max(2, len(ps_ctx.ps_mat_data.group_nodes)))
         
         # Channels and Layers section
-        channels = ps_ctx.active_group.channels
+        channels = list(iter_group_channels(ps_ctx.active_group))
         if channels:
             box = layout.box()
             row = box.row(align=True)
@@ -477,8 +478,8 @@ class NODE_PT_PaintSystemShaderEditor(PSContextMixin, Panel):
         row.label(text=linked_layer.name)
         
         # Select node button - only for non-folder layers with node trees
-        if linked_layer.type != 'FOLDER' and linked_layer.node_tree and ps_ctx.active_material:
-            nt = linked_layer.node_tree
+        if linked_layer.type != 'FOLDER' and linked_layer.get_node_tree() and ps_ctx.active_material:
+            nt = linked_layer.get_node_tree()
             nodetree_operator(row, nt)
             op = row.operator("paint_system.inspect_layer_node_tree", text="", icon='NODETREE')
             op.layer_id = layer.id
