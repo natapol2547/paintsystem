@@ -247,13 +247,13 @@ def update_brush_settings(self=None, context: bpy.types.Context = bpy.context):
     if context.mode != 'PAINT_TEXTURE':
         return
     ps_ctx = parse_context(context)
-    active_layer = ps_ctx.active_layer
-    if not active_layer:
+    active_ref = ps_ctx.active_layer_ref
+    if not active_ref:
         return
     brush = context.tool_settings.image_paint.brush
     if not brush:
         return
-    brush.use_alpha = not active_layer.lock_alpha
+    brush.use_alpha = not active_ref.lock_alpha
 
 def update_active_image(self=None, context: bpy.types.Context = None):
     context = context or bpy.context
@@ -265,11 +265,12 @@ def update_active_image(self=None, context: bpy.types.Context = None):
     if not mat or not active_channel:
         return
     active_layer = ps_ctx.active_layer
+    active_ref = ps_ctx.active_layer_ref
     update_brush_settings(self, context)
 
     if image_paint.mode == 'MATERIAL':
         image_paint.mode = 'IMAGE'
-    if not active_layer or active_layer.lock_layer or active_channel.use_bake_image:
+    if not active_layer or (active_ref and active_ref.lock_layer) or active_channel.use_bake_image:
         image_paint.canvas = None
         # Unable to paint
         return
@@ -1462,18 +1463,25 @@ class Layer(BaseNestedListItem):
     def uses_coord_type(self) -> bool:
         return self.type in ['IMAGE', 'TEXTURE']
     
-    def get_layer_warnings(self, context: Context) -> List[str]:
+    def get_layer_warnings(self, context: Context, managed_item=None) -> List[str]:
+        """Return warnings for this layer.
+
+        *managed_item* is the hierarchy item (LayerRef in V3, or self in V2)
+        that carries ``id`` / ``parent_id``.  When omitted, falls back to
+        ``self`` (V2 path).
+        """
+        if managed_item is None:
+            managed_item = self
         ps_ctx = parse_context(context)
         layer_data = self.get_layer_data()
         active_channel = ps_ctx.active_channel
         flattened = active_channel.flatten_hierarchy()
         current_flat_index = next(
-            (i for i, (it, _) in enumerate(flattened) if it.id == self.id), -1)
+            (i for i, (it, _) in enumerate(flattened) if it.id == managed_item.id), -1)
         below_layer, next_index = active_channel.get_next_sibling_item(flattened, current_flat_index)
         warnings = []
         blend_mode = get_layer_blend_type(layer_data)
-        # If no layer below
-        if not below_layer or active_channel.get_parent_layer_id(below_layer, ignore_passthrough=True) != active_channel.get_parent_layer_id(self, ignore_passthrough=True):
+        if not below_layer or active_channel.get_parent_layer_id(below_layer, ignore_passthrough=True) != active_channel.get_parent_layer_id(managed_item, ignore_passthrough=True):
             if blend_mode != 'MIX':
                 warnings.append("Blend mode is not MIX. Use Folder with Passthrough blend mode or move the layer")
             if layer_data.type == "ADJUSTMENT":
@@ -1835,10 +1843,14 @@ def vector_transform(node_builder: NodeTreeBuilder, color_name: str, color_socke
     return new_color_name, new_color_socket
 
 
-class LayerRef(PropertyGroup):
-    """V3 layer slot — a pointer to the layer's NodeTree.
+class LayerRef(BaseNestedListItem):
+    """V3 layer slot — owns hierarchy position and per-slot state.
 
-    The full Layer data lives in ``node_tree.ps_layer_data``.
+    The full Layer data (blend_mode, opacity, image, etc.) lives in
+    ``node_tree.ps_layer_data``.  Hierarchy fields (``id``, ``parent_id``,
+    ``order``, ``type``) come from :class:`BaseNestedListItem` and are
+    independent per-slot, so linked layers can be ordered separately.
+
     Linked layers are expressed by having multiple LayerRef entries
     (potentially across different channels) point to the **same** NodeTree.
     """
@@ -1846,6 +1858,26 @@ class LayerRef(PropertyGroup):
         name="Node Tree",
         type=NodeTree
     )
+    lock_layer: BoolProperty(
+        name="Lock Layer",
+        description="Lock the layer",
+        default=False,
+    )
+    lock_alpha: BoolProperty(
+        name="Lock Alpha",
+        description="Lock the alpha channel",
+        default=False,
+    )
+    is_expanded: BoolProperty(
+        name="Expanded",
+        description="Expand the layer",
+        default=True,
+    )
+
+    @property
+    def layer(self) -> "Layer | None":
+        """Return the underlying Layer data, or None."""
+        return self.node_tree.ps_layer_data if self.node_tree else None
 
 
 class Channel(BaseNestedListManager):
@@ -1854,15 +1886,19 @@ class Channel(BaseNestedListManager):
     Compiles its layer graph into a single node tree that can be used by a Group.
     """
     
-    def get_parent_layer_id(self, layer: "Layer", ignore_passthrough: bool = False) -> int:
-        if layer.parent_id == -1:
+    def get_parent_layer_id(self, managed_item, ignore_passthrough: bool = False) -> int:
+        """Return the hierarchy id of *managed_item*'s parent.
+
+        *managed_item* is a LayerRef (V3) or Layer (V2).
+        """
+        if managed_item.parent_id == -1:
             return -1
-        parent_layer = self.get_item_by_id(layer.parent_id)
+        parent_item = self.get_item_by_id(managed_item.parent_id)
         if ignore_passthrough:
-            parent_layer_linked = parent_layer.get_layer_data()
-            if parent_layer_linked.blend_mode == "PASSTHROUGH":
-                return self.get_parent_layer_id(parent_layer)
-        return parent_layer.id
+            parent_data = parent_item.layer if isinstance(parent_item, LayerRef) else parent_item.get_layer_data()
+            if parent_data and parent_data.blend_mode == "PASSTHROUGH":
+                return self.get_parent_layer_id(parent_item)
+        return parent_item.id
     
     def get_node_tree(self):
         """Return the NodeTree for this channel (V3: self.id_data, V2: self.node_tree)."""
@@ -1951,16 +1987,20 @@ class Channel(BaseNestedListManager):
                 return
             
         if len(flattened_unlinked_layers) > 0:
-            for unlinked_layer in flattened_unlinked_layers:
-                layer = unlinked_layer.get_layer_data()
+            for managed_item in flattened_unlinked_layers:
+                if isinstance(managed_item, LayerRef):
+                    layer = managed_item.layer
+                    layer = layer.get_layer_data() if layer else None
+                else:
+                    layer = managed_item.get_layer_data()
                 layer_nt = layer.get_node_tree() if layer else None
                 if layer is None or not layer_nt:
                     continue
-                sample_id = unlinked_layer.parent_id
-                if unlinked_layer.parent_id != -1:
-                    sample_id = self.get_parent_layer_id(unlinked_layer)
+                sample_id = managed_item.parent_id
+                if managed_item.parent_id != -1:
+                    sample_id = self.get_parent_layer_id(managed_item)
                 previous_data = previous_dict.get(sample_id, None)
-                layer_identifier = unlinked_layer.uid
+                layer_identifier = layer.uid
                 add_command = node_builder.add_node(
                     layer_identifier, "ShaderNodeGroup",
                     {"node_tree": layer_nt},
@@ -1972,7 +2012,7 @@ class Channel(BaseNestedListManager):
                 if layer.is_clip and not previous_data.clip_mode:
                     previous_data.clip_mode = True
                     clip_nt = get_alpha_over_nodetree()
-                    clip_nt_identifier = f"clip_nt_{layer.id}"
+                    clip_nt_identifier = f"clip_nt_{managed_item.id}"
                     node_builder.add_node(clip_nt_identifier, "ShaderNodeGroup", {"node_tree": clip_nt}, {"Color": (0, 0, 0, 1), "Alpha": 0}, force_default_values=True)
                     node_builder.link(clip_nt_identifier, previous_data.color_name, "Color", previous_data.color_socket)
                     node_builder.link(clip_nt_identifier, previous_data.alpha_name, "Alpha", previous_data.alpha_socket)
@@ -1999,7 +2039,7 @@ class Channel(BaseNestedListManager):
                                 target_alpha_socket)
                 connect_passthrough(node_builder, layer_identifier, previous_data)
                 if layer.blend_mode == "PASSTHROUGH":
-                    previous_data.passthrough_id = unlinked_layer.id
+                    previous_data.passthrough_id = managed_item.id
                 if previous_data.clip_mode:
                     previous_data.clip_color_name = layer_identifier
                     previous_data.clip_color_socket = "Color"
@@ -2011,7 +2051,7 @@ class Channel(BaseNestedListManager):
                     previous_data.alpha_name = layer_identifier
                     previous_data.alpha_socket = "Alpha"
                 if layer.type == "FOLDER":
-                    previous_dict[unlinked_layer.id] = PreviousLayer(
+                    previous_dict[managed_item.id] = PreviousLayer(
                         color_name=layer_identifier,
                         color_socket="Over Color",
                         alpha_name=layer_identifier,
@@ -2082,28 +2122,54 @@ class Channel(BaseNestedListManager):
         self, 
         context,
         layer_name: str = "Layer Name",
-        layer_type: str = "BLANK", # "BLANK" is a special type that creates a blank layer with no node tree
+        layer_type: str = "BLANK",
         update_active_index: bool = True, 
         insert_at: Literal["TOP", "BOTTOM", "CURSOR", "BEFORE", "AFTER"] = "CURSOR", 
         handle_folder: bool = True,
         **kwargs
     ) -> 'Layer':
         parent_id, insert_order = self.get_insertion_data(handle_folder=handle_folder, insert_at=insert_at)
-        # Adjust existing items' order
         self.adjust_sibling_orders(parent_id, insert_order)
-        layer = self.add_item(
+
+        ref_or_layer_kwargs = {}
+        layer_kwargs = {}
+        _REF_PROPS = {'lock_layer', 'lock_alpha', 'is_expanded'}
+        for key, value in kwargs.items():
+            if self._is_v3() and key in _REF_PROPS:
+                ref_or_layer_kwargs[key] = value
+            else:
+                layer_kwargs[key] = value
+
+        if self._is_v3():
+            item_type = "FOLDER" if layer_type == "FOLDER" else "ITEM"
+            ref = self.add_item(
+                layer_name,
+                item_type,
+                parent_id=parent_id,
+                order=insert_order,
+                **ref_or_layer_kwargs,
+            )
+            layer = ref.layer
+            layer.auto_update_node_tree = False
+            layer.type = layer_type
+            layer.uid = str(uuid.uuid4())
+            layer.name = layer_name
+            for key, value in layer_kwargs.items():
+                setattr(layer, key, value)
+        else:
+            ref = None
+            layer = self.add_item(
                 layer_name,
                 "BLANK",
                 parent_id=parent_id,
                 order=insert_order
             )
-        layer.auto_update_node_tree = False
-        layer.type = layer_type
-        layer.uid = str(uuid.uuid4())
-        for key, value in kwargs.items():
-            setattr(layer, key, value)
-        
-        # Layer type specific setup
+            layer.auto_update_node_tree = False
+            layer.type = layer_type
+            layer.uid = str(uuid.uuid4())
+            for key, value in layer_kwargs.items():
+                setattr(layer, key, value)
+
         match layer.type:
             case "IMAGE":
                 if not layer.image:
@@ -2113,10 +2179,10 @@ class Channel(BaseNestedListManager):
                         layer.image = create_ps_image(layer.name, use_udim_tiles=use_udim_tiles, objects=[ps_ctx.ps_object], uv_layer_name=layer.uv_map_name)
                     else:
                         layer.image = create_ps_image(layer.name)
-        
-        # Update active index
+
         if update_active_index:
-            new_id = layer.id
+            managed_item = ref if ref is not None else layer
+            new_id = managed_item.id
             if new_id != -1:
                 for i, item in enumerate(self._get_items()):
                     if item.id == new_id:
@@ -2127,16 +2193,44 @@ class Channel(BaseNestedListManager):
         self.update_node_tree(context)
         return layer
 
-    def add_linked_layer_ref(self, layer_node_tree: NodeTree):
+    def get_ref_for_layer(self, layer: "Layer") -> "LayerRef | None":
+        """V3 only: find the LayerRef pointing to the NodeTree that contains *layer*."""
+        if not self._is_v3():
+            return None
+        layer_nt = layer.get_node_tree()
+        if not layer_nt:
+            return None
+        for ref in self.layer_nodes:
+            if ref.node_tree == layer_nt:
+                return ref
+        return None
+
+    def add_linked_layer_ref(self, layer_node_tree: NodeTree, insert_at: Literal["TOP", "BOTTOM", "CURSOR"] = "CURSOR", handle_folder: bool = True):
         """V3 only: add a LayerRef pointing to an existing layer NodeTree (linking)."""
+        layer_data = layer_node_tree.ps_layer_data if layer_node_tree else None
+        parent_id, insert_order = self.get_insertion_data(handle_folder=handle_folder, insert_at=insert_at)
+        self.adjust_sibling_orders(parent_id, insert_order)
         ref = self.layer_nodes.add()
         ref.node_tree = layer_node_tree
-        self.active_index = len(self.layer_nodes) - 1
-
-    def set_active_index_to_layer(self, context, layer: "Layer"):
+        ref.id = self.next_id
+        ref.name = layer_data.name if layer_data else "Linked Layer"
+        ref.parent_id = parent_id
+        ref.order = insert_order
+        ref.type = "FOLDER" if (layer_data and layer_data.type == "FOLDER") else "ITEM"
+        self.next_id += 1
         self.normalize_orders()
-        order = int(layer.order)
-        parent_id = int(layer.parent_id)
+        self.active_index = len(self.layer_nodes) - 1
+        return ref
+
+    def set_active_index_to_layer(self, context, managed_item):
+        """Set active_index to the item matching *managed_item*'s position.
+
+        *managed_item* must carry ``order`` and ``parent_id`` — i.e. a
+        LayerRef (V3) or Layer (V2).
+        """
+        self.normalize_orders()
+        order = int(managed_item.order)
+        parent_id = int(managed_item.parent_id)
         for i, item in enumerate(self._get_items()):
             self.active_index = i
             if item.order == order and item.parent_id == parent_id:
@@ -2145,15 +2239,23 @@ class Channel(BaseNestedListManager):
             self.active_index, self._items_count() - 1)
         self.update_node_tree(context)
     
-    def delete_layer(self, context, layer: "Layer"):
-        item_id = layer.id
-        order = int(layer.order)
-        parent_id = int(layer.parent_id)
-        logger.debug(f"Deleting layer {layer.name} with id {item_id} and order {order} and parent_id {parent_id}")
-        def on_delete(item: "Layer"):
-            item.delete_layer_data()
+    def delete_layer(self, context, item_or_layer):
+        """Delete a layer by its managed item (LayerRef in V3, Layer in V2).
+
+        *item_or_layer* must carry ``id``, ``order``, ``parent_id`` — i.e. the
+        object returned by ``_get_items()`` (LayerRef for V3, Layer for V2).
+        """
+        item_id = item_or_layer.id
+        order = int(item_or_layer.order)
+        parent_id = int(item_or_layer.parent_id)
+        logger.debug(f"Deleting layer {item_or_layer.name} with id {item_id} and order {order} and parent_id {parent_id}")
+        def on_delete(item):
+            if isinstance(item, LayerRef):
+                if item.layer:
+                    item.layer.delete_layer_data()
+            else:
+                item.delete_layer_data()
         if item_id != -1 and self.remove_item_and_children(item_id, on_delete):
-            # Update active_index
             self.normalize_orders()
             for i, item in enumerate(self._get_items()):
                 self.active_index = i
@@ -2365,12 +2467,12 @@ class Channel(BaseNestedListManager):
 
     def _get_items(self):
         if self._is_v3():
-            return [ref.node_tree.ps_layer_data for ref in self.layer_nodes if ref.node_tree]
+            return list(self.layer_nodes)
         return self.layers
 
     def _get_item_at(self, index):
         if self._is_v3():
-            return self.layer_nodes[index].node_tree.ps_layer_data
+            return self.layer_nodes[index]
         return self.layers[index]
 
     def _items_count(self):
@@ -2384,7 +2486,7 @@ class Channel(BaseNestedListManager):
             nt.ps_type = 'LAYER'
             ref = self.layer_nodes.add()
             ref.node_tree = nt
-            return nt.ps_layer_data
+            return ref
         return self.layers.add()
 
     def _remove_raw_item(self, index):
@@ -2431,11 +2533,21 @@ class Channel(BaseNestedListManager):
     
     @property
     def flattened_layers(self):
-        return [layer.get_layer_data() for layer, _ in self.flatten_hierarchy()]
+        """Resolved Layer data objects in display order."""
+        result = []
+        for item, _ in self.flatten_hierarchy():
+            if isinstance(item, LayerRef):
+                layer = item.layer
+                if layer:
+                    result.append(layer.get_layer_data())
+            else:
+                result.append(item.get_layer_data())
+        return result
 
     @property
     def flattened_unlinked_layers(self):
-        return [layer for layer, _ in self.flatten_hierarchy()]
+        """Managed items (LayerRef in V3, Layer in V2) in display order."""
+        return [item for item, _ in self.flatten_hierarchy()]
     
     active_index: IntProperty(name="Active Material Layer Index", update=update_active_image)
     def update_type(self, context):

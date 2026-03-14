@@ -221,7 +221,7 @@ class PAINTSYSTEM_OT_BakeChannel(BakeOperator):
         
         for mat in bake_materials:
             # Get the active channel for the material
-            _, _, active_channel, _ = parse_material(mat)
+            _, _, active_channel, _, _ = parse_material(mat)
             self.image_name = f"{mat.name}_Baked"
             if self.image_resolution != 'CUSTOM':
                 self.image_width = int(self.image_resolution)
@@ -322,7 +322,7 @@ class PAINTSYSTEM_OT_BakeAllChannels(BakeOperator):
             self.image_height = int(self.image_resolution)
         ps_ctx = self.parse_context(context)
         for mat in bake_materials:
-            _, active_group, _, _ = parse_material(mat)
+            _, active_group, _, _, _ = parse_material(mat)
             for channel in iter_group_channels(active_group):
                 bake_image = channel.bake_image
                 if not bake_image:
@@ -641,15 +641,15 @@ class PAINTSYSTEM_OT_ConvertToImageLayer(BakeOperator):
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
         active_layer = ps_ctx.active_layer
+        active_ref = ps_ctx.active_layer_ref
         if not active_channel:
             return {'CANCELLED'}
         
         image = self.create_image(context)
         
-        children = active_channel.get_children(active_layer.id)
+        children = active_channel.get_children(active_ref.id)
         
         to_be_enabled_layers = []
-        # Ensure all layers are disabled except the active layer
         for layer in iter_channel_layers(active_channel):
             if layer.type != "FOLDER" and layer.enabled and layer != active_layer and layer not in children:
                 to_be_enabled_layers.append(layer)
@@ -669,7 +669,7 @@ class PAINTSYSTEM_OT_ConvertToImageLayer(BakeOperator):
         active_layer.type = 'IMAGE'
         for layer in to_be_enabled_layers:
             layer.enabled = True
-        active_channel.remove_children(active_layer.id)
+        active_channel.remove_children(active_ref.id)
         # Set cursor back to default
         context.window.cursor_set('DEFAULT')
         end_time = time.time()
@@ -698,28 +698,34 @@ class PAINTSYSTEM_OT_MergeDown(BakeOperator):
     def get_below_layer(self, context, unprocessed: bool = False):
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
-        active_layer = ps_ctx.unlinked_layer if unprocessed else ps_ctx.active_layer
-        flattened_layers = active_channel.flattened_unlinked_layers if unprocessed else active_channel.flattened_layers
-        if active_layer and flattened_layers.index(active_layer) < len(flattened_layers) - 1:
-            return flattened_layers[flattened_layers.index(active_layer) + 1]
+        if unprocessed:
+            active_item = ps_ctx.active_layer_ref
+            flattened = active_channel.flattened_unlinked_layers
+        else:
+            active_item = ps_ctx.active_layer
+            flattened = active_channel.flattened_layers
+        if active_item and active_item in flattened and flattened.index(active_item) < len(flattened) - 1:
+            return flattened[flattened.index(active_item) + 1]
         return None
     
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
         active_layer = ps_ctx.active_layer
-        below_layer = cls.get_below_layer(cls, context)
-        if not below_layer:
+        active_ref = ps_ctx.active_layer_ref
+        below_managed = cls.get_below_layer(cls, context, unprocessed=True)
+        below_layer_data = below_managed.layer if hasattr(below_managed, 'layer') and hasattr(below_managed, 'node_tree') else below_managed if below_managed else None
+        if not below_layer_data:
             return False
         return (
             active_layer
-            and below_layer
+            and below_layer_data
             and active_layer.type != "FOLDER"
-            and below_layer.type != "FOLDER"
-            and active_layer.parent_id == below_layer.parent_id
+            and below_layer_data.type != "FOLDER"
+            and active_ref.parent_id == below_managed.parent_id
             and active_layer.enabled
-            and below_layer.enabled
-            and not below_layer.modifies_color_data
+            and below_layer_data.enabled
+            and not below_layer_data.modifies_color_data
             )
     
     def invoke(self, context, event):
@@ -760,9 +766,9 @@ class PAINTSYSTEM_OT_MergeDown(BakeOperator):
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
         active_layer = ps_ctx.active_layer
+        active_managed = ps_ctx.active_layer_ref
         below_layer = self.get_below_layer(context)
-        unlinked_layer = ps_ctx.unlinked_layer
-        below_unlinked_layer = self.get_below_layer(context, unprocessed=True)
+        below_managed = self.get_below_layer(context, unprocessed=True)
         
         if not active_channel:
             return {'CANCELLED'}
@@ -770,39 +776,32 @@ class PAINTSYSTEM_OT_MergeDown(BakeOperator):
         image = self.create_image(context)
         
         to_be_enabled_layers = []
-        # Enable both active layer and below layer, disable all others
         for layer in active_channel.flattened_layers:
             if layer.type != "FOLDER" and layer.enabled and layer != active_layer and layer != below_layer:
                 to_be_enabled_layers.append(layer)
                 layer.enabled = False
         
-        # Enable the below layer if it's not already enabled
         if not below_layer.enabled:
             below_layer.enabled = True
         
-        # Store original blend modes
         original_active_blend_mode = get_layer_blend_type(active_layer)
         original_below_blend_mode = get_layer_blend_type(below_layer)
         
-        # Set both layers to MIX for proper blending
         set_layer_blend_type(active_layer, 'MIX')
         set_layer_blend_type(below_layer, 'MIX')
         
-        # Bake both layers into the new image
         active_channel.bake(context, ps_ctx.active_material, image, self.uv_map_name, use_group_tree=False, force_alpha=True)
         
-        # Restore original blend modes
         set_layer_blend_type(active_layer, original_active_blend_mode)
         set_layer_blend_type(below_layer, original_below_blend_mode)
         
-        # Restore other layers
         for layer in to_be_enabled_layers:
             layer.enabled = True
         
-        # Remove the current layer since it's been merged
-        apply_merged_image_to_layer(below_unlinked_layer, image, self.uv_map_name)
-        active_channel.delete_layer(context, unlinked_layer)
-        active_channel.set_active_index_to_layer(context, below_unlinked_layer)
+        below_layer_data = below_managed.layer if hasattr(below_managed, 'layer') and hasattr(below_managed, 'node_tree') else below_managed
+        apply_merged_image_to_layer(below_layer_data, image, self.uv_map_name)
+        active_channel.delete_layer(context, active_managed)
+        active_channel.set_active_index_to_layer(context, below_managed)
         # Set cursor back to default
         context.window.cursor_set('DEFAULT')
         end_time = time.time()
@@ -820,27 +819,33 @@ class PAINTSYSTEM_OT_MergeUp(BakeOperator):
     def get_above_layer(self, context, unprocessed: bool = False):
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
-        active_layer = ps_ctx.unlinked_layer if unprocessed else ps_ctx.active_layer
-        flattened_layers = active_channel.flattened_unlinked_layers if unprocessed else active_channel.flattened_layers
-        if active_layer and flattened_layers.index(active_layer) > 0:
-            return flattened_layers[flattened_layers.index(active_layer) - 1]
+        if unprocessed:
+            active_item = ps_ctx.active_layer_ref
+            flattened = active_channel.flattened_unlinked_layers
+        else:
+            active_item = ps_ctx.active_layer
+            flattened = active_channel.flattened_layers
+        if active_item and active_item in flattened and flattened.index(active_item) > 0:
+            return flattened[flattened.index(active_item) - 1]
         return None
 
     @classmethod
     def poll(cls, context):
         ps_ctx = cls.parse_context(context)
         active_layer = ps_ctx.active_layer
-        above_layer = cls.get_above_layer(cls, context)
-        if not above_layer:
+        active_ref = ps_ctx.active_layer_ref
+        above_managed = cls.get_above_layer(cls, context, unprocessed=True)
+        above_layer_data = above_managed.layer if hasattr(above_managed, 'layer') and hasattr(above_managed, 'node_tree') else above_managed if above_managed else None
+        if not above_layer_data:
             return False
         return (
             active_layer
-            and above_layer
+            and above_layer_data
             and active_layer.type != "FOLDER"
-            and above_layer.type != "FOLDER"
-            and active_layer.parent_id == above_layer.parent_id
+            and above_layer_data.type != "FOLDER"
+            and active_ref.parent_id == above_managed.parent_id
             and active_layer.enabled
-            and above_layer.enabled
+            and above_layer_data.enabled
             and not active_layer.modifies_color_data
         )
 
@@ -881,9 +886,9 @@ class PAINTSYSTEM_OT_MergeUp(BakeOperator):
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
         active_layer = ps_ctx.active_layer
+        active_managed = ps_ctx.active_layer_ref
         above_layer = self.get_above_layer(context)
-        unlinked_layer = ps_ctx.unlinked_layer
-        above_unlinked_layer = self.get_above_layer(context, unprocessed=True)
+        above_managed = self.get_above_layer(context, unprocessed=True)
 
         if not active_channel:
             return {'CANCELLED'}
@@ -891,38 +896,32 @@ class PAINTSYSTEM_OT_MergeUp(BakeOperator):
         image = self.create_image(context)
 
         to_be_enabled_layers = []
-        # Enable both active layer and above layer, disable all others
         for layer in active_channel.flattened_layers:
             if layer.type != "FOLDER" and layer.enabled and layer != active_layer and layer != above_layer:
                 to_be_enabled_layers.append(layer)
                 layer.enabled = False
 
-        # Ensure the above layer is enabled
         if not above_layer.enabled:
             above_layer.enabled = True
 
-        # Store original blend modes
         original_active_blend_mode = get_layer_blend_type(active_layer)
         original_above_blend_mode = get_layer_blend_type(above_layer)
 
-        # Set both layers to MIX for proper blending
         set_layer_blend_type(active_layer, 'MIX')
         set_layer_blend_type(above_layer, 'MIX')
 
-        # Bake both layers into the new image
         active_channel.bake(context, ps_ctx.active_material, image, self.uv_map_name, use_group_tree=False, force_alpha=True)
 
-        # Restore original blend modes
         set_layer_blend_type(active_layer, original_active_blend_mode)
         set_layer_blend_type(above_layer, original_above_blend_mode)
 
-        # Restore other layers
         for layer in to_be_enabled_layers:
             layer.enabled = True
 
-        apply_merged_image_to_layer(above_unlinked_layer, image, self.uv_map_name)
-        active_channel.delete_layer(context, unlinked_layer)
-        active_channel.set_active_index_to_layer(context, above_unlinked_layer)
+        above_layer_data = above_managed.layer if hasattr(above_managed, 'layer') and hasattr(above_managed, 'node_tree') else above_managed
+        apply_merged_image_to_layer(above_layer_data, image, self.uv_map_name)
+        active_channel.delete_layer(context, active_managed)
+        active_channel.set_active_index_to_layer(context, above_managed)
         # Set cursor back to default
         context.window.cursor_set('DEFAULT')
         end_time = time.time()

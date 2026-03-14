@@ -323,8 +323,11 @@ def toggle_paint_mode_ui(layout: bpy.types.UILayout, context: bpy.types.Context)
 def layer_settings_ui(layout: bpy.types.UILayout, context: bpy.types.Context):
     ps_ctx = PSContextMixin.parse_context(context)
     active_layer = ps_ctx.active_layer
+    active_ref = ps_ctx.active_layer_ref
     if not active_layer or not active_layer.get_node_tree():
         return
+    lock_owner = active_ref if active_ref else active_layer
+    is_locked = lock_owner.lock_layer
     color_mix_node = active_layer.mix_node
     
     if ps_ctx.ps_settings.use_legacy_ui:
@@ -334,21 +337,21 @@ def layer_settings_ui(layout: bpy.types.UILayout, context: bpy.types.Context):
         row.scale_x = 1.2
         scale_content(context, row, 1.7, 1.5)
         clip_row = row.row(align=True)
-        clip_row.enabled = not active_layer.lock_layer
+        clip_row.enabled = not is_locked
         clip_row.prop(active_layer, "is_clip", text="",
                 icon="SELECT_INTERSECT")
         if active_layer.type == 'IMAGE':
-            clip_row.prop(active_layer, "lock_alpha",
+            clip_row.prop(lock_owner, "lock_alpha",
                     text="", icon='TEXTURE')
         lock_row = row.row(align=True)
-        lock_row.prop(active_layer, "lock_layer",
+        lock_row.prop(lock_owner, "lock_layer",
                 text="", icon=icon_parser('VIEW_LOCKED', 'LOCKED'))
         blend_type_row = row.row(align=True)
-        blend_type_row.enabled = not active_layer.lock_layer
+        blend_type_row.enabled = not is_locked
         blend_type_row.prop(active_layer, "blend_mode", text="")
         row = col.row(align=True)
         scale_content(context, row, scale_x=1.2, scale_y=1.5)
-        row.enabled = not active_layer.lock_layer
+        row.enabled = not is_locked
         row.prop(active_layer.pre_mix_node.inputs['Opacity'], "default_value",
                 text="Opacity", slider=True)
     else:
@@ -364,20 +367,20 @@ def layer_settings_ui(layout: bpy.types.UILayout, context: bpy.types.Context):
         split.scale_x = 1.3
         main_row = split.row(align=True)
         clip_row = main_row.row(align=True)
-        clip_row.enabled = not active_layer.lock_layer
+        clip_row.enabled = not is_locked
         clip_row.prop(active_layer, "is_clip", text="",
                 icon="SELECT_INTERSECT")
         if active_layer.type == 'IMAGE':
-            clip_row.prop(active_layer, "lock_alpha",
+            clip_row.prop(lock_owner, "lock_alpha",
                     text="", icon='TEXTURE')
         lock_row = main_row.row(align=True)
-        lock_row.prop(active_layer, "lock_layer",
+        lock_row.prop(lock_owner, "lock_layer",
                 text="", icon=icon_parser('VIEW_LOCKED', 'LOCKED'))
         blend_type_row = main_row.row(align=True)
-        blend_type_row.enabled = not active_layer.lock_layer
+        blend_type_row.enabled = not is_locked
         blend_type_row.prop(active_layer, "blend_mode", text="")
         opacity_row = split.row(align=True)
-        opacity_row.enabled = not active_layer.lock_layer
+        opacity_row.enabled = not is_locked
         if not use_wide_ui:
             opacity_row.scale_y = 0.8
         opacity_row.prop(active_layer.pre_mix_node.inputs['Opacity'], "default_value",
@@ -535,7 +538,13 @@ def draw_warning_box(layout: bpy.types.UILayout, lines):
     return warning_col
 
 
-def draw_layer_icon(layer: "Layer", layout: bpy.types.UILayout):
+def draw_layer_icon(layer: "Layer", layout: bpy.types.UILayout, managed_item=None):
+    """Draw the icon for *layer*.
+
+    *managed_item* is the hierarchy owner (LayerRef in V3) that holds
+    ``is_expanded``.  Falls back to *layer* for V2.
+    """
+    expand_owner = managed_item if managed_item is not None else layer
     match layer.type:
         case 'IMAGE':
             if not layer.image:
@@ -550,8 +559,8 @@ def draw_layer_icon(layer: "Layer", layout: bpy.types.UILayout):
                         layer.image.asset_generate_preview()
                     layout.label(icon_value=get_icon('image'))
         case 'FOLDER':
-            layout.prop(layer, "is_expanded", text="", icon_only=True, icon_value=get_icon(
-                'folder_open') if layer.is_expanded else get_icon('folder'), emboss=False)
+            layout.prop(expand_owner, "is_expanded", text="", icon_only=True, icon_value=get_icon(
+                'folder_open') if expand_owner.is_expanded else get_icon('folder'), emboss=False)
         case 'SOLID_COLOR':
             rgb_node = layer.source_node
             if rgb_node:

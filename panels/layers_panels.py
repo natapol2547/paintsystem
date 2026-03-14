@@ -55,35 +55,39 @@ def draw_input_sockets(layout, context: Context, only_output: bool = False):
         row = panel.row(align=True)
         row.label(icon="BLANK1")
         draw_socket_grid(row, active_layer, include_inputs=not only_output)
-def _resolve_layer(item):
-    """Unwrap a Layer or LayerRef to the underlying Layer data."""
-    if hasattr(item, 'node_tree') and not hasattr(item, 'uid'):
-        # LayerRef — resolve via NodeTree
-        return item.node_tree.ps_layer_data if item.node_tree else None
-    return item
+def _is_layer_ref(item):
+    """Return True if *item* is a LayerRef (has .layer property)."""
+    return hasattr(item, 'layer') and hasattr(item, 'node_tree')
 
 class MAT_PT_UL_LayerList(PSContextMixin, UIList):
     def draw_item(self, context: Context, layout: bpy.types.UILayout, data, item, icon, active_data, active_property, index):
         ps_ctx = self.parse_context(context)
-        raw_item = _resolve_layer(item)
-        if not raw_item:
+
+        if _is_layer_ref(item):
+            managed_item = item
+            layer_data = item.layer
+        else:
+            managed_item = item
+            layer_data = item
+
+        if not layer_data:
             return
-        linked_item = raw_item.get_layer_data()
+        linked_item = layer_data.get_layer_data()
         if not linked_item:
             return
-        # The UIList passes channel as 'data'
+
         active_channel = data
         flattened = active_channel.flattened_layers
         if index < len(flattened):
-            level = active_channel.get_item_level_from_id(raw_item.id)
+            level = active_channel.get_item_level_from_id(managed_item.id)
             main_row = layout.row(align=True)
-            warnings = raw_item.get_layer_warnings(context)
-                # main_row.label(text="\n".join(warnings), icon='ERROR')
-            # Check if parent of the current item is enabled
-            parent_item = active_channel.get_item_by_id(
-                raw_item.parent_id)
-            if parent_item and not parent_item.enabled:
-                main_row.enabled = False
+            warnings = layer_data.get_layer_warnings(context, managed_item=managed_item)
+
+            parent_item = active_channel.get_item_by_id(managed_item.parent_id)
+            if parent_item:
+                parent_layer = parent_item.layer if _is_layer_ref(parent_item) else parent_item
+                if parent_layer and not parent_layer.enabled:
+                    main_row.enabled = False
 
             row = main_row.row(align=True)
             for i in range(level):
@@ -96,13 +100,13 @@ class MAT_PT_UL_LayerList(PSContextMixin, UIList):
                 clipping_row = row.row()
                 clipping_row.scale_x = 0.7
                 clipping_row.label(icon_value=get_icon('clipping'))
-            draw_layer_icon(linked_item, row)
+            draw_layer_icon(linked_item, row, managed_item=managed_item)
             main_row.separator()
             main_row.prop(linked_item, "name", text="", emboss=False)
 
             row = main_row.row(align=True)
             row.alignment = 'RIGHT'
-            if linked_item.lock_layer:
+            if managed_item.lock_layer:
                 row.label(icon=icon_parser('VIEW_LOCKED', 'LOCKED'))
             if len(linked_item.actions) > 0:
                 row.label(icon="KEYTYPE_KEYFRAME_VEC")
@@ -110,7 +114,7 @@ class MAT_PT_UL_LayerList(PSContextMixin, UIList):
                 row.label(icon="LINKED")
             if warnings:
                 op = row.operator("paint_system.show_layer_warnings", text="", icon_value=get_icon('error'), emboss=False)
-                op.layer_id = raw_item.id
+                op.layer_id = managed_item.id
             if ps_ctx.ps_settings.show_opacity_in_layer_list:
                 row.label(text=f"{linked_item.opacity:.1f}")
             row.prop(linked_item, "enabled", text="",
@@ -118,33 +122,24 @@ class MAT_PT_UL_LayerList(PSContextMixin, UIList):
             self.draw_custom_properties(row, linked_item)
 
     def filter_items(self, context, data, propname):
-        # This function gets the collection property (as the usual tuple (data, propname)), and must return two lists:
-        # * The first one is for filtering, it must contain 32bit integers were self.bitflag_filter_item marks the
-        #   matching item as filtered (i.e. to be shown). The upper 16 bits (including self.bitflag_filter_item) are
-        #   reserved for internal use, the lower 16 bits are free for custom use. Here we use the first bit to mark
-        #   VGROUP_EMPTY.
-        # * The second one is for reordering, it must return a list containing the new indices of the items (which
-        #   gives us a mapping org_idx -> new_idx).
-        # Please note that the default UI_UL_list defines helper functions for common tasks (see its doc for more info).
-        # If you do not make filtering and/or ordering, return empty list(s) (this will be more efficient than
-        # returning full lists doing nothing!).
         raw_items = getattr(data, propname).values()
-        resolved = [_resolve_layer(item) for item in raw_items]
-        flattened_layers = data.flattened_unlinked_layers
+        flattened_managed = data.flattened_unlinked_layers
 
-        # Default return values.
-        flt_flags = []
+        flt_flags = [self.bitflag_filter_item] * len(raw_items)
         flt_neworder = []
 
-        # Filtering by name
-        flt_flags = [self.bitflag_filter_item] * len(raw_items)
-        for idx, layer in enumerate(resolved):
-            flt_neworder.append(flattened_layers.index(layer) if layer in flattened_layers else idx)
-            while layer.parent_id != -1:
-                layer = data.get_item_by_id(layer.parent_id)
-                if layer and not layer.is_expanded:
+        for idx, item in enumerate(raw_items):
+            managed = item
+            flt_neworder.append(
+                flattened_managed.index(managed) if managed in flattened_managed else idx
+            )
+            current = managed
+            while current.parent_id != -1:
+                parent = data.get_item_by_id(current.parent_id)
+                if parent and not parent.is_expanded:
                     flt_flags[idx] &= ~self.bitflag_filter_item
                     break
+                current = parent
 
         return flt_flags, flt_neworder
 
@@ -182,7 +177,9 @@ class MAT_MT_PaintSystemMergeAndExport(PSContextMixin, Menu):
 def draw_layer_settings(layout, context):
     ps_ctx = PSContextMixin.parse_context(context)
     active_layer = ps_ctx.active_layer
-    layout.enabled = not active_layer.lock_layer
+    active_ref = ps_ctx.active_layer_ref
+    lock_owner = active_ref if active_ref else active_layer
+    layout.enabled = not lock_owner.lock_layer
     if ps_ctx.ps_settings.use_legacy_ui:
         box = layout.box()
         layer_settings_ui(box, context)
@@ -672,7 +669,7 @@ class MAT_PT_Layers(PSContextMixin, Panel):
             if not active_layer:
                 return
                 # Settings
-            warnings = active_layer.get_layer_warnings(context)
+            warnings = active_layer.get_layer_warnings(context, managed_item=ps_ctx.active_layer_ref)
             if warnings:
                 warnings_box = layout.box()
                 warnings_box.alert = True

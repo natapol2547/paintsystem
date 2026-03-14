@@ -608,8 +608,8 @@ class PAINTSYSTEM_OT_DeleteItem(PSContextMixin, MultiMaterialOperator):
     def process_material(self, context):
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
-        unlinked_layer = ps_ctx.unlinked_layer
-        active_channel.delete_layer(context, unlinked_layer)
+        managed_item = ps_ctx.active_layer_ref
+        active_channel.delete_layer(context, managed_item)
         
         redraw_panel(context)
         return {'FINISHED'}
@@ -827,8 +827,10 @@ class PAINTSYSTEM_OT_CopyAllLayers(PSContextMixin, Operator):
         if not ps_scene_data:
             return {'CANCELLED'}
         ps_scene_data.clear_clipboard()
-        for layer in active_channel.flattened_unlinked_layers:
-            ps_scene_data.add_layer_to_clipboard(layer)
+        for managed_item in active_channel.flattened_unlinked_layers:
+            layer = managed_item.layer if hasattr(managed_item, 'layer') and hasattr(managed_item, 'node_tree') else managed_item
+            if layer:
+                ps_scene_data.add_layer_to_clipboard(layer)
         return {'FINISHED'}
 
 
@@ -852,12 +854,14 @@ class PAINTSYSTEM_OT_PasteLayer(PSContextMixin, Operator):
     
     def execute(self, context):
         ps_ctx = self.parse_context(context)
+        active_ref = ps_ctx.active_layer_ref
         active_layer = ps_ctx.active_layer
+        active_channel = ps_ctx.active_channel
         clipboard_layers = bpy.context.scene.ps_scene_data.clipboard_layers
-        new_layer_id_map = {}
-        if active_layer:
+        new_managed_map = {}
+        if active_ref:
             is_folder = active_layer and active_layer.type == "FOLDER"
-            base_parent_id = active_layer.id if is_folder else active_layer.parent_id
+            base_parent_id = active_ref.id if is_folder else active_ref.parent_id
         else:
             base_parent_id = -1
         for idx, clipboard_layer in enumerate(clipboard_layers):
@@ -866,21 +870,26 @@ class PAINTSYSTEM_OT_PasteLayer(PSContextMixin, Operator):
                 continue
             if self.linked:
                 layer_nt = layer.get_node_tree()
-                if ps_ctx.active_channel._is_v3() and layer_nt:
-                    ps_ctx.active_channel.add_linked_layer_ref(layer_nt)
+                if active_channel._is_v3() and layer_nt:
+                    ref = active_channel.add_linked_layer_ref(layer_nt)
+                    new_managed = ref
                     new_layer = layer_nt.ps_layer_data
                 else:
-                    new_layer = ps_ctx.active_channel.create_layer(context, layer.layer_name, "BLANK" if layer.type != "FOLDER" else "FOLDER", insert_at="CURSOR" if idx == 0 else "AFTER", linked_layer_uid=clipboard_layer.uid, linked_material=clipboard_layer.material)
+                    new_layer = active_channel.create_layer(context, layer.layer_name, "BLANK" if layer.type != "FOLDER" else "FOLDER", insert_at="CURSOR" if idx == 0 else "AFTER", linked_layer_uid=clipboard_layer.uid, linked_material=clipboard_layer.material)
+                    new_managed = new_layer
             else:
-                new_layer = ps_ctx.active_channel.create_layer(context, layer.layer_name, layer.type, insert_at="CURSOR" if idx == 0 else "AFTER")
+                new_layer = active_channel.create_layer(context, layer.layer_name, layer.type, insert_at="CURSOR" if idx == 0 else "AFTER")
                 new_layer.copy_layer_data(layer)
-            new_layer_id_map[layer.id] = new_layer
-            if layer.parent_id != -1:
-                new_layer.parent_id = new_layer_id_map[layer.parent_id].id
+                new_managed = active_channel.get_ref_for_layer(new_layer) if active_channel._is_v3() else new_layer
+                if not new_managed:
+                    new_managed = new_layer
+            new_managed_map[layer.id] = new_managed
+            if layer.parent_id != -1 and layer.parent_id in new_managed_map:
+                new_managed.parent_id = new_managed_map[layer.parent_id].id
             else:
-                new_layer.parent_id = base_parent_id
+                new_managed.parent_id = base_parent_id
             new_layer.update_node_tree(context)
-        ps_ctx.active_channel.update_node_tree(context)
+        active_channel.update_node_tree(context)
         
         return {'FINISHED'}
 
@@ -1004,8 +1013,9 @@ class PAINTSYSTEM_OT_ShowLayerWarnings(PSContextMixin, Operator):
         layout = self.layout
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
-        layer = active_channel.get_item_by_id(self.layer_id)
-        warnings = layer.get_layer_data().get_layer_warnings(context)
+        managed_item = active_channel.get_item_by_id(self.layer_id)
+        layer_data = managed_item.layer if hasattr(managed_item, 'layer') and hasattr(managed_item, 'node_tree') else managed_item
+        warnings = layer_data.get_layer_data().get_layer_warnings(context, managed_item=managed_item)
         warnings_box = layout.box()
         warnings_col = warnings_box.column(align=True)
         for warning in warnings:

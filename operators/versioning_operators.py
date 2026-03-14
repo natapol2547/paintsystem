@@ -139,6 +139,8 @@ def _copy_channel_to_nt(src_channel, channel_nt, uid_to_layer_nt):
              skip_props={'layers', 'layer_nodes', 'auto_update_node_tree',
                          'node_tree'})
 
+    next_id = 0
+
     for src_layer in src_channel.layers:
         logger.info(
             "  Layer uid=%s name='%s' type=%s is_linked=%s "
@@ -201,6 +203,18 @@ def _copy_channel_to_nt(src_channel, channel_nt, uid_to_layer_nt):
 
         ref = dst.layer_nodes.add()
         ref.node_tree = layer_nt
+        ref.id = src_layer.id
+        ref.parent_id = src_layer.parent_id
+        ref.order = src_layer.order
+        ref.type = "FOLDER" if src_layer.type == "FOLDER" else "ITEM"
+        ref.name = src_layer.name
+        ref.lock_layer = src_layer.lock_layer
+        ref.lock_alpha = src_layer.lock_alpha
+        ref.is_expanded = src_layer.is_expanded
+        if src_layer.id >= next_id:
+            next_id = src_layer.id + 1
+
+    dst.next_id = next_id
 
     return dst
 

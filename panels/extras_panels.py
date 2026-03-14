@@ -457,14 +457,18 @@ class NODE_PT_PaintSystemShaderEditor(PSContextMixin, Panel):
                         for layer in flattened:
                             self.draw_layer_row(layer_col, context, layer, channel)
     
-    def draw_layer_row(self, layout, context, layer, channel):
+    def draw_layer_row(self, layout, context, managed_item, channel):
         """Draw a single layer row with indentation for hierarchy"""
         ps_ctx = self.parse_context(context)
-        linked_layer = layer.get_layer_data()
+        if hasattr(managed_item, 'layer') and hasattr(managed_item, 'node_tree'):
+            layer_data = managed_item.layer
+        else:
+            layer_data = managed_item
+        linked_layer = layer_data.get_layer_data() if layer_data else None
         if not linked_layer:
             return
         
-        level = channel.get_item_level_from_id(layer.id)
+        level = channel.get_item_level_from_id(managed_item.id)
         row = layout.row(align=True)
         row.label(icon="BLANK1")
         for i in range(level):
@@ -473,7 +477,7 @@ class NODE_PT_PaintSystemShaderEditor(PSContextMixin, Panel):
             else:
                 row.label(icon='BLANK1')
         row.enabled = linked_layer.opacity > 0 and linked_layer.enabled
-        draw_layer_icon(linked_layer, row)
+        draw_layer_icon(linked_layer, row, managed_item=managed_item)
         
         row.label(text=linked_layer.name)
         
