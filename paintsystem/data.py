@@ -1444,14 +1444,32 @@ class Layer(BaseNestedListItem):
         current_flat_index = next(
             (i for i, (it, _) in enumerate(flattened) if it.id == self.id), -1)
         below_layer, next_index = active_channel.get_next_sibling_item(flattened, current_flat_index)
+        # If below_layer have different parent below_layer = None
+        if below_layer and active_channel.get_parent_layer_id(self, ignore_passthrough=True) != active_channel.get_parent_layer_id(below_layer, ignore_passthrough=True):
+            below_layer = None
         warnings = []
         blend_mode = get_layer_blend_type(layer_data)
+        group_node = find_node(ps_ctx.active_material.node_tree, {
+            'bl_idname': 'ShaderNodeGroup', 'node_tree': ps_ctx.active_group.node_tree})
+        color_channel_name = ps_ctx.active_channel.name
+        alpha_channel_name = ps_ctx.active_channel.name + " Alpha"
+        has_node_connected = any(input.is_linked for input in group_node.inputs if input.name in {color_channel_name, alpha_channel_name}) if group_node else False
+        is_last_layer = current_flat_index == len(flattened) - 1
         # If no layer below
-        if not below_layer or active_channel.get_parent_layer_id(below_layer, ignore_passthrough=True) != active_channel.get_parent_layer_id(self, ignore_passthrough=True):
-            if blend_mode != 'MIX':
-                warnings.append("Blend mode is not MIX. Use Folder with Passthrough blend mode or move the layer")
-            if layer_data.type == "ADJUSTMENT":
-                warnings.append("Adjustment disabled. Use Folder with Passthrough blend mode or move the layer")
+        if not below_layer:
+            if not has_node_connected or not is_last_layer:
+                is_in_folder = active_channel.get_parent_layer_id(self, ignore_passthrough=True) != -1
+                if blend_mode != 'MIX':
+                    if is_in_folder:
+                        warnings.append("Last layer in folder. Blending may not work. Use folder with Passthrough blend mode.")
+                    else:
+                        warnings.append("No layer below. Blending may not work.")
+                if layer_data.type == "ADJUSTMENT":
+                    warnings.append("No layer below. Adjustment effects may not work.")
+            else:
+                # Check if alpha is 0
+                if group_node and group_node.inputs[alpha_channel_name].default_value == 0:
+                    warnings.append(f"Input Alpha of {color_channel_name} channel is 0. Blending may not work.")
             
         return warnings
     
