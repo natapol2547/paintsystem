@@ -33,7 +33,7 @@ from .common import (
     PSUVOptionsMixin,
     PSImageCreateMixin
     )
-from .operators_utils import redraw_panel, intern_enum_items
+from .common import redraw_panel, intern_enum_items
 from .layers_operators import PAINTSYSTEM_OT_NewImage
 
 class PAINTSYSTEM_OT_NewImageMask(PAINTSYSTEM_OT_NewImage):

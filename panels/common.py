@@ -564,3 +564,59 @@ def draw_layer_icon(layer: "Layer", layout: bpy.types.UILayout):
             layout.label(icon='MESH_DATA')
         case _:
             layout.label(icon='BLANK1')
+
+
+def is_uv_edit_active(context: bpy.types.Context) -> bool:
+    """Check if UV editing is currently active.
+    
+    Args:
+        context: The Blender context
+        
+    Returns:
+        True if UV edit mode is active, False otherwise
+    """
+    if not context.scene:
+        return False
+    ps_scene_data = context.scene.ps_scene_data
+    return bool(ps_scene_data and ps_scene_data.uv_edit_enabled)
+
+
+def draw_uv_edit_alert(layout: bpy.types.UILayout, context: bpy.types.Context):
+    """Draw an alert box indicating that UV editing is in progress.
+    
+    Args:
+        layout: The parent UILayout
+        context: The Blender context
+    """
+    ps_scene_data = context.scene.ps_scene_data if context.scene else None
+    if ps_scene_data and ps_scene_data.uv_edit_enabled:
+        alert_box = layout.box()
+        alert_box.alert = True
+        alert_col = alert_box.column(align=True)
+        alert_col.label(text="UV Edit Mode Active", icon='INFO')
+        alert_col.label(text="Editing UV coordinates...", icon='BLANK1')
+
+
+def draw_uv_edit_checker(layout: bpy.types.UILayout, context: bpy.types.Context, show_apply: bool = False):
+    """Draw UV edit status checker.
+    
+    Args:
+        layout: The parent UILayout
+        context: The Blender context
+        show_apply: Whether to show apply/cancel buttons
+    """
+    ps_scene_data = context.scene.ps_scene_data if context.scene else None
+    if not ps_scene_data:
+        return
+    
+    check_box = layout.box()
+    check_box.label(text="UV Edit Status", icon='UV')
+    
+    if ps_scene_data.uv_edit_enabled:
+        check_col = check_box.column(align=True)
+        check_col.label(text="Edit in progress...", icon='CHECKMARK')
+        
+        if show_apply:
+            button_row = check_box.row(align=True)
+            button_row.operator("paint_system.apply_uv_edit", text="Apply", icon='CHECKMARK')
+            button_row.operator("paint_system.exit_uv_edit", text="Cancel", icon='X')

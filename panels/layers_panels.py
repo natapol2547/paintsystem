@@ -696,10 +696,7 @@ class MAT_PT_Layers(PSContextMixin, Panel):
                     for i, chunk in enumerate(wList):
                         warnings_col.label(text=chunk, icon='ERROR' if not i else 'BLANK1')
             
-            header, panel = layout.panel("layer_settings_panel")
-            header.label(text="Layer Settings")
-            if panel:
-                draw_layer_settings(panel, context)
+
 
 
 def get_image(context) -> bpy.types.Image:
@@ -1604,7 +1601,6 @@ classes = (
     MAT_MT_LayerMenu,
     MAT_MT_PaintSystemMergeAndExport,
     MAT_PT_Layers,
-    MAT_PT_ChannelsPopover,
     MAT_MT_ImageMenu,
     MAT_PT_LayerSettings,
     MAT_PT_GreasePencilMaskSettings,

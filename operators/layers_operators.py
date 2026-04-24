@@ -32,7 +32,7 @@ from .common import (
     PSUVOptionsMixin,
     PSImageCreateMixin
     )
-from .operators_utils import redraw_panel, intern_enum_items
+from .common import redraw_panel, intern_enum_items
 
 def get_object_uv_maps(self, context: Context):
     items = [

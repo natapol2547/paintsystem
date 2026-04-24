@@ -48,7 +48,7 @@ from .context import get_legacy_global_layer, parse_context
 from .graph import (
     NodeTreeBuilder,
     Add_Node,
-    create_layer_graph,
+    PSNodeTreeBuilder,
     get_alpha_over_nodetree,
     get_layer_blend_type,
     set_layer_blend_type,
@@ -1072,7 +1072,7 @@ class Layer(BaseNestedListItem):
             if self.empty_object.name in collection.objects:
                 collection.objects.unlink(self.empty_object)
         
-        layer_graph = create_layer_graph(self)
+        layer_graph = PSNodeTreeBuilder.create_layer_graph(self, context)
         layer_graph.compile()
         
         # For fake light, we need to update the empty object rotation via drivers

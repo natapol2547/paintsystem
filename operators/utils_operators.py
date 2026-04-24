@@ -281,8 +281,11 @@ class PAINTSYSTEM_OT_AddCameraPlane(Operator):
 
 class PAINTSYSTEM_OT_HidePaintingTips(PSContextMixin, MultiMaterialOperator):
     """Hide the normal painting tips"""
+    bl_idname = "paint_system.hide_painting_tips"
     bl_label = "Hide Normal Painting Tips"
     bl_options = {'INTERNAL'}
+    
+    attribute_name: bpy.props.StringProperty(
         default=""
     )
     
@@ -578,7 +581,6 @@ classes = (
     PAINTSYSTEM_OT_DuplicatePaintSystemData,
     PAINTSYSTEM_OT_ToggleTransformGizmos,
     PAINTSYSTEM_OT_ToggleImageEditor,
-    PAINTSYSTEM_OT_SplitImageEditor,
     PAINTSYSTEM_OT_FocusPSNode,
 )
 
