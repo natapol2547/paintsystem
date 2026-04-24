@@ -26,13 +26,13 @@ bl_info = {
     "author": "Tawan Sunflower, @blastframe",
     "description": "",
     "blender": (4, 2, 0),
-    "version": (2, 1, 10),
     "version": (2, 1, 8),
     "location": "View3D > Sidebar > Paint System",
     "warning": "",
     "category": "Paint",
     'support': 'COMMUNITY',
-    "tracker_url": "https://github.com/natapol2547/paintsystem"
+    "tracker_url": "https://github.com/natapol2547/paintsystem",
+    "python": (3, 11)
 }
 
 bl_info_copy = bl_info.copy()
