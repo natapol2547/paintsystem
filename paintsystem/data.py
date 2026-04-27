@@ -109,28 +109,9 @@ LAYER_TYPE_ENUM = [
     ('BLANK', "Blank", "Blank layer"),
 ]
 
-
-def _safe_set_id_name(id_block, new_name: str) -> bool:
-    if not id_block or not new_name:
-        return False
-    try:
-        current_name = getattr(id_block, "name", None)
-        if current_name == new_name:
-            return True
-    except Exception:
-        pass
-    if getattr(id_block, "library", None) is not None:
-        return False
-    if getattr(id_block, "is_embedded_data", False):
-        return False
-    try:
-        id_block.name = new_name
-        return True
-    except Exception:
-        return False
-
 MASK_TYPE_ENUM = [
     ('IMAGE', "Image", "Image layer"),
+    ('TEXTURE', "Texture", "Texture layer"),
 ]
 
 CHANNEL_TYPE_ENUM = [
@@ -342,9 +323,13 @@ def update_active_group(self, context):
 def find_channels_containing_layer(check_layer: "Layer") -> list["Channel"]:
     """Find all channels that reference *check_layer* (directly or via link)."""
     channels = []
-    for _mat, _grp, channel, layer in iter_all_layers():
-        if layer == check_layer or layer.linked_layer_uid == check_layer.uid:
-            channels.append(channel)
+    for material in bpy.data.materials:
+        if hasattr(material, 'ps_mat_data'):
+            for group in material.ps_mat_data.groups:
+                for channel in group.channels:
+                    for layer in channel.layers:
+                        if layer == check_layer or layer.linked_layer_uid == check_layer.uid:
+                            channels.append(channel)
     return channels
 
 def get_node_from_nodetree(node_tree: NodeTree, identifier: str) -> Node | None:
@@ -921,14 +906,17 @@ class Layer(BaseNestedListItem):
         self.updating_name_flag = True
         if self.layer_name != self.name:
             self.layer_name = self.name
-        # Sync image name if automatic name syncing is enabled
-        if context and self.type == 'IMAGE' and self.image:
-            try:
-                prefs = get_preferences(context)
-                if prefs.automatic_name_sync:
-                    self.image.name = self.name
-            except:
-                pass
+
+        prefs = get_preferences(context)
+        if getattr(prefs, "automatic_name_syncing", True):
+            material = find_material_for_layer(self)
+            if material:
+                new_name = ensure_layer_name_prefix(self.name, material.name)
+                if new_name != self.name:
+                    self.name = new_name
+                    self.layer_name = new_name
+            if self.type == 'IMAGE' and self.image:
+                self.image.name = self.name
         self.updating_name_flag = False
         self.update_node_tree(context)
     
@@ -974,12 +962,6 @@ class Layer(BaseNestedListItem):
         # If the layer is linked, do nothing
         if self.is_linked:
             return
-        
-        # Ensure a valid UUID
-        if not is_valid_uuidv4(self.uid):
-            self.uid = str(uuid.uuid4())
-        
-        # If the layer is blank, do nothing
         if self.type == "BLANK":
             return
         
@@ -1926,7 +1908,7 @@ def ps_bake(context, objects: list[Object], mat: Material, uv_layer, bake_image,
 
     return bake_image
 
-def vector_transform(node_builder: NodeTreeBuilder, color_name: str, color_socket: str, convert_from: str, convert_to: str, normalize_input: bool, normalize_output: bool, vector_type: str, tangent_uv: str= "UVMap"):
+def vector_transform_output(node_builder: NodeTreeBuilder, color_name: str, color_socket: str, convert_from: str, convert_to: str, normalize_input: bool, normalize_output: bool, vector_type: str, tangent_uv: str= "UVMap"):
     """Transform the vector output of the channel to the output vector space.
 
     Args:
@@ -2011,9 +1993,6 @@ def vector_transform(node_builder: NodeTreeBuilder, color_name: str, color_socke
 class Channel(BaseNestedListManager):
     """A paint channel (e.g. Color, Roughness, Normal) that owns a hierarchy of layers.
     
-    Compiles its layer graph into a single node tree that can be used by a Group.
-    """
-    
     def get_parent_layer_id(self, layer: "Layer", ignore_passthrough: bool = False) -> int:
         if layer.parent_id == -1:
             return -1
@@ -2053,19 +2032,6 @@ class Channel(BaseNestedListManager):
             clip_color_socket: Optional[str] = None
             clip_alpha_socket: Optional[str] = None
             passthrough_id: Optional[int] = None
-        
-        def connect_passthrough(node_builder: NodeTreeBuilder, layer_identifier: str, previous_data: PreviousLayer):
-            if previous_data.passthrough_id:
-                passthrough_data = previous_dict.get(previous_data.passthrough_id, None)
-                if passthrough_data:
-                    node_builder.link(layer_identifier,
-                                    passthrough_data.color_name,
-                                    "Color",
-                                    passthrough_data.color_socket)
-                    node_builder.link(layer_identifier,
-                                    passthrough_data.alpha_name,
-                                    "Alpha", passthrough_data.alpha_socket)
-                    previous_data.passthrough_id = None
             
         previous_dict: Dict[int, PreviousLayer] = {}
         
@@ -2073,9 +2039,8 @@ class Channel(BaseNestedListManager):
         node_builder.link("alpha_clamp_end", "group_output", "Result", "Alpha")
         previous_dict[-1] = PreviousLayer(color_name="group_output", color_socket="Color", alpha_name="alpha_clamp_end", alpha_socket="Value")
         
-        previous_data = previous_dict.get(-1)
-        if self.type == "VECTOR" and self.use_space_transform_output and not self.disable_output_transform:
-            color_name, color_socket = vector_transform(
+        if self.type == "VECTOR" and not self.disable_output_transform:
+            color_name, color_socket = vector_transform_output(
                 node_builder,
                 previous_data.color_name,
                 previous_data.color_socket,
@@ -2145,7 +2110,17 @@ class Channel(BaseNestedListManager):
                                 target_alpha,
                                 "Alpha",
                                 target_alpha_socket)
-                connect_passthrough(node_builder, layer_identifier, previous_data)
+                if previous_data.passthrough_id:
+                    passthrough_data = previous_dict.get(previous_data.passthrough_id, None)
+                    if passthrough_data:
+                        node_builder.link(layer_identifier,
+                                        passthrough_data.color_name,
+                                        "Color",
+                                        passthrough_data.color_socket)
+                        node_builder.link(layer_identifier,
+                                        passthrough_data.alpha_name,
+                                        "Alpha", passthrough_data.alpha_socket)
+                        previous_data.passthrough_id = None
                 if layer.blend_mode == "PASSTHROUGH":
                     previous_data.passthrough_id = unlinked_layer.id
                 if previous_data.clip_mode:
@@ -2168,8 +2143,8 @@ class Channel(BaseNestedListManager):
                 if previous_data.clip_mode and not layer.is_clip:
                     previous_data.clip_mode = False
         prev_layer = previous_dict[-1]
-        if self.type == "VECTOR" and self.use_space_transform_input:
-            color_name, color_socket = vector_transform(
+        if self.type == "VECTOR":
+            color_name, color_socket = vector_transform_output(
                 node_builder,
                 prev_layer.color_name,
                 prev_layer.color_socket,
@@ -2347,16 +2322,11 @@ class Channel(BaseNestedListManager):
             context.view_layer.objects.active = ps_context.ps_object
         
         ps_context = parse_context(context)
-
         orig_use_alpha = None
         orig_tangent_uv_map = None
         orig_output_vector_space = None
         orig_disable_output_transform = None
 
-        orig_preview_channel = False
-        if ps_context.ps_mat_data.preview_channel:
-            orig_preview_channel = bool(ps_context.ps_mat_data.preview_channel)
-            self.isolate_channel(context)
         if force_alpha:
             orig_use_alpha = bool(self.use_alpha)
             self.use_alpha = True
@@ -2457,30 +2427,36 @@ class Channel(BaseNestedListManager):
                 
                 set_image_pixels(bake_image, pixels_bake)
                 save_image(bake_image)
-        except Exception as e:
-            print(f"Error baking channel: {e}")
-        finally:
-            if temp_alpha_image and temp_alpha_image.name in bpy.data.images:
-                bpy.data.images.remove(temp_alpha_image)
+            bpy.data.images.remove(temp_alpha_image)
 
             for node in to_be_deleted_nodes:
-                if node in node_tree.nodes:
-                    node_tree.nodes.remove(node)
-
-            if surface_socket and from_socket:
+                node_tree.nodes.remove(node)
+            
+            # Restore surface socket
+            if from_socket:
                 connect_sockets(surface_socket, from_socket)
-
+            
             if force_alpha and orig_use_alpha is not None:
                 self.use_alpha = orig_use_alpha
-        
-        if orig_preview_channel:
-            self.isolate_channel(context)
-
-        if as_tangent_normal:
-            self.tangent_uv_map = orig_tangent_uv_map
-            self.output_vector_space = orig_output_vector_space
-
-        self.disable_output_transform = orig_disable_output_transform
+                
+            if as_tangent_normal:
+                self.tangent_uv_map = orig_tangent_uv_map
+                self.output_vector_space = orig_output_vector_space
+            else:
+                self.disable_output_transform = orig_disable_output_transform
+        except Exception as e:
+            print(f"Error baking channel: {e}")
+            try:
+                if orig_use_alpha is not None:
+                    self.use_alpha = orig_use_alpha
+                if orig_tangent_uv_map is not None:
+                    self.tangent_uv_map = orig_tangent_uv_map
+                if orig_output_vector_space is not None:
+                    self.output_vector_space = orig_output_vector_space
+                if orig_disable_output_transform is not None:
+                    self.disable_output_transform = orig_disable_output_transform
+            except Exception as e:
+                print(f"Error restoring channel settings: {e}")
         
     @property
     def item_type(self):
@@ -2565,16 +2541,10 @@ class Channel(BaseNestedListManager):
         default=False,
         update=update_node_tree
     )
-    use_space_transform_input: BoolProperty(
-        name="Use Space Transform Input",
+    use_space_transform: BoolProperty(
+        name="Use Space Transform",
         description="Use space transform for the channel",
         default=True,
-        update=update_node_tree
-    )
-    use_space_transform_output: BoolProperty(
-        name="Use Space Transform Output",
-        description="Use space transform for the channel",
-        default=False,
         update=update_node_tree
     )
     def update_default_value(self, context):
@@ -2600,13 +2570,13 @@ class Channel(BaseNestedListManager):
         ],
         name="Vector Type",
         description="Type of the vector",
-        default='VECTOR',
+        default='NORMAL',
         update=update_node_tree
     )
     input_vector_space: EnumProperty(
         items=[
-            ('WORLD', "World", "World Space", "WORLD", 0),
-            ('OBJECT', "Object", "Object Space", "OBJECT_DATA", 1),
+            ('WORLD', "World Space", "World Space", "WORLD", 0),
+            ('OBJECT', "Object Space", "Object Space", "OBJECT_DATA", 1),
         ],
         name="Input Vector Space",
         description="Space of the input",
@@ -2615,9 +2585,9 @@ class Channel(BaseNestedListManager):
     )
     vector_space: EnumProperty(
         items=[
-            ('WORLD', "World", "World Space", "WORLD", 0),
-            ('OBJECT', "Object", "Object Space", "OBJECT_DATA", 1),
-            ('TANGENT', "Tangent", "Tangent Space", "MESH_DATA", 2)
+            ('WORLD', "World Space", "World Space", "WORLD", 0),
+            ('OBJECT', "Object Space", "Object Space", "OBJECT_DATA", 1),
+            ('TANGENT', "Tangent Space", "Tangent Space", "MESH_DATA", 2)
         ],
         name="Vector Space",
         description="Space used when painting",
@@ -2626,9 +2596,9 @@ class Channel(BaseNestedListManager):
     )
     output_vector_space: EnumProperty(
         items=[
-            ('WORLD', "World", "World Space", "WORLD", 0),
-            ('OBJECT', "Object", "Object Space", "OBJECT_DATA", 1),
-            ('TANGENT', "Tangent", "Tangent Space", "MESH_DATA", 2)
+            ('WORLD', "World Space", "World Space", "WORLD", 0),
+            ('OBJECT', "Object Space", "Object Space", "OBJECT_DATA", 1),
+            ('TANGENT', "Tangent Space", "Tangent Space", "MESH_DATA", 2)
         ],
         name="Output Vector Space",
         description="Space of the output vector",
@@ -2900,20 +2870,17 @@ class Group(PropertyGroup):
                 channel = self.create_channel(context, channel_name='Color', channel_type='COLOR', use_alpha=True)
                 if node_group and to_node:
                     color_socket = find_socket_on_node(to_node, 'Base Color')
-                    # Color
                     if not color_socket:
                         color_socket = find_socket_on_node(to_node, 'Color')
+                    alpha_socket = find_socket_on_node(to_node, 'Alpha')
                     if color_socket:
+                        if not transfer_connection(mat_node_tree, color_socket, node_group.inputs['Color']):
+                            channel.create_layer(context, layer_name='Solid Color', layer_type='SOLID_COLOR')
                         transfer_connection(mat_node_tree, color_socket, node_group.inputs['Color'])
                         connect_sockets(node_group.outputs['Color'], color_socket)
-                    # Alpha
-                    alpha_socket = find_socket_on_node(to_node, 'Alpha')
-                    if alpha_socket:
-                        transfer_connection(mat_node_tree, alpha_socket, node_group.inputs['Color Alpha'])
-                        connect_sockets(node_group.outputs['Color Alpha'], alpha_socket)
-                    else:
-                        # Disable alpha
-                        channel.use_alpha = False
+                        if alpha_socket:
+                            transfer_connection(mat_node_tree, alpha_socket, node_group.inputs['Color Alpha'])
+                            connect_sockets(node_group.outputs['Color Alpha'], alpha_socket)
                 if add_layers:
                     channel.create_layer(context, layer_name=f'{mat.name}_Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
                 return channel
@@ -2935,7 +2902,7 @@ class Group(PropertyGroup):
                 return channel
             case "NORMAL":
                 socket_transferred = False
-                channel = self.create_channel(context, channel_name='Normal', channel_type='VECTOR', use_alpha=False, normalize_input=True, color_space='NONCOLOR', default_value='NORMAL', use_space_transform_input=True, use_space_transform_output=True)
+                channel = self.create_channel(context, channel_name='Normal', channel_type='VECTOR', use_alpha=False, normalize_input=True, color_space='NONCOLOR', default_value='NORMAL', use_space_transform=True)
                 if node_group and to_node:
                     normal_socket = find_socket_on_node(to_node, 'Normal')
                     if normal_socket:
@@ -2943,8 +2910,8 @@ class Group(PropertyGroup):
                         connect_sockets(node_group.outputs['Normal'], normal_socket)
                 if add_layers:
                     if not socket_transferred:
-                        channel.create_layer(context, layer_name='Normal', layer_type='GEOMETRY', geometry_type='OBJECT_NORMAL', normalize_normal=True)
-                    channel.create_layer(context, layer_name='Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
+                        channel.create_layer(context, layer_name=f'{mat.name}_Normal', layer_type='GEOMETRY', geometry_type='OBJECT_NORMAL', normalize_normal=True)
+                    channel.create_layer(context, layer_name=f'{mat.name}_Image', layer_type='IMAGE', coord_type=self.coord_type, uv_map_name=self.uv_map_name)
             case _:
                 raise ValueError(f"Invalid template: {template}")
     
@@ -3462,10 +3429,7 @@ class PaintSystemGlobalData(PropertyGroup):
         self.active_clipboard_index = 0
 
 class MaterialData(PropertyGroup):
-    """Per-material Paint System data (stored on ``Material.ps_mat_data``).
-    
-    Contains groups, preview state, and helper methods for creating groups.
-    """
+    """Custom data for channels in the Paint System"""
     groups: CollectionProperty(
         type=Group,
         name="Groups",
@@ -3547,8 +3511,107 @@ class Filter(PropertyGroup):
         default=1
     )
 
-def iter_all_layers() -> Generator[tuple[Material, Group, Channel, Layer], None, None]:
-    """Yield (material, group, channel, layer) for every layer across all materials."""
+
+def find_material_for_layer(layer: "Layer") -> Material | None:
+    target_layer = layer.get_layer_data() if hasattr(layer, "get_layer_data") else layer
+    if not target_layer:
+        return None
+    target_uid = getattr(target_layer, "uid", None)
+    if not target_uid:
+        return None
+    for material in bpy.data.materials:
+        if hasattr(material, 'ps_mat_data') and material.ps_mat_data:
+            for group in material.ps_mat_data.groups:
+                for channel in group.channels:
+                    for item in channel.layers:
+                        item_layer = item.get_layer_data() if hasattr(item, "get_layer_data") else item
+                        if item_layer and getattr(item_layer, "uid", None) == target_uid:
+                            return material
+    return None
+
+
+def get_layer_suffix(layer_name: str, old_material_name: str | None = None) -> str:
+    if old_material_name and layer_name == old_material_name:
+        return ""
+    if old_material_name and layer_name.startswith(f"{old_material_name}_"):
+        return layer_name.split("_", 1)[1]
+    if "_" in layer_name:
+        return layer_name.split("_", 1)[1]
+    return layer_name
+
+
+def ensure_layer_name_prefix(layer_name: str, material_name: str, old_material_name: str | None = None) -> str:
+    if layer_name == material_name:
+        return layer_name
+    if layer_name.startswith(f"{material_name}_"):
+        return layer_name
+    suffix = get_layer_suffix(layer_name, old_material_name)
+    if not suffix:
+        return material_name
+    return f"{material_name}_{suffix}"
+
+
+def _set_layer_name(layer: "Layer", new_name: str, context: Context):
+    if not layer or not new_name:
+        return
+    if layer.name == new_name:
+        return
+    previous_flag = getattr(layer, "updating_name_flag", False)
+    layer.updating_name_flag = True
+    layer.name = new_name
+    layer.layer_name = new_name
+    layer.updating_name_flag = previous_flag
+    layer.update_node_tree(context)
+
+
+def update_material_name(material: Material, context: Context = None, force: bool = False):
+    context = context or bpy.context
+    if not material or not hasattr(material, 'ps_mat_data') or not material.ps_mat_data:
+        return
+    prefs = get_preferences(context)
+    if not force and not getattr(prefs, "automatic_name_syncing", True):
+        material.ps_mat_data.last_material_name = material.name
+        return
+
+    ps_mat_data = material.ps_mat_data
+    old_name = ps_mat_data.last_material_name or material.name
+    new_name = material.name
+
+    # Update group names with PS_ prefix
+    for group in ps_mat_data.groups:
+        base_name = f"PS_{new_name}"
+        unique_name = get_next_unique_name(base_name, [g.name for g in ps_mat_data.groups if g != group])
+        if group.name != unique_name:
+            group.name = unique_name
+
+    # Update layer names (all types) and image datablocks
+    for group in ps_mat_data.groups:
+        for channel in group.channels:
+            for layer in channel.layers:
+                if layer.is_linked:
+                    continue
+                layer_data = layer.get_layer_data()
+                if not layer_data:
+                    continue
+                new_layer_name = ensure_layer_name_prefix(layer_data.name, new_name, old_name)
+                _set_layer_name(layer_data, new_layer_name, context)
+                if layer_data.image and layer_data.image.name != layer_data.name:
+                    layer_data.image.name = layer_data.name
+
+    ps_mat_data.last_material_name = new_name
+
+
+def sync_names(context: Context, material: Material | None = None, force: bool = False):
+    context = context or bpy.context
+    if material:
+        update_material_name(material, context, force=force)
+        return
+    ps_ctx = parse_context(context)
+    if ps_ctx.active_material:
+        update_material_name(ps_ctx.active_material, context, force=force)
+
+def get_all_layers() -> list[Layer]:
+    layers = []
     for material in bpy.data.materials:
         if hasattr(material, 'ps_mat_data'):
             for group in material.ps_mat_data.groups:

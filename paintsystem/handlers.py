@@ -10,24 +10,10 @@ import time
 from .graph.nodetree_builder import get_nodetree_version
 import uuid
 
-_COLOR_HISTORY_PALETTE_NAME = "Paint System History"
-
-
 def get_ps_scene_data(scene: bpy.types.Scene):
     if not hasattr(scene, 'ps_scene_data'):
         return None
     return scene.ps_scene_data
-
-
-def ensure_color_history_palette(ps_scene_data) -> bpy.types.Palette:
-    """Return the colour-history palette, creating it if necessary."""
-    palette = ps_scene_data.color_history_palette
-    if not palette:
-        palette = bpy.data.palettes.get(_COLOR_HISTORY_PALETTE_NAME)
-        if not palette:
-            palette = bpy.data.palettes.new(_COLOR_HISTORY_PALETTE_NAME)
-        ps_scene_data.color_history_palette = palette
-    return palette
 
 @bpy.app.handlers.persistent
 def frame_change_pre(scene: bpy.types.Scene):
@@ -109,14 +95,23 @@ def load_paint_system_data(scene: bpy.types.Scene = None):
 
 @bpy.app.handlers.persistent
 def load_post(scene):
-    scene = scene or bpy.context.scene
-    if not scene:
-        return
-    ps_scene_data = get_ps_scene_data(scene)
+    
+    # Ensure color history palette is created
+    ps_scene_data = get_ps_scene_data(bpy.context.scene)
     if not ps_scene_data:
         return
-    ensure_color_history_palette(ps_scene_data)
-    load_paint_system_data(scene)
+    if not ps_scene_data.color_history_palette:
+        palette_name = "Paint System History"
+        palette = bpy.data.palettes.get(palette_name)
+        if not palette:
+            palette = bpy.data.palettes.new(palette_name)
+    
+    load_paint_system_data()
+    # Check for donation info
+    # get_donation_info()
+    # if donation_info:
+    #     print(f"Donation info: {donation_info}")
+    # Check for version check
     get_latest_version()
 
 @bpy.app.handlers.persistent
@@ -337,12 +332,6 @@ def material_name_update_handler(scene: bpy.types.Scene, depsgraph: bpy.types.De
         return
     if not depsgraph.id_type_updated('MATERIAL'):
         return
-    def _strip_numeric_suffix(name: str) -> str:
-        if "." in name:
-            base, suffix = name.rsplit(".", 1)
-            if suffix.isdigit():
-                return base
-        return name
     try:
         for update in depsgraph.updates:
             material = update.id
@@ -358,10 +347,8 @@ def material_name_update_handler(scene: bpy.types.Scene, depsgraph: bpy.types.De
                 if material.ps_mat_data.groups:
                     for group in material.ps_mat_data.groups:
                         if group.name.startswith("PS_"):
-                            inferred_old = _strip_numeric_suffix(group.name[3:])
+                            inferred_old = group.name[3:]
                             break
-                        if not inferred_old:
-                            inferred_old = _strip_numeric_suffix(group.name)
                 if inferred_old and inferred_old != material.name:
                     material.ps_mat_data.last_material_name = inferred_old
                     update_material_name(material, bpy.context)
@@ -373,35 +360,7 @@ def material_name_update_handler(scene: bpy.types.Scene, depsgraph: bpy.types.De
 
 # --- On Addon Enable ---
 def on_addon_enable():
-    context = bpy.context
-    window = getattr(context, "window", None)
-    screen = getattr(window, "screen", None) if window else None
-    scene = getattr(context, "scene", None)
-
-    if screen and getattr(screen, "areas", None):
-        try:
-            for area in screen.areas:
-                if area.type != 'IMAGE_EDITOR':
-                    continue
-                for space in area.spaces:
-                    if space.type != 'IMAGE_EDITOR' or not hasattr(space, "ui_mode"):
-                        continue
-                    ui_mode_prop = space.bl_rna.properties.get("ui_mode")
-                    ui_mode_items = [item.identifier for item in ui_mode_prop.enum_items] if ui_mode_prop else []
-                    if not ui_mode_items:
-                        continue
-                    if 'VIEW' in ui_mode_items:
-                        space.ui_mode = 'VIEW'
-                    else:
-                        space.ui_mode = ui_mode_items[0]
-        except Exception:
-            pass
-
-    if not scene or not window or not screen or not getattr(screen, "areas", None):
-        return 0.25
-
-    load_post(scene)
-    get_latest_version()
+    load_post(bpy.context.scene)
     try:
         for material in bpy.data.materials:
             if hasattr(material, 'ps_mat_data') and material.ps_mat_data:
@@ -410,8 +369,6 @@ def on_addon_enable():
     except Exception:
         pass
 
-    return None
-
 
 owner = object()
 
@@ -419,21 +376,6 @@ def brush_color_callback(*args):
     context = bpy.context
     if context.scene and hasattr(context.scene, 'ps_scene_data'):
         context.scene.ps_scene_data.update_hsv_color(context)
-
-
-def uv_edit_mode_guard(*args):
-    context = bpy.context
-    if not context or not context.scene or not hasattr(context.scene, 'ps_scene_data'):
-        return
-    ps_scene_data = context.scene.ps_scene_data
-    if not ps_scene_data or not ps_scene_data.uv_edit_enabled:
-        return
-    obj = context.object
-    if obj and getattr(obj, "mode", None) == 'PAINT_TEXTURE':
-        try:
-            bpy.ops.object.mode_set(mode='OBJECT')
-        except Exception:
-            pass
 
 
 def material_name_msgbus_callback(*args):
@@ -477,12 +419,6 @@ def register():
         owner=owner,
         args=(None,),
         notify=brush_color_callback,
-    )
-    bpy.msgbus.subscribe_rna(
-        key=(bpy.types.Object, "mode"),
-        owner=owner,
-        args=(None,),
-        notify=uv_edit_mode_guard,
     )
     bpy.msgbus.subscribe_rna(
         key=(bpy.types.Material, "name"),

@@ -252,6 +252,148 @@ class PSNodeTreeBuilder:
         if self._color_modifiers:
             final_color_node, _, final_color_socket = self._color_modifiers[-1]
         else:
+            self._builder.link(node_name, "mapping", socket_name, "Vector")
+        if self._layer.coord_type in {"PROJECT", "DECAL"}:
+            self._builder.add_node("center_image", "ShaderNodeVectorMath", {"operation": "ADD"}, default_values={1: (0.5, 0.5, 0)}, force_default_values=True)
+            self._builder.link("mapping", "center_image", "Vector", 0)
+            output_node_name = "center_image"
+            output_socket_name = 0
+        return output_node_name, output_socket_name
+    
+    def __getattr__(self, name):
+        """Delegate all other method calls to the underlying NodeTreeBuilder"""
+        return getattr(self._builder, name)
+    
+    def add_node(self, *args, **kwargs):
+        """Add a node to the graph"""
+        return self._builder.add_node(*args, **kwargs)
+    
+    def link(self, *args, **kwargs):
+        """Link nodes in the graph"""
+        return self._builder.link(*args, **kwargs)
+    
+    def compile(self, *args, **kwargs):
+        """Compile the graph, ensuring modifier chains are properly linked"""
+        # Compile mask builders first
+        for mask_builder in self.mask_builders:
+            mask_builder.compile(*args, **kwargs)
+            
+        # Update mixing graph links before compiling to ensure modifiers are connected
+        self._update_mixing_graph_links()
+        return self._builder.compile(*args, **kwargs)
+    
+    @property
+    def builder(self):
+        """Access the underlying NodeTreeBuilder if needed"""
+        return self._builder
+    
+    def create_coord_graph(self, node_name: str, socket_name: str) -> NodeTreeBuilder:
+        """Create the coordinate graph for the layer.
+
+        Args:
+            node_name (str): The name of the node to link the coordinate graph to.
+            socket_name (str): The socket name to link the coordinate graph to.
+        """
+        coord_type = self._layer.coord_type
+        if coord_type == "AUTO":
+            self._builder.add_node("uvmap", "ShaderNodeUVMap", {"uv_map": DEFAULT_PS_UV_MAP_NAME}, force_properties=True)
+            output_node_name, output_socket_name = self._create_mapping_setup("uvmap", "UV")
+            self._builder.link(output_node_name, node_name, output_socket_name, socket_name)
+        elif coord_type == "UV":
+            # Handle both layer and mask UV map property names
+            uv_map_name = getattr(self._layer, 'uv_map_name', getattr(self._layer, 'mask_uv_map', ''))
+            self._builder.add_node("uvmap", "ShaderNodeUVMap", {"uv_map": uv_map_name}, force_properties=True)
+            output_node_name, output_socket_name = self._create_mapping_setup("uvmap", "UV")
+            self._builder.link(output_node_name, node_name, output_socket_name, socket_name)
+        elif coord_type in ["OBJECT", "CAMERA", "WINDOW", "REFLECTION", "GENERATED"]:
+            empty_object = self._layer.empty_object
+            self._builder.add_node("tex_coord", "ShaderNodeTexCoord", {"object": empty_object})
+            output_node_name, output_socket_name = self._create_mapping_setup("tex_coord", coord_type.title())
+            self._builder.link(output_node_name, node_name, output_socket_name, socket_name)
+        elif coord_type == "POSITION":
+            self._builder.add_node("geometry", "ShaderNodeNewGeometry")
+            output_node_name, output_socket_name = self._create_mapping_setup("geometry", "Position")
+            self._builder.link(output_node_name, node_name, output_socket_name, socket_name)
+        elif coord_type == "DECAL":
+            empty_object = self._layer.empty_object
+            use_decal_depth_clip = getattr(self._layer, 'use_decal_depth_clip', False)
+            self._builder.add_node("tex_coord", "ShaderNodeTexCoord", {"object": empty_object}, force_properties=True)
+            output_node_name, output_socket_name = self._create_mapping_setup("tex_coord", "Object")
+            self._builder.link(output_node_name, node_name, output_socket_name, socket_name)
+            if use_decal_depth_clip:
+                self._builder.add_node("decal_depth_separate_xyz", "ShaderNodeSeparateXYZ")
+                self._builder.add_node("decal_depth_clip", "ShaderNodeMath", {"operation": "COMPARE"}, default_values={1: 0, 2: 0.5}, force_default_values=True)
+                self._builder.link("mapping", "decal_depth_separate_xyz", "Vector", 0)
+                self._builder.link("decal_depth_separate_xyz", "decal_depth_clip", "Z", 0)
+                if self._alpha_source_node is not None and self._alpha_source_socket is not None:
+                    self._builder.add_node("decal_alpha_multiply", "ShaderNodeMath", {"operation": "MULTIPLY"}, default_values={0: 1, 1: 1} , force_default_values=True)
+                    self._builder.link("decal_depth_clip", "decal_alpha_multiply", "Value", 0)
+                    self.add_alpha_modifier("decal_alpha_multiply", 1, 0)
+                else:
+                    self._alpha_source_node = "decal_depth_clip"
+                    self._alpha_source_socket = 0
+        elif coord_type == "PROJECT":
+            proj_nt = get_library_nodetree(".PS Projection")
+            self._builder.add_node(
+                "proj_node",
+                "ShaderNodeGroup",
+                {"node_tree": proj_nt, "hide": True},
+                {"Vector": self._layer.projection_position, "Rotation": self._layer.projection_rotation, "FOV": self._layer.projection_fov, "Object Space": self._layer.projection_space == "OBJECT"},
+                force_properties=True,
+                force_default_values=True
+            )
+            output_node_name, output_socket_name = self._create_mapping_setup("proj_node", "Vector")
+            self._builder.link(output_node_name, node_name, output_socket_name, socket_name)
+            if self._alpha_source_node is not None and self._alpha_source_socket is not None:
+                self._builder.add_node("projcetion_alpha_multiply", "ShaderNodeMath", {"operation": "MULTIPLY"}, default_values={0: 1, 1: 1} , force_default_values=True)
+                self._builder.link("proj_node", "projcetion_alpha_multiply", "Mask", 0)
+                self.add_alpha_modifier("projcetion_alpha_multiply", 1, 0)
+            else:
+                self._alpha_source_node = "proj_node"
+                self._alpha_source_socket = "Mask"
+        elif coord_type == "PARALLAX":
+            match self._layer.parallax_space:
+                case "UV":
+                    parallax_nt = get_library_nodetree(".PS UV Parallax")
+                    self._builder.add_node("geometry", "ShaderNodeNewGeometry")
+                    self._builder.add_node("parallax", "ShaderNodeGroup", {"node_tree": parallax_nt}, force_properties=True)
+                    self._builder.add_node("uvmap", "ShaderNodeUVMap", {"uv_map": self._layer.parallax_uv_map_name}, force_properties=True)
+                    self._builder.add_node("uv_tangent", "ShaderNodeTangent", {"direction_type": "UV_MAP", "uv_map": self._layer.parallax_uv_map_name}, force_properties=True)
+                    self._builder.link("uvmap", "parallax", "UV", "UV")
+                    self._builder.link("uv_tangent", "parallax", "Tangent", "Tangent")
+                    self._builder.link("geometry", "parallax", "Normal", "Normal")
+                case "Object":
+                    parallax_nt = get_library_nodetree(".PS Object Parallax")
+                    self._builder.add_node("parallax", "ShaderNodeGroup", {"node_tree": parallax_nt}, force_properties=True)
+            output_node_name, output_socket_name = self._create_mapping_setup("parallax", "Vector")
+            self._builder.link(output_node_name, node_name, output_socket_name, socket_name)
+    
+    def _remove_final_color_link(self):
+        """Remove any existing link to mix_rgb.B input."""
+        # Find and remove any edge that targets mix_rgb with target_socket "B"
+        edges_to_remove = [
+            edge for edge in self._builder.edges
+            if edge.target == "mix_rgb" and edge.target_socket == "B"
+        ]
+        for edge in edges_to_remove:
+            self._builder.edges.remove(edge)
+    
+    def _remove_final_alpha_link(self):
+        """Remove any existing link to pre_mix.Over Alpha input."""
+        # Find and remove any edge that targets pre_mix with target_socket "Over Alpha"
+        edges_to_remove = [
+            edge for edge in self._builder.edges
+            if edge.target == "pre_mix" and edge.target_socket == "Over Alpha"
+        ]
+        for edge in edges_to_remove:
+            self._builder.edges.remove(edge)
+    
+    def _update_mixing_graph_links(self):
+        """Update the links from color/alpha sources (through modifiers) to the mixing graph."""
+        # Determine final color source (last modifier or original source)
+        if self._color_modifiers:
+            final_color_node, _, final_color_socket = self._color_modifiers[-1]
+        else:
             final_color_node = self._color_source_node
             final_color_socket = self._color_source_socket
         
@@ -552,7 +694,7 @@ class PSNodeTreeBuilder:
             for mask in layer.layer_masks:
                 if not mask.uid:
                     mask.uid = str(uuid.uuid4())
-                if mask.type != 'IMAGE':
+                if mask.type not in {'IMAGE', 'TEXTURE'}:
                     mask.type = 'IMAGE'
                 if not mask.node_tree:
                     mask.node_tree = bpy.data.node_groups.new(
@@ -626,6 +768,8 @@ class PSNodeTreeBuilder:
         
         match layer_mask.type:
             case "IMAGE":
+                if layer_mask.mask_image:
+                    layer_mask.mask_image.name = layer_mask.name
                 img = layer_mask.mask_image
                 create_mask_mixing_graph(builder, layer_mask, "source", "Color")
                 builder.add_node("source", "ShaderNodeTexImage", {"image.force": img, "interpolation": "Closest", "name": "source"})
@@ -697,6 +841,14 @@ class PSNodeTreeBuilder:
                 builder.link("hue_multiply_add", "hue_saturation_value", "Value", "Hue")
                 builder.link("saturation_multiply_add", "hue_saturation_value", "Value", "Saturation")
                 builder.link("value_multiply_add", "hue_saturation_value", "Value", "Value")
+                return builder
+
+            case "TEXTURE":
+                color_socket = "Color"
+                texture_type = get_texture_identifier(layer_mask.texture_type)
+                create_mask_mixing_graph(builder, layer_mask, "source", color_socket)
+                builder.add_node("source", texture_type, {"name": "source"})
+                builder.create_coord_graph('source', 'Vector')
                 return builder
 
             case _:

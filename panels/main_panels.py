@@ -16,7 +16,9 @@ from .common import (
     check_group_multiuser,
     toggle_paint_mode_ui,
     draw_uv_edit_alert,
-    is_uv_edit_active
+    is_uv_edit_active,
+    ensure_invoke_context,
+    draw_warning_box,
 )
 
 from ..paintsystem.data import LegacyPaintSystemContextParser

@@ -230,6 +230,8 @@ class PAINTSYSTEM_OT_NewGroup(PSContextMixin, PSUVOptionsMixin, MultiMaterialOpe
                         context, "NORMAL", add_layers=self.add_layers)
                 ps_ctx = self.parse_context(context)
                 ps_ctx.active_group.active_index = 0
+                ps_ctx = self.parse_context(context)
+                ps_ctx.active_group.active_index = 0
 
             case 'PAINT_OVER':
                 # Check if Engine is EEVEE
@@ -442,8 +444,7 @@ class PAINTSYSTEM_OT_DeleteGroup(PSContextMixin, Operator):
         col = box.column(align=True)
         col.alert = True
         col.label(text="Danger Zone!", icon="ERROR")
-        col.label(
-            text=f"Are you sure you want to delete Paint System?", icon="BLANK1")
+        col.label(text=f"Are you sure you want to delete Paint System?", icon="BLANK1")
 
 
 class PAINTSYSTEM_OT_MoveGroup(PSContextMixin, MultiMaterialOperator):

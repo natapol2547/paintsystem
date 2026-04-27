@@ -20,13 +20,12 @@ from .custom_icons import load_icons, unload_icons
 from . import paintsystem as paintsystem
 
 # from .paintsystem.data import parse_context
-
 bl_info = {
     "name": "Paint System",
     "author": "Tawan Sunflower, @blastframe",
     "description": "",
     "blender": (4, 2, 0),
-    "version": (2, 1, 8),
+    "version": (2, 1, 6),
     "location": "View3D > Sidebar > Paint System",
     "warning": "",
     "category": "Paint",

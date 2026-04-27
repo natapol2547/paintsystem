@@ -17,6 +17,8 @@ from ..paintsystem.data import (
     ACTION_TYPE_ENUM,
     ADJUSTMENT_TYPE_ENUM,
     ATTRIBUTE_TYPE_ENUM,
+    MASK_TYPE_ENUM,
+    TEXTURE_TYPE_ENUM,
     GRADIENT_TYPE_ENUM,
     GEOMETRY_TYPE_ENUM,
     add_empty_to_collection,
@@ -30,6 +32,7 @@ from .common import (
     PSContextMixin,
     scale_content,
     get_icon_from_socket_type,
+    MultiMaterialOperator,
     PSUVOptionsMixin,
     PSImageCreateMixin
     )
@@ -244,6 +247,53 @@ class PAINTSYSTEM_OT_NewImageMaskAuto(PAINTSYSTEM_OT_NewImageMask):
         self.image_height = max(1, image_height)
         return self.execute(context)
 
+class PAINTSYSTEM_OT_NewTextureMask(PSContextMixin, MultiMaterialOperator):
+    """Create a new procedural texture mask"""
+    bl_idname = "paint_system.new_texture_mask"
+    bl_label = "New Texture Mask"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Create a new procedural texture mask"
+
+    texture_type: EnumProperty(
+        items=TEXTURE_TYPE_ENUM,
+        name="Texture Type",
+        description="Texture type for the new mask",
+        default='TEX_NOISE',
+    )
+
+    @classmethod
+    def poll(cls, context):
+        ps_ctx = cls.parse_context(context)
+        return ps_ctx.active_layer is not None
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        layout = self.layout
+        self.multiple_objects_ui(layout, context)
+        layout.prop(self, "texture_type")
+
+    def process_material(self, context):
+        ps_ctx = self.parse_context(context)
+        active_layer = ps_ctx.active_layer
+        mask_name = get_next_unique_name("Texture Mask", [layer_mask.layer_name for layer_mask in active_layer.layer_masks])
+
+        active_layer.use_masks = True
+        active_layer.create_layer_mask(
+            context,
+            mask_name,
+            'TEXTURE',
+            texture_type=self.texture_type,
+            coord_type=active_layer.coord_type,
+            mask_uv_map=getattr(active_layer, "uv_map_name", ""),
+            enabled=True,
+        )
+        active_layer.active_layer_mask_index = max(0, len(active_layer.layer_masks) - 1)
+        active_layer.edit_mask = False
+        update_active_image(context=context)
+        return {'FINISHED'}
+
 
 class PAINTSYSTEM_OT_EditLayerMask(PSContextMixin, Operator):
     """Edit the active image mask"""
@@ -306,6 +356,7 @@ classes = (
     PAINTSYSTEM_OT_NewImageMask,
     PAINTSYSTEM_OT_NewImageMaskAuto,
     PAINTSYSTEM_OT_DeleteLayerMask,
+    PAINTSYSTEM_OT_NewTextureMask,
     PAINTSYSTEM_OT_EditLayerMask,
     PAINTSYSTEM_OT_FinishEditLayerMask,
 )
