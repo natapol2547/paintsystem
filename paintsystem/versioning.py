@@ -30,11 +30,12 @@ def migrate_global_layer_data(layer_parent_map: dict[Layer, LayerParent]):
             global_layer = get_legacy_global_layer(layer)
             if global_layer:
                 layer.auto_update_node_tree = False
-                logger.info(f"Migrating global layer data ({global_layer.name}) to layer data ({layer.name}) ({layer.layer_name})")
+                logger.info(f"Migrating global layer data ({global_layer.name}) ({global_layer.layer_name}) to layer data ({layer.name}) ({layer.layer_name})")
                 has_migrated_global_layer = True
                 layer.layer_name = layer.name
                 layer.uid = global_layer.name
-                layer.name = global_layer.layer_name
+                if global_layer.layer_name:
+                    layer.name = global_layer.layer_name
                 if global_layer.name not in seen_global_layers_map:
                     seen_global_layers_map[global_layer.name] = [layer_parent["mat"], global_layer]
                     for prop in global_layer.bl_rna.properties:
@@ -52,6 +53,7 @@ def migrate_global_layer_data(layer_parent_map: dict[Layer, LayerParent]):
                     mat, global_layer = seen_global_layers_map[global_layer.name]
                     layer.linked_layer_uid = global_layer.name
                     layer.linked_material = mat
+                logger.info(f"Migration done for layer {layer.name}")
                 layer.auto_update_node_tree = True
                 layer.update_node_tree(bpy.context)
         if has_migrated_global_layer:

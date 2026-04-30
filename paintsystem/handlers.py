@@ -67,6 +67,7 @@ def frame_change_pre(scene: bpy.types.Scene):
 
 def load_paint_system_data():
     logger.debug("Loading Paint System data...")
+    update_library_nodetree_version()
     start_time = time.time()
     ps_scene_data = get_ps_scene_data(bpy.context.scene)
     if not ps_scene_data:
@@ -92,7 +93,6 @@ def load_paint_system_data():
     migrate_blend_mode(layer_parent_map)
     migrate_source_node(layer_parent_map)
     migrate_socket_names(layer_parent_map)
-    update_library_nodetree_version()
     update_layer_version(layer_parent_map)
     update_layer_name(layer_parent_map)
 
