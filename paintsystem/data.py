@@ -2208,10 +2208,14 @@ class Channel(BaseNestedListManager):
                 # Use channel node group instead
                 bake_node = node_tree.nodes.new(type='ShaderNodeGroup')
                 bake_node.node_tree = self.node_tree
-                color_output = bake_node.outputs['Color']
+                color_output = bake_node.outputs[self.name]
                 if self.use_alpha:
-                    alpha_output = bake_node.outputs['Alpha']
+                    alpha_output = bake_node.outputs[f'{self.name} Alpha']
                 to_be_deleted_nodes.append(bake_node)
+            
+            # if orig_use_alpha is False, set alpha socket to 1
+            if self.use_alpha and not orig_use_alpha and bake_node.inputs[self.name].is_linked:
+                bake_node.inputs[f'{self.name} Alpha'].default_value = 1.0
             
             # Bake image
             connect_sockets(surface_socket, color_output)
