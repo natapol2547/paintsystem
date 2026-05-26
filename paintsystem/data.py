@@ -1468,7 +1468,7 @@ class Layer(BaseNestedListItem):
                     warnings.append("No layer below. Adjustment effects may not work.")
             else:
                 # Check if alpha is 0
-                if group_node and group_node.inputs[alpha_channel_name].default_value == 0:
+                if active_channel.use_alpha and group_node and group_node.inputs[alpha_channel_name].default_value == 0:
                     warnings.append(f"Input Alpha of {color_channel_name} channel is 0. Blending may not work.")
             
         return warnings
