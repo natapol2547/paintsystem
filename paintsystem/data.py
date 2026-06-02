@@ -2199,23 +2199,23 @@ class Channel(BaseNestedListManager):
                 for group in mat.ps_mat_data.groups:
                     if group.node_tree and self.name in group.channels:
                         bake_node = find_node(node_tree, {'bl_idname': 'ShaderNodeGroup', 'node_tree': group.node_tree})
-                        color_output = bake_node.outputs[self.name]
-                        if self.use_alpha:
-                            alpha_output = bake_node.outputs[f'{self.name} Alpha']
+                        if bake_node:
+                            color_output = bake_node.outputs[self.name]
+                            if self.use_alpha:
+                                alpha_output = bake_node.outputs[f'{self.name} Alpha']
+                            # if orig_use_alpha is False, set alpha socket to 1
+                            if self.use_alpha and not orig_use_alpha and bake_node.inputs[self.name].is_linked:
+                                bake_node.inputs[f'{self.name} Alpha'].default_value = 1.0
                         break
             
             if not bake_node:
                 # Use channel node group instead
                 bake_node = node_tree.nodes.new(type='ShaderNodeGroup')
                 bake_node.node_tree = self.node_tree
-                color_output = bake_node.outputs[self.name]
+                color_output = bake_node.outputs['Color']
                 if self.use_alpha:
-                    alpha_output = bake_node.outputs[f'{self.name} Alpha']
+                    alpha_output = bake_node.outputs['Alpha']
                 to_be_deleted_nodes.append(bake_node)
-            
-            # if orig_use_alpha is False, set alpha socket to 1
-            if self.use_alpha and not orig_use_alpha and bake_node.inputs[self.name].is_linked:
-                bake_node.inputs[f'{self.name} Alpha'].default_value = 1.0
             
             # Bake image
             connect_sockets(surface_socket, color_output)
