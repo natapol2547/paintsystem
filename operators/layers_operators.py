@@ -38,6 +38,10 @@ def get_object_uv_maps(self, context: Context):
     ]
     return intern_enum_items(items)
 
+def ps_not_initialized(context: Context):
+    ps_ctx = PSContextMixin.parse_context(context)
+    return not (hasattr(context.active_object.active_material, "ps_mat_data") and ps_ctx.active_group and ps_ctx.active_channel)
+
 class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSImageCreateMixin, MultiMaterialOperator):
     """Create a new image layer"""
     bl_idname = "paint_system.new_image_layer"
@@ -80,6 +84,8 @@ class PAINTSYSTEM_OT_NewImage(PSContextMixin, PSImageCreateMixin, MultiMaterialO
             return get_next_unique_name("Image", [layer.name for layer in ps_ctx.active_channel.layers])
 
     def process_material(self, context):
+        if ps_not_initialized(context):
+            return {'CANCELLED'}
         self.store_coord_type(context)
         ps_ctx = self.parse_context(context)
         if self.image_add_type == 'NEW':
@@ -153,6 +159,8 @@ class PAINTSYSTEM_OT_NewFolder(PSContextMixin, MultiMaterialOperator):
     )
 
     def process_material(self, context):
+        if ps_not_initialized(context):
+            return {'CANCELLED'}
         ps_ctx = self.parse_context(context)
         ps_ctx.active_channel.create_layer(context, self.layer_name, "FOLDER")
         return {'FINISHED'}
@@ -176,6 +184,8 @@ class PAINTSYSTEM_OT_NewSolidColor(PSContextMixin, MultiMaterialOperator):
     )
 
     def process_material(self, context):
+        if ps_not_initialized(context):
+            return {'CANCELLED'}
         ps_ctx = self.parse_context(context)
         ps_ctx.active_channel.create_layer(context, self.layer_name, "SOLID_COLOR")
         return {'FINISHED'}
@@ -209,6 +219,8 @@ class PAINTSYSTEM_OT_NewAttribute(PSContextMixin, MultiMaterialOperator):
     )
 
     def process_material(self, context):
+        if ps_not_initialized(context):
+            return {'CANCELLED'}
         ps_ctx = self.parse_context(context)
         ps_ctx.active_channel.create_layer(context, self.layer_name, "ATTRIBUTE")
         return {'FINISHED'}
@@ -231,6 +243,8 @@ class PAINTSYSTEM_OT_NewAdjustment(PSContextMixin, MultiMaterialOperator):
     )
 
     def process_material(self, context):
+        if ps_not_initialized(context):
+            return {'CANCELLED'}
         ps_ctx = self.parse_context(context)
         layer_name = next(name for adjustment_type, name, description in ADJUSTMENT_TYPE_ENUM if adjustment_type == self.adjustment_type)
         ps_ctx.active_channel.create_layer(context, layer_name, "ADJUSTMENT", adjustment_type=self.adjustment_type)
@@ -255,6 +269,8 @@ class PAINTSYSTEM_OT_NewShader(PSContextMixin, MultiMaterialOperator):
     )
 
     def process_material(self, context):
+        if ps_not_initialized(context):
+            return {'CANCELLED'}
         ps_ctx = self.parse_context(context)
         ps_ctx.active_channel.create_layer(context, self.layer_name, "SHADER")
         return {'FINISHED'}
@@ -284,6 +300,8 @@ class PAINTSYSTEM_OT_NewGradient(PSContextMixin, MultiMaterialOperator):
     )
 
     def process_material(self, context):
+        if ps_not_initialized(context):
+            return {'CANCELLED'}
         ps_ctx = self.parse_context(context)
         layer = ps_ctx.active_channel.create_layer(context, self.gradient_type.title() if self.gradient_type != 'FAKE_LIGHT' else "Fake Light", "GRADIENT", gradient_type=self.gradient_type)
         if self.gradient_type == 'FAKE_LIGHT':
@@ -309,6 +327,8 @@ class PAINTSYSTEM_OT_NewGeometry(PSContextMixin, MultiMaterialOperator):
         return ps_ctx.active_channel is not None
     
     def process_material(self, context):
+        if ps_not_initialized(context):
+            return {'CANCELLED'}
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
         layer_name = next(name for geometry_type, name, description in GEOMETRY_TYPE_ENUM if geometry_type == self.geometry_type)
@@ -375,6 +395,8 @@ class PAINTSYSTEM_OT_NewRandomColor(PSContextMixin, MultiMaterialOperator):
         return ps_ctx.active_channel is not None
     
     def process_material(self, context):
+        if ps_not_initialized(context):
+            return {'CANCELLED'}
         ps_ctx = self.parse_context(context)
         ps_ctx.active_channel.create_layer(context, self.layer_name, "RANDOM")
         return {'FINISHED'}
@@ -424,7 +446,7 @@ class PAINTSYSTEM_OT_NewCustomNodeGroup(PSContextMixin, MultiMaterialOperator):
         output_sockets = get_nodetree_socket_enum(custom_node_tree, in_out='OUTPUT')
         found_color_input = False
         found_alpha_input = False
-        found_color_output = False
+        # found_color_output = False
         found_alpha_output = False
         for input_socket in input_sockets:
             if input_socket[1] == 'Color':
@@ -434,18 +456,19 @@ class PAINTSYSTEM_OT_NewCustomNodeGroup(PSContextMixin, MultiMaterialOperator):
                 self.alpha_input_name = input_socket[0]
                 found_alpha_input = True
         for output_socket in output_sockets:
-            if output_socket[1] == 'Color':
-                self.color_output_name = output_socket[0]
-                found_color_output = True
-            elif output_socket[1] == 'Alpha':
+            # if output_socket[1] == 'Color':
+            #     self.color_output_name = output_socket[0]
+            #     found_color_output = True
+            if output_socket[1] == 'Alpha':
                 self.alpha_output_name = output_socket[0]
                 found_alpha_output = True
         if not found_color_input:
             self.color_input_name = '_NONE_'
         if not found_alpha_input:
             self.alpha_input_name = '_NONE_'
-        if not found_color_output:
-            self.color_output_name = '_NONE_'
+        # Color should not have none output
+        # if not found_color_output:
+        #     self.color_output_name = '_NONE_'
         if not found_alpha_output:
             self.alpha_output_name = '_NONE_'
     def has_unsupported_sockets(self, node_tree: NodeTree):
@@ -489,10 +512,12 @@ class PAINTSYSTEM_OT_NewCustomNodeGroup(PSContextMixin, MultiMaterialOperator):
         return ps_ctx.active_channel is not None
     
     def process_material(self, context):
+        if ps_not_initialized(context):
+            return {'CANCELLED'}
         if not self.node_tree_name:
             return {'CANCELLED'}
         # Must have at least one output socket
-        if self.color_output_name == '_NONE_' and self.alpha_output_name == '_NONE_':
+        if (not self.color_output_name or self.color_output_name == '_NONE_') and (not self.alpha_output_name or self.alpha_output_name == '_NONE_'):
             self.report({'ERROR'}, "Node tree must have at least one output socket")
             return {'CANCELLED'}
         ps_ctx = self.parse_context(context)
@@ -578,6 +603,8 @@ class PAINTSYSTEM_OT_NewTexture(PSContextMixin, PSUVOptionsMixin, MultiMaterialO
         self.select_coord_type_ui(box, context, show_warning=False)
     
     def process_material(self, context):
+        if ps_not_initialized(context):
+            return {'CANCELLED'}
         ps_ctx = self.parse_context(context)
         self.store_coord_type(context)
         layer_name = next(name for texture_type, name, description in TEXTURE_TYPE_ENUM if texture_type == self.texture_type)
@@ -605,6 +632,8 @@ class PAINTSYSTEM_OT_DeleteItem(PSContextMixin, MultiMaterialOperator):
         return ps_ctx.unlinked_layer is not None
 
     def process_material(self, context):
+        if ps_not_initialized(context):
+            return {'CANCELLED'}
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
         unlinked_layer = ps_ctx.unlinked_layer
@@ -689,6 +718,8 @@ class PAINTSYSTEM_OT_MoveUp(PSContextMixin, MultiMaterialOperator):
                 setattr(op, key, value)
 
     def process_material(self, context):
+        if ps_not_initialized(context):
+            return {'CANCELLED'}
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
         if not active_channel:
@@ -768,6 +799,8 @@ class PAINTSYSTEM_OT_MoveDown(PSContextMixin, MultiMaterialOperator):
                 setattr(op, key, value)
 
     def process_material(self, context):
+        if ps_not_initialized(context):
+            return {'CANCELLED'}
         ps_ctx = self.parse_context(context)
         active_channel = ps_ctx.active_channel
         if not active_channel:
