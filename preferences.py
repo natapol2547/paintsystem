@@ -18,7 +18,6 @@ class PaintSystemPreferences:
     show_hsv_sliders_rmb: bool = True
     show_active_palette_rmb: bool = True
     show_brush_settings_rmb: bool = True
-    loading_donations: bool = False
     version_check_interval_days: int = 1
     version_check_interval_hours: int = 0
     version_check_interval_minutes: int = 0

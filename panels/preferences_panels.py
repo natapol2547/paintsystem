@@ -113,13 +113,6 @@ class PaintSystemPreferences(AddonPreferences):
         default=True
     )
     
-    loading_donations: BoolProperty(
-        name="Loading Donations",
-        description="Loading donations",
-        default=False,
-        options={'SKIP_SAVE'}
-    )
-    
     # Version check settings
     version_check_interval_days: IntProperty(
         name="Version Check Interval (Days)",

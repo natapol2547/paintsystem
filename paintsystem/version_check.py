@@ -1,6 +1,4 @@
 import bpy
-import sys
-import threading
 from typing import Optional, Tuple
 from .context import parse_context
 from ..utils.version import is_newer_than, is_online
@@ -49,8 +47,13 @@ def load_version_cache() -> Optional[str]:
     return None
 
 
-def thread_check_update():
-    """Check for updates in a background thread - combines latest version check and update availability."""
+def check_update():
+    """Check for updates on the main thread - combines latest version check and update availability.
+
+    Reads Blender's local extension-repo cache (bl_pkg); intended to be scheduled
+    as a one-shot main-thread callback via bpy.app.timers so RNA writes stay safe.
+    Returns None so the timer runs only once.
+    """
     logger.debug(f"Checking for updates...")
     ps_ctx = parse_context(bpy.context)
     
@@ -208,10 +211,12 @@ def get_latest_version() -> Optional[str]:
     if cached_version is not None:
         return cached_version
     
-    # Start background thread to check for updates (combines latest version and update check)
+    # Schedule a one-shot main-thread update check (combines latest version and
+    # update check). Runs via bpy.app.timers instead of a background thread, since
+    # Blender's Python/RNA API is not thread-safe.
     ps_ctx.ps_settings.update_state = 'LOADING'
-    threading.Thread(target=thread_check_update).start()
-    
+    bpy.app.timers.register(check_update, first_interval=0.0)
+
     return None
 
 
