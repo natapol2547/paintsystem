@@ -1,5 +1,4 @@
 import bpy
-from datetime import datetime
 from bpy.utils import register_classes_factory
 from bpy.types import Panel, Menu, UIList
 from bl_ui.properties_paint_common import (
@@ -13,7 +12,6 @@ from ..paintsystem.version_check import get_latest_version
 
 from ..utils.version import is_newer_than, is_online
 
-from ..paintsystem.donations import get_donation_info
 from .common import (
     PSContextMixin,
     draw_indent,
@@ -28,75 +26,6 @@ from .common import (
 )
 
 from ..paintsystem.data import LegacyPaintSystemContextParser
-
-creators = [
-    ("Tawan Sunflower", "https://x.com/himawari_hito"),
-    ("@blastframe", "https://github.com/blastframe"),
-    ("Pink.Ninjaa", "https://pinkninjaa.net/"),
-    ("Zoomy Toons", "https://www.youtube.com/channel/UCNCKsXWIBFoWH6cMzeHmkhA")
-]
-
-def align_center(layout):
-    row = layout.row(align=True)
-    row.alignment = 'CENTER'
-    return row
-
-class MAT_PT_Support(PSContextMixin, Panel):
-    bl_idname = 'MAT_PT_Support'
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "WINDOW"
-    bl_label = "Support"
-    bl_options = {"INSTANCED"}
-    bl_ui_units_x = 10
-    
-
-    def draw(self, context):
-        ps_ctx = self.parse_context(context)
-        layout = self.layout
-        row = layout.row(align=True)
-        row.scale_x = 1.5
-        row.scale_y = 1.5
-        row.operator('wm.url_open', text="Support us!",
-                        icon='FUND', depress=True).url = "https://tawansunflower.gumroad.com/l/paint_system"
-        if is_online():
-            donations_box = layout.box()
-            donation_info = get_donation_info()
-            col = donations_box.column(align=True)
-            row = align_center(col)
-            row.template_icon(get_icon("star"))
-            row.label(text=f"Recent Donations:")
-            row.template_icon(get_icon("star"))
-            
-            if ps_ctx.ps_settings is None or ps_ctx.ps_settings.loading_donations:
-                align_center(col).label(text="Loading...", icon="INFO")
-            if donation_info:
-                if donation_info['recentDonations'] and len(donation_info['recentDonations']) > 0:
-                    line_separator(col)
-                    date_format = '%d-%m-%y %H:%M'
-                    # year is current year
-                    current_year = datetime.now().year
-                    for idx, donation in enumerate(donation_info['recentDonations'][:3]):
-                        donation_year = datetime.fromisoformat(donation['timestamp']).year
-                        if donation_year != current_year:
-                            date_format = '%d %b %y %H:%M'
-                        else:
-                            date_format = '%d %b %H:%M'
-                        row = align_center(col)
-                        row.enabled = idx == 0
-                        row.label(text=f"${donation['price']} donated on {datetime.fromisoformat(donation['timestamp']).strftime(date_format)}")
-        align_center(layout).label(text="But more importantly,")
-        row = layout.row(align=True)
-        row.scale_x = 1.5
-        row.scale_y = 1.5
-        row.operator('wm.url_open', text="Donate to Blender Foundation!!!",
-                        icon='BLENDER').url = "https://fund.blender.org/"
-        header, content = layout.panel("paintsystem_credits", default_closed=True)
-        header.label(text="Credits:")
-        if content:
-            for idx, creator in enumerate(creators):
-                column = content.column(align=True)
-                column.operator('wm.url_open', text=creator[0],
-                                icon='URL').url = creator[1]
 
 class MAT_MT_PaintSystemMaterialSelectMenu(PSContextMixin, Menu):
     bl_label = "Material Select Menu"
@@ -206,7 +135,7 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
             row.operator("paint_system.new_group", icon='ADD', text="")
             row.operator("wm.call_menu", text="", icon="REMOVE").name = "MAT_MT_DeleteGroupMenu"
         else:
-            row.popover("MAT_PT_Support", icon="FUND", text="Wah!")
+            row.operator("paint_system.new_group", icon='ADD', text="")
     
     @classmethod
     def poll(cls, context):
@@ -365,7 +294,6 @@ class MAT_MT_DeleteGroupMenu(PSContextMixin, Menu):
 
 
 classes = (
-    MAT_PT_Support,
     MAT_PT_PaintSystemMaterialSettings,
     MATERIAL_UL_PaintSystemGroups,
     MAT_MT_PaintSystemMaterialSelectMenu,

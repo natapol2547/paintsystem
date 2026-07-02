@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-2.0-or-later
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 import bpy
 
@@ -9,32 +9,9 @@ addon_keymaps = []
 ENABLE_SHIFT_RMB_FALLBACK = False
 # 2) Plain RMB override (enabled by default for Bforartists compatibility)
 #    Bforartists 4.4.3 doesn't have a default Texture Paint RMB menu,
-#    so we NEED to override RMB to provide menu access
+#    so we add our own RMB entry to provide menu access. This only registers
+#    an item on the add-on keyconfig; Blender's default keymaps are untouched.
 ENABLE_RMB_OVERRIDE_IN_TEXPAINT = True
-
-
-def _remove_default_rmb_menu() -> None:
-    wm = getattr(bpy.context, 'window_manager', None)
-    kc_default = getattr(getattr(wm, 'keyconfigs', None), 'default', None)
-    if not kc_default:
-        return
-
-    keymap_names = (
-        'Image Paint',
-        '3D View Tool: Paint Draw',
-        '3D View'
-    )
-
-    for km_name in keymap_names:
-        km = kc_default.keymaps.get(km_name)
-        if not km:
-            continue
-        for kmi in list(km.keymap_items):
-            if kmi.type != 'RIGHTMOUSE':
-                continue
-            if kmi.idname not in {'wm.call_menu', 'wm.call_menu_pie'}:
-                continue
-            km.keymap_items.remove(kmi)
 
 
 def _add_keymap_entry(
@@ -69,8 +46,6 @@ def register() -> None:
         kc = getattr(kc, 'addon', None)
         if not kc:
             return
-
-        _remove_default_rmb_menu()
 
         km_name = 'Image Paint'
         space = 'EMPTY'

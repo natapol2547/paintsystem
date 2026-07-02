@@ -1,6 +1,5 @@
 import bpy
 import os
-import pathlib
 
 ICON_FOLDER = 'icons'
 
@@ -49,16 +48,4 @@ def get_icon_from_socket_type(socket_type: str) -> int:
 def get_image_editor_icon(current_image_editor: str) -> int:
         if not current_image_editor:
             return None
-        editor_path = pathlib.Path(current_image_editor)
-        app_name = editor_path.name.lower()
-        if "clipstudiopaint" in app_name:
-            return get_icon("clip_studio_paint")
-        elif "photoshop" in app_name:
-            return get_icon("photoshop")
-        elif "gimp" in app_name:
-            return get_icon("gimp")
-        elif "krita" in app_name:
-            return get_icon("krita")
-        elif "affinity" in app_name:
-            return get_icon("affinity")
         return get_icon("image")
