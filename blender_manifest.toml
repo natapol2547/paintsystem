@@ -65,9 +65,29 @@ files = "Loading and saving images"
 
 # Optional: build settings.
 # https://docs.blender.org/manual/en/dev/advanced/extensions/command_line_arguments.html#command-line-args-extension-build
-# [build]
-# paths_exclude_pattern = [
-#   "__pycache__/",
-#   "/.git/",
-#   "/*.zip",
-# ]
+# NOTE: defining [build] overrides Blender's built-in defaults, so the common
+# excludes (__pycache__, .git, *.zip) are repeated here explicitly.
+[build]
+paths_exclude_pattern = [
+  # Blender defaults
+  "__pycache__/",
+  "/.git/",
+  "/*.zip",
+  # Version control / CI / editor config
+  "/.github/",
+  "/.gitignore",
+  "/.prettierrc",
+  # Python dev environment / tooling (not needed to run the add-on)
+  "/.venv/",
+  "/.python-version",
+  "/pyproject.toml",
+  "/uv.lock",
+  "/run_tests.py",
+  # Runtime caches (regenerated on demand; avoid shipping stale data)
+  "/donation_cache.json",
+  "/version_cache.json",
+  # Misc junk
+  "*.py[cod]",
+  ".DS_Store",
+  "*.blend1",
+]
