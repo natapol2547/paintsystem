@@ -875,7 +875,7 @@ class Layer(BaseNestedListItem):
         
         # Update node tree name
         if self.name:
-            self.node_tree.name = f"PS {self.name} ({self.uid[:8]})"
+            self.node_tree.name = f".PS {self.name} ({self.uid[:8]})"
         
         if self.coord_type == "DECAL":
             if not self.empty_object:
@@ -1824,7 +1824,7 @@ class Channel(BaseNestedListManager):
             return
         _invalidate_material_layer_cache(parse_context(context).active_material)
         
-        self.node_tree.name = f"PS {self.name}"
+        self.node_tree.name = f".PS {self.name}"
         if len(self.node_tree.interface.items_tree) == 0:
             self.node_tree.interface.new_socket("Color", in_out="OUTPUT", socket_type="NodeSocketColor")
             self.node_tree.interface.new_socket("Alpha", in_out="OUTPUT", socket_type="NodeSocketFloat")
