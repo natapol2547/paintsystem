@@ -1,7 +1,11 @@
 # Paint System Addon
-A simple but flexible painting system for **non-photorealistic-rendering** in Blender
+**Paint System** is a layer based add-on that resembles your typical drawing process. The Idea is that it simplifies the user’s experience by consolidating the main settings and tools into one place.
 
-![Paint System](https://github.com/user-attachments/assets/0db90d3b-b52a-425d-bc37-8ed9d4f41fa4)
+We are focused on replicating the UI and workflow you see in Photoshop, Clip Studio Paint, and Procreate allowing artists to have better experience transitioning from 2D painting software to Blender.
+
+<img height="600" alt="image" src="https://github.com/user-attachments/assets/5824418f-5119-4d21-8ec3-29c2e171c2f9" />
+
+
 
 ## Installation
 **Note: Please use Blender 4.1+**
@@ -14,7 +18,7 @@ In blender click **Edit > Preferences > Add-ons**
 Navigate to the downloaded .zip file and install it.
 
 ## Documentation
-[Paint System Documentation](https://www.notion.so/Paint-System-Documentation-2b02d71289d680f68ff9ef712d33716f?source=copy_link)
+[Paint System Documentation](https://app.notion.com/p/Paint-System-Documentation-2b02d71289d680f68ff9ef712d33716f)
 
 ### Have questions about the addon? You can email me anytime!
 tawan.sunflower.nc@gmail.com
