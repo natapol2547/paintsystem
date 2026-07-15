@@ -1,5 +1,6 @@
 """Shared JSON file caching utilities for the Paint System addon."""
 
+import bpy
 import json
 import os
 import time
@@ -10,9 +11,12 @@ from ..utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-def _get_addon_root() -> str:
-    """Get the addon root directory (one level up from this file's directory)."""
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+def _get_cache_dir() -> str:
+    # (bl_ext.<repo>.<pkg>). __package__ here is the nested submodule
+    # (bl_ext.<repo>.<pkg>.paintsystem), so trim it back to the extension root.
+    extension_package = ".".join(__package__.split(".")[:3])
+    return bpy.utils.extension_path_user(extension_package, path="", create=True)
+
 
 
 class JsonFileCache:
@@ -29,7 +33,7 @@ class JsonFileCache:
 
     @property
     def path(self) -> str:
-        return os.path.join(_get_addon_root(), self._filename)
+        return os.path.join(_get_cache_dir(), self._filename)
 
     def save(self, data: Dict[str, Any]) -> None:
         """Save *data* to the cache file, stamped with the current time."""
