@@ -20,7 +20,7 @@ class JsonFileCache:
     
     Args:
         filename: Name of the cache file (stored in the addon root directory).
-        label: Human-readable label used in log messages (e.g. "donation", "version").
+        label: Human-readable label used in log messages (e.g. "version").
     """
 
     def __init__(self, filename: str, label: str = "cache"):

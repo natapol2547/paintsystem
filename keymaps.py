@@ -1,40 +1,11 @@
-# SPDX-License-Identifier: GPL-2.0-or-later
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 import bpy
 
 addon_keymaps = []
 
 # Toggleable shortcuts
-# 1) Optional Shift+RMB fallback (off by default to avoid duplicates)
-ENABLE_SHIFT_RMB_FALLBACK = False
-# 2) Plain RMB override (enabled by default for Bforartists compatibility)
-#    Bforartists 4.4.3 doesn't have a default Texture Paint RMB menu,
-#    so we NEED to override RMB to provide menu access
-ENABLE_RMB_OVERRIDE_IN_TEXPAINT = True
-
-
-def _remove_default_rmb_menu() -> None:
-    wm = getattr(bpy.context, 'window_manager', None)
-    kc_default = getattr(getattr(wm, 'keyconfigs', None), 'default', None)
-    if not kc_default:
-        return
-
-    keymap_names = (
-        'Image Paint',
-        '3D View Tool: Paint Draw',
-        '3D View'
-    )
-
-    for km_name in keymap_names:
-        km = kc_default.keymaps.get(km_name)
-        if not km:
-            continue
-        for kmi in list(km.keymap_items):
-            if kmi.type != 'RIGHTMOUSE':
-                continue
-            if kmi.idname not in {'wm.call_menu', 'wm.call_menu_pie'}:
-                continue
-            km.keymap_items.remove(kmi)
+ENABLE_SHIFT_RMB_IN_TEXPAINT = True
 
 
 def _add_keymap_entry(
@@ -70,12 +41,10 @@ def register() -> None:
         if not kc:
             return
 
-        _remove_default_rmb_menu()
-
         km_name = 'Image Paint'
         space = 'EMPTY'
         # Plain RMB override in Texture Paint tool context (preferred)
-        if ENABLE_RMB_OVERRIDE_IN_TEXPAINT:
+        if ENABLE_SHIFT_RMB_IN_TEXPAINT:
             # Tool-specific keymap names vary slightly across versions; add to a couple of common ones
             _add_keymap_entry(
                 kc,
@@ -85,17 +54,6 @@ def register() -> None:
                 key='RIGHTMOUSE',
                 value='PRESS',
                 properties={'name': 'MAT_PT_TexPaintRMBMenu'},
-            )
-
-        # Optional Shift+RMB fallback
-        if ENABLE_SHIFT_RMB_FALLBACK:
-            _add_keymap_entry(
-                kc,
-                name=km_name,
-                space_type=space,
-                idname='paint_system.open_texpaint_menu',
-                key='RIGHTMOUSE',
-                value='PRESS',
                 shift=True,
             )
 
