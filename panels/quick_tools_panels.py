@@ -71,8 +71,9 @@ class MAT_PT_PaintSystemQuickToolsMesh(PSContextMixin, Panel):
         row = box.row()
         scale_content(context, row, 1.5, 1.5)
         row.alignment = 'CENTER'
-        row.operator("paint_system.add_camera_plane",
+        op = row.operator("primitive_plane_add",
                      text="", icon='IMAGE_PLANE')
+        op.align = 'VIEW'
         row.operator("mesh.primitive_plane_add",
                      text="", icon='MESH_PLANE')
         row.operator("mesh.primitive_cube_add",

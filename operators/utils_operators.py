@@ -257,27 +257,6 @@ class PAINTSYSTEM_OT_RecalculateNormals(Operator):
         return {'FINISHED'}
 
 
-class PAINTSYSTEM_OT_AddCameraPlane(Operator):
-    bl_idname = "paint_system.add_camera_plane"
-    bl_label = "Add Camera Plane"
-    bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Add a plane with a camera texture"
-
-    align_up: EnumProperty(
-        name="Align Up",
-        items=[
-            ('NONE', "None", "No alignment"),
-            ('X', "X", "Align up with X axis"),
-            ('Y', "Y", "Align up with Y axis"),
-            ('Z', "Z", "Align up with Z axis"),
-        ],
-        default='NONE'
-    )
-
-    def execute(self, context):
-        bpy.ops.mesh.primitive_plane_add('INVOKE_DEFAULT', align='VIEW')
-        return {'FINISHED'}
-
 
 class PAINTSYSTEM_OT_HidePaintingTips(PSContextMixin, MultiMaterialOperator):
     """Hide the normal painting tips"""
@@ -543,7 +522,6 @@ classes = (
     PAINTSYSTEM_OT_OpenPaintSystemPreferences,
     PAINTSYSTEM_OT_FlipNormals,
     PAINTSYSTEM_OT_RecalculateNormals,
-    PAINTSYSTEM_OT_AddCameraPlane,
     PAINTSYSTEM_OT_HidePaintingTips,
     PAINTSYSTEM_OT_DuplicatePaintSystemData,
     PAINTSYSTEM_OT_ToggleTransformGizmos,
