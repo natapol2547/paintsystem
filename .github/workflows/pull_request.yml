@@ -1,93 +1,20 @@
-# .github/workflows/pull_request.yaml
 name: Pull Request
 
 on:
-    pull_request:
-        branches: ['**']
-    workflow_dispatch:
-        inputs:
-            version:
-                description: 'version'
-                required: false
-                default: ''
-            release_stage:
-                type: choice
-                description: 'release stage'
-                required: True
-                default: 'gold'
-                options:
-                    - alpha
-                    - beta
-                    - rc
-                    - gold
+  pull_request:
+    branches: ['**']
 
 permissions:
-    contents: write
+  contents: read
 
 jobs:
-    make-tests-matrix:
-        runs-on: ubuntu-latest
-        outputs:
-            matrix: ${{ steps.set-matrix.outputs.matrix }}
-        steps:
-            - name: Checkout repository
-              uses: actions/checkout@v4
-            - name: Set up Python
-              uses: actions/setup-python@v5
-              with:
-                python-version: '3.10'
-            - name: Generate test matrix
-              id: set-matrix
-              run: python .github/make-tests-matrix.py >> $GITHUB_OUTPUT
+  build-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-    Test:
-        needs: make-tests-matrix
-        runs-on: ubuntu-latest
-        strategy:
-            fail-fast: false
-            matrix: ${{ fromJSON(needs.make-tests-matrix.outputs.matrix) }}
-        steps:
-            - name: Checkout repository
-              uses: actions/checkout@v4
-
-            - name: Cache Blender download
-              id: blender-cache
-              uses: actions/cache@v4
-              with:
-                  path: blender-${{ matrix.version }}
-                  key: blender-${{ runner.os }}-${{ matrix.version }}
-
-            - name: Download and extract Blender
-              if: steps.blender-cache.outputs.cache-hit != 'true'
-              run: |
-                echo "Downloading Blender from ${{ matrix.download_url }}"
-                curl -SL --fail -o blender.tar.xz "${{ matrix.download_url }}"
-                echo "Download complete. Checking file..."
-                ls -lh blender.tar.xz
-                file blender.tar.xz
-                echo "Extracting Blender..."
-                mkdir -p blender-${{ matrix.version }}
-                tar -xf blender.tar.xz -C blender-${{ matrix.version }} --strip-components=1
-                echo "Extraction complete."
-
-            - name: Run Addon Tests in Blender ${{ matrix.version }}
-              run: |
-                  BLENDER_EXECUTABLE=./blender-${{ matrix.version }}/blender
-                  ADDON_FOLDER_NAME=paint_system
-
-                  echo "Finding user script path for Blender ${{ matrix.version }}"
-                  BLENDER_USER_SCRIPTS=$(./blender-${{ matrix.version }}/blender --background --python-expr "import bpy; print(bpy.utils.script_path_user())" | grep '^/')
-                  
-                  if [ -z "$BLENDER_USER_SCRIPTS" ]; then
-                      echo "Error: Could not determine Blender's user script path."
-                      exit 1
-                  fi
-
-                  ADDON_INSTALL_PATH="$BLENDER_USER_SCRIPTS/addons"
-                  echo "Addon will be linked to: $ADDON_INSTALL_PATH"
-
-                  mkdir -p "$ADDON_INSTALL_PATH"
-                  ln -s "$GITHUB_WORKSPACE" "$ADDON_INSTALL_PATH/$ADDON_FOLDER_NAME"
-
-                  echo "Running tests with Blender from: $BLENDER_EXECUTABLE"
-                  $BLENDER_EXECUTABLE --background --python run_tests.py
+      - name: Build and validate extension
+        uses: natapol2547/blender-extension-builder@main
+        with:
+          source-dir: '.'
+          create-release: 'false'

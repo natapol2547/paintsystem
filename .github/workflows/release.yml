@@ -1,0 +1,26 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write # needed to create the draft release
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build, validate and draft release
+        id: build
+        uses: natapol2547/blender-extension-builder@main
+        with:
+          source-dir: '.'
+
+      - name: Summary
+        run: |
+          echo "Built ${{ steps.build.outputs.addon-id }} ${{ steps.build.outputs.addon-version }} with Blender ${{ steps.build.outputs.blender-version }}"
+          echo "Draft release: ${{ steps.build.outputs.release-url }}"
