@@ -8,9 +8,7 @@ from bl_ui.properties_paint_common import (
 from .channels_panels import draw_channels_settings_panel, poll_channels_panel, draw_channels_panel
 from .extras_panels import poll_brush_color_settings, draw_brush_color_settings, poll_brush_settings, draw_brush_settings
 
-from ..paintsystem.version_check import get_latest_version
-
-from ..utils.version import is_newer_than, is_online
+from ..utils.version import is_newer_than
 
 from .common import (
     PSContextMixin,
@@ -170,24 +168,6 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
             
             return
         ps_ctx = self.parse_context(context)
-        if is_online() and ps_ctx.ps_settings:
-            # Trigger version check (non-blocking)
-            get_latest_version()
-            
-            # Check update state
-            update_state = ps_ctx.ps_settings.update_state
-            if update_state == 'AVAILABLE':
-                box = layout.box()
-                box.alert = True
-                row = box.row()
-                row.label(text="Update Available", icon="INFO")
-                row.operator("paint_system.dismiss_update", text="", icon="X")
-                row = box.row()
-                scale_content(context, row)
-                row.operator("paint_system.open_extension_preferences", text="Update Paint System", icon="FILE_REFRESH")
-            # elif update_state == 'LOADING':
-            #     box = layout.box()
-            #     box.label(text="Checking for updates...", icon="INFO")
         if ps_ctx.ps_settings and not ps_ctx.ps_settings.use_legacy_ui and ps_ctx.active_channel:
             toggle_paint_mode_ui(layout, context)
         ob = ps_ctx.ps_object

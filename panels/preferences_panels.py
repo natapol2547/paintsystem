@@ -1,9 +1,8 @@
 import bpy
 from bpy.types import AddonPreferences
-from bpy.props import BoolProperty, FloatProperty, IntProperty, EnumProperty
+from bpy.props import BoolProperty, FloatProperty, EnumProperty
 from bpy.utils import register_classes_factory
 
-from ..paintsystem.version_check import get_latest_version
 from .common import find_keymap
 from ..preferences import addon_package
 
@@ -112,44 +111,6 @@ class PaintSystemPreferences(AddonPreferences):
         description="Show brush radius/strength controls in the Texture Paint right-click popover",
         default=True
     )
-    
-    # Version check settings
-    version_check_interval_days: IntProperty(
-        name="Version Check Interval (Days)",
-        description="Days between version checks",
-        default=1,
-        min=0,
-        soft_max=30
-    )
-    
-    version_check_interval_hours: IntProperty(
-        name="Version Check Interval (Hours)",
-        description="Hours between version checks",
-        default=0,
-        min=0,
-        soft_max=23
-    )
-    
-    version_check_interval_minutes: IntProperty(
-        name="Version Check Interval (Minutes)",
-        description="Minutes between version checks",
-        default=0,
-        min=0,
-        soft_max=59
-    )
-    
-    update_state: EnumProperty(
-        name='Update State',
-        description='Extension update state',
-        items=(
-            ('UNAVAILABLE', 'Unavailable', ''),
-            ('AVAILABLE', 'Available', ''),
-            ('LOADING', 'Loading', ''),
-            ("ERROR", 'Error', '')
-        ),
-        default='UNAVAILABLE',
-        options={'SKIP_SAVE'}
-    )
 
     def draw_shortcut(self, layout, kmi, text):
         row = layout.row(align=True)
@@ -197,23 +158,6 @@ class PaintSystemPreferences(AddonPreferences):
         rmb_box.prop(self, "show_hsv_sliders_rmb", text="Show HSV sliders in RMB popover")
         # rmb_box.prop(self, "show_active_palette_rmb", text="Show Active Palette in RMB popover")
         rmb_box.prop(self, "show_brush_settings_rmb", text="Show Brush Controls in RMB popover")
-        
-        # Version check settings
-        from ..utils.version import is_online
-        if is_online():
-            box = layout.box()
-            row = box.row()
-            row.operator("paint_system.check_for_updates", text="", icon='FILE_REFRESH')
-            latest_version = get_latest_version()
-            if latest_version:
-                row.label(text=f"Latest Version: {latest_version}")
-            else:
-                row.label(text="Failed to check latest version")
-            box.label(text="Version Check Interval:")
-            row = box.row()
-            row.prop(self, "version_check_interval_days", text="Days")
-            row.prop(self, "version_check_interval_hours", text="Hours")
-            row.prop(self, "version_check_interval_minutes", text="Minutes")
 
         box = layout.box()
         box.label(text="Paint System Shortcuts:")

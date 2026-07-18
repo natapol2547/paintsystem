@@ -1,8 +1,6 @@
-import bpy
 from bpy.types import Operator, Object, NodeTree, Node
 from bpy.utils import register_classes_factory
 
-from ..paintsystem.version_check import get_latest_version, get_current_version, reset_version_cache
 from .common import PSContextMixin
 
 from ..paintsystem.data import (
@@ -13,9 +11,6 @@ from ..paintsystem.data import (
 from ..paintsystem.graph.nodetree_builder import capture_node_state, apply_node_state
 from ..utils.nodes import find_nodes
 from bpy_extras.node_utils import connect_sockets
-from ..utils.version import is_online
-from ..preferences import addon_package
-import addon_utils
 from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -215,70 +210,8 @@ class PAINTSYSTEM_OT_UpdatePaintSystemData(PSContextMixin, Operator):
             self.report({'WARNING'}, "\n".join(warning_messages))
         return {'FINISHED'}
 
-
-class PAINTSYSTEM_OT_CheckForUpdates(PSContextMixin, Operator):
-    bl_idname = "paint_system.check_for_updates"
-    bl_label = "Check for Updates"
-    bl_description = "Check for Updates"
-    bl_options = {'REGISTER', 'UNDO'}
-    
-    @classmethod
-    def poll(cls, context):
-        ps_ctx = cls.parse_context(context)
-        if ps_ctx.ps_settings is None:
-            return False
-        return is_online() and ps_ctx.ps_settings.update_state != 'LOADING'
-    
-    def execute(self, context):
-        # Delete version cache
-        reset_version_cache()
-        # Check for updates
-        get_latest_version()
-        return {'FINISHED'}
-
-
-class PAINTSYSTEM_OT_OpenExtensionPreferences(Operator):
-    bl_idname = "paint_system.open_extension_preferences"
-    bl_label = "Open Extension Preferences"
-    bl_description = "Open Extension Preferences"
-    bl_options = {'REGISTER', 'UNDO'}
-    
-    def execute(self, context):
-        bpy.ops.screen.userpref_show()
-        bpy.context.preferences.active_section = 'EXTENSIONS'
-        bpy.context.window_manager.extension_search = 'Paint System'
-        modules = addon_utils.modules()
-        mod = None
-        for mod in modules:
-            if mod.bl_info.get("name") == "Paint System":
-                mod = mod
-                break
-        if mod is None:
-            logger.error("Paint System not found")
-            return {'FINISHED'}
-        bl_info = addon_utils.module_bl_info(mod)
-        show_expanded = bl_info["show_expanded"]
-        if not show_expanded:
-            bpy.ops.preferences.addon_expand(module=addon_package())
-        return {'FINISHED'}
-
-
-class PAINTSYSTEM_OT_DismissUpdate(PSContextMixin, Operator):
-    bl_idname = "paint_system.dismiss_update"
-    bl_label = "Dismiss Update"
-    bl_description = "Dismiss Update"
-    bl_options = {'REGISTER', 'UNDO'}
-    
-    def execute(self, context):
-        ps_ctx = self.parse_context(context)
-        ps_ctx.ps_settings.update_state = 'UNAVAILABLE'
-        return {'FINISHED'}
-
 classes = (
     PAINTSYSTEM_OT_UpdatePaintSystemData,
-    PAINTSYSTEM_OT_CheckForUpdates,
-    PAINTSYSTEM_OT_OpenExtensionPreferences,
-    PAINTSYSTEM_OT_DismissUpdate,
 )
 
 register, unregister = register_classes_factory(classes)

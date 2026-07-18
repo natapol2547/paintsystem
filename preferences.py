@@ -18,10 +18,6 @@ class PaintSystemPreferences:
     show_hsv_sliders_rmb: bool = True
     show_active_palette_rmb: bool = True
     show_brush_settings_rmb: bool = True
-    version_check_interval_days: int = 1
-    version_check_interval_hours: int = 0
-    version_check_interval_minutes: int = 0
-    update_state: str = 'UNAVAILABLE'
     preferred_coord_type: str = 'UNDETECTED'
     show_opacity_in_layer_list: bool = True
     use_panel_quick_access: bool = False

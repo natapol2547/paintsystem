@@ -1,7 +1,6 @@
 import bpy
 
 from .versioning import get_layer_parent_map, migrate_global_layer_data, migrate_blend_mode, migrate_source_node, migrate_socket_names, update_layer_name, update_layer_version, update_library_nodetree_version
-from .version_check import get_latest_version
 from .context import parse_context
 from .data import sort_actions, get_all_layers, is_valid_uuidv4, iter_all_layers
 from .image import save_image
@@ -113,7 +112,6 @@ def load_post(scene):
         return
     ensure_color_history_palette(ps_scene_data)
     load_paint_system_data()
-    get_latest_version()
 
 @bpy.app.handlers.persistent
 def save_handler(scene: bpy.types.Scene):
