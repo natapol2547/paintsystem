@@ -90,4 +90,6 @@ paths_exclude_pattern = [
   "*.py[cod]",
   ".DS_Store",
   "*.blend1",
+  "scripts/",
+  "dist/",
 ]
