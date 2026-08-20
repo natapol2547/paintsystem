@@ -8,14 +8,9 @@ We are focused on replicating the UI and workflow you see in Photoshop, Clip Stu
 
 
 ## Installation
-**Note: Please use Blender 4.1+**
+**Note: Please use Blender 4.2+**
 
-Under **Releases** on the right click one of **Paint System** version, then simply click the .zip file. The addon will begin to download.
-
-In blender click **Edit > Preferences > Add-ons**
-(For Blender 4.2+) Click the small dropdown on the top right and choose **Install From Disk**. (For Blender 4.1) Click **Install**
-
-Navigate to the downloaded .zip file and install it.
+Please install this addon via the [Blender Extension](https://extensions.blender.org/add-ons/paint-system/) page
 
 ## Documentation
 [Paint System Documentation](https://app.notion.com/p/Paint-System-Documentation-2b02d71289d680f68ff9ef712d33716f)
