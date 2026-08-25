@@ -12,7 +12,7 @@ from ..paintsystem.data import update_active_image
 from ..preferences import addon_package
 from ..utils.nodes import find_node, get_material_output
 from ..utils.version import is_newer_than
-from ..utils.unified_brushes import get_unified_settings
+from ..utils.unified_brushes import get_unified_settings, get_unified_paint_settings
 from .brushes import get_brushes_from_library
 from .common import MultiMaterialOperator, PSContextMixin, DEFAULT_PS_UV_MAP_NAME, execute_operator_in_area, wait_for_redraw, redraw_panel
 from ..panels.common import is_editor_open
@@ -135,7 +135,7 @@ class PAINTSYSTEM_OT_ToggleBrushEraseAlpha(Operator):
         return context.mode == 'PAINT_TEXTURE'
 
     def execute(self, context):
-        tool_settings = UnifiedPaintPanel.paint_settings(context)
+        tool_settings = get_unified_paint_settings(context)
 
         if tool_settings is not None:
             brush = tool_settings.brush
@@ -170,7 +170,7 @@ class PAINTSYSTEM_OT_ColorSample(PSContextMixin, Operator):
         pixel.dimensions = 1 * 1 * 3
         pix_value = [float(item) for item in pixel]
 
-        tool_settings = UnifiedPaintPanel.paint_settings(context)
+        tool_settings = get_unified_paint_settings(context)
         brush_settings = tool_settings.brush
         unified_settings = get_unified_settings(context, "use_unified_color")
 

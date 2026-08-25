@@ -5,7 +5,7 @@ from bpy.utils import register_classes_factory
 
 from .common import PSContextMixin, draw_layer_icon, get_event_icons, find_keymap, find_keymap_by_name, get_icon_from_channel, scale_content, get_icon
 from ..utils.version import is_newer_than
-from ..utils.unified_brushes import get_unified_settings
+from ..utils.unified_brushes import get_unified_settings, get_unified_paint_settings
 from ..utils.nodes import is_in_nodetree
 
 from bl_ui.properties_paint_common import (
@@ -65,7 +65,7 @@ def poll_brush_settings(context: Context):
 def draw_brush_settings(layout: UILayout, context: Context):
     layout.use_property_split = False
     layout.use_property_decorate = False
-    settings = UnifiedPaintPanel.paint_settings(context)
+    settings = get_unified_paint_settings(context)
     brush = settings.brush
     # Check blender version
     if not is_newer_than(4, 3):
@@ -159,7 +159,7 @@ class MAT_PT_BrushColorSettings(PSContextMixin, Panel):
 
 def poll_brush_color_settings(context: Context):
     ps_ctx = PSContextMixin.parse_context(context)
-    settings = UnifiedPaintPanel.paint_settings(context)
+    settings = get_unified_paint_settings(context)
     if not settings:
         return False
     brush = settings.brush
@@ -189,7 +189,7 @@ def poll_brush_color_settings(context: Context):
 def draw_brush_color_settings(layout: UILayout, context: Context):
     ps_ctx = PSContextMixin.parse_context(context)
     col = layout.column()
-    settings = UnifiedPaintPanel.paint_settings(context)
+    settings = get_unified_paint_settings(context)
     brush = settings.brush
     if ps_ctx.ps_object.type == 'MESH':
         prop_owner = get_unified_settings(context, "use_unified_color")

@@ -9,6 +9,7 @@ from .channels_panels import draw_channels_settings_panel, poll_channels_panel, 
 from .extras_panels import poll_brush_color_settings, draw_brush_color_settings, poll_brush_settings, draw_brush_settings
 
 from ..utils.version import is_newer_than
+from ..utils.unified_brushes import get_unified_paint_settings
 
 from .common import (
     PSContextMixin,
@@ -246,7 +247,7 @@ class MAT_PT_PaintSystemMainPanel(PSContextMixin, Panel):
                 )
                 draw_brush_color_settings(panel, context)
             else:
-                settings = UnifiedPaintPanel.paint_settings(context)
+                settings = get_unified_paint_settings(context)
                 brush = settings.brush
                 row = header.row(align=True)
                 row.alignment = 'RIGHT'
