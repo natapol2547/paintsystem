@@ -2800,15 +2800,22 @@ class PaintSystemGlobalData(PropertyGroup):
         else:
             ups = settings.unified_paint_settings
         prop_owner = ups if ups.use_unified_color else brush
+        # Blender 5.3 defaults use_unified_color to False and has no image paint brush outside paint mode.
+        if prop_owner is None:
+            return None
         return prop_owner.color
-    
+
     def update_unified_color(self, context):
         brush_color = self.get_brush_color(context)
+        if brush_color is None:
+            return
         if brush_color.hsv != (self.hue, self.saturation, self.value):
             brush_color.hsv = (self.hue, self.saturation, self.value)
-    
+
     def update_hex_color(self, context):
         brush_color = self.get_brush_color(context)
+        if brush_color is None:
+            return
         brush_color_hex = blender_color_to_srgb_hex(brush_color)
         if brush_color_hex != self.hex_color:
             color = hex_string_to_blender_color(self.hex_color)

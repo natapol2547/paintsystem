@@ -156,9 +156,11 @@ def color_history_handler(scene: bpy.types.Scene, depsgraph: bpy.types.Depsgraph
             return
         image: bpy.types.Image = active_layer.image
         if active_layer and active_layer.type == "IMAGE" and image and image.is_dirty:
-            palette = ensure_color_history_palette(ps_scene_data)
             current_color = ps_scene_data.get_brush_color(bpy.context)
-            
+            if current_color is None:
+                return
+            palette = ensure_color_history_palette(ps_scene_data)
+
             should_add = True
             if len(palette.colors) > 0:
                 last_color = palette.colors[0].color
