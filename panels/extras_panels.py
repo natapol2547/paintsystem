@@ -7,11 +7,24 @@ from .common import PSContextMixin, draw_layer_icon, get_event_icons, find_keyma
 from ..utils.version import is_newer_than
 from ..utils.unified_brushes import get_unified_settings, get_unified_paint_settings
 from ..utils.nodes import is_in_nodetree
+from ..utils.logging import get_logger
 
 from bl_ui.properties_paint_common import (
     UnifiedPaintPanel,
     brush_settings,
 )
+
+logger = get_logger(__name__)
+
+_reported_draw_errors: set[str] = set()
+
+
+def _log_draw_error_once(section: str):
+    """Log a draw failure the first time it happens; panels redraw too often to log every time."""
+    if section in _reported_draw_errors:
+        return
+    _reported_draw_errors.add(section)
+    logger.exception(f"Failed to draw the {section} section")
 
 def nodetree_operator(layout: UILayout, nodetree: NodeTree, text="", icon='ADD'):
     op = layout.operator("node.add_node", text=text, icon=icon)
@@ -211,6 +224,7 @@ def draw_brush_color_settings(layout: UILayout, context: Context):
             color_jitter_panel(box, context, brush)
         except Exception:
             pass
+        # Each section gets its own try block so a failure in one does not hide the other.
         try:
             header, panel = box.panel("paintsystem_color_history_palette", default_closed=True)
             header.label(text="Color History")
@@ -218,14 +232,18 @@ def draw_brush_color_settings(layout: UILayout, context: Context):
                 if not ps_ctx.ps_scene_data.color_history_palette:
                     panel.label(text="No color history yet")
                 else:
-                    panel.template_palette(ps_ctx.ps_scene_data, "color_history_palette", color=True)
+                    panel.template_palette(ps_ctx.ps_scene_data, "color_history_palette")
+        except Exception:
+            _log_draw_error_once("Color History")
+        try:
             header, panel = box.panel("paintsystem_color_palette", default_closed=True)
             header.label(text="Color Palette")
-            panel.template_ID(settings, "palette", new="palette.new")
-            if panel and settings.palette:
-                panel.template_palette(settings, "palette", color=True)
+            if panel:
+                panel.template_ID(settings, "palette", new="palette.new")
+                if settings.palette:
+                    panel.template_palette(settings, "palette")
         except Exception:
-            pass
+            _log_draw_error_once("Color Palette")
         # draw_color_settings(context, col, brush)
     if ps_ctx.ps_object.type == 'GREASEPENCIL':
         row = col.row()
@@ -384,7 +402,7 @@ class MAT_PT_TexPaintRMBMenu(PSContextMixin, Panel, UnifiedPaintPanel):
         #     color_col.separator()
         #     color_col.template_ID(settings, "palette", new="palette.new")
         #     if settings.palette:
-        #         color_col.template_palette(settings, "palette", color=True)
+        #         color_col.template_palette(settings, "palette")
 
         if show_brush_controls:
             # Brush settings container
