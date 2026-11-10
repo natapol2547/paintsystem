@@ -89,6 +89,12 @@ class PaintSystemPreferences(AddonPreferences):
         default=False
     )
     
+    show_quick_tools_tab: BoolProperty(
+        name="Show Quick Tools Tab",
+        description="Show the Quick Tools tab in the 3D Viewport sidebar",
+        default=True
+    )
+
     developer_mode: BoolProperty(
         name="Developer Mode",
         description="Enable developer mode for verbose logging",
@@ -144,6 +150,7 @@ class PaintSystemPreferences(AddonPreferences):
         layout.prop(self, "show_opacity_in_layer_list", text="Show Opacity in Layer List")
         layout.prop(self, "use_legacy_ui", text="Use Legacy UI")
         layout.prop(self, "use_panel_quick_access", text="Use Panel Quick Access")
+        layout.prop(self, "show_quick_tools_tab", text="Show Quick Tools Tab")
         # layout.prop(self, "name_layers_group",
         #             text="Name Layers According to Group Name")
 
